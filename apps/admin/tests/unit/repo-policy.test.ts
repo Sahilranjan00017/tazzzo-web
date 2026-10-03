@@ -87,7 +87,38 @@ describe('no fake or browser-held identity', () => {
       join('api', 'auth', 'google', 'callback', 'route.ts'),
       join('api', 'auth', 'google', 'start', 'route.ts'),
       join('api', 'auth', 'logout', 'route.ts'),
+      join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
     ])
+  })
+
+  it('has no generic proxy: no catch-all routes, no request-chosen backend target', () => {
+    const appFiles = SOURCE.map((f) => relative(join(APP, 'src', 'app'), f))
+    expect(appFiles.filter((r) => r.includes('[...') || r.includes('[[...'))).toEqual([])
+    for (const f of SOURCE) {
+      expect(read(f), relative(APP, f)).not.toMatch(
+        /searchParams\.get\(\s*['"](url|path|target|backend|host)['"]/,
+      )
+    }
+  })
+
+  it('reaches the backend only from the two declared server modules, built from TAZZZO_BACKEND_URL', () => {
+    const serverFetchers = SOURCE.filter(
+      (f) =>
+        /\bfetch(Impl)?\(|fetchImpl\(/.test(read(f)) &&
+        relative(APP, f).startsWith(join('src', 'server')),
+    )
+    expect(serverFetchers.map((f) => relative(APP, f)).sort()).toEqual([
+      join('src', 'server', 'backend', 'admin-me.ts'),
+      join('src', 'server', 'bff', 'mutation.ts'),
+    ])
+    expect(read(join(APP, 'src', 'server', 'bff', 'mutation.ts'))).toMatch(
+      /new URL\(call\.path, env\.TAZZZO_BACKEND_URL\)/,
+    )
+    for (const f of SOURCE.filter((f) => /^['"]use client['"]/m.test(read(f)))) {
+      for (const url of read(f).match(/fetch\(\s*[`'"][^`'"]*/g) ?? []) {
+        expect(url, relative(APP, f)).toMatch(/fetch\(\s*[`'"]\/api\//)
+      }
+    }
   })
 
   it('never holds a shared service token for human requests', () => {
@@ -120,7 +151,7 @@ describe('toolchain pins agree', () => {
     expect(rootPkg.engines.node).toBe(`>=${nvmrc} <${Number(major) + 1}`)
     expect(ci).toContain("node-version-file: '.nvmrc'")
     expect(ci).not.toContain('ubuntu-latest')
-    expect(ci.match(/runs-on: ubuntu-24\.04/g)?.length).toBeGreaterThanOrEqual(6)
+    expect(ci.match(/runs-on: ubuntu-24\.04/g)?.length).toBeGreaterThanOrEqual(7)
     expect(ci).not.toMatch(/node-version:\s/)
   })
 

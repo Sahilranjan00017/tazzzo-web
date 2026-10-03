@@ -24,6 +24,8 @@ export class MockOidcProvider {
   private foreignKey!: CryptoKey
   private jwk!: JWK
   tokenRequests = 0
+  /** Identity used by the browser-facing /authorize endpoint (auto-consent; E2E only). */
+  identity: Record<string, unknown> = { sub: '110000000000000000001', email: 'writer@tazzzo.test' }
 
   async start(): Promise<void> {
     const pair = await generateKeyPair('RS256', { extractable: true })
@@ -67,6 +69,29 @@ export class MockOidcProvider {
       })
     }
     if (url.pathname === '/jwks') return json(200, { keys: [this.jwk] })
+    if (url.pathname === '/__control/identity' && req.method === 'POST') {
+      this.identity = JSON.parse(await readBody(req)) as Record<string, unknown>
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/authorize') {
+      // Auto-consent for browser tests: bind a code to the request's PKCE challenge, redirect URI and nonce.
+      const p = url.searchParams
+      const code = this.issueCode({
+        codeChallenge: p.get('code_challenge') ?? '',
+        redirectUri: p.get('redirect_uri') ?? '',
+        claims: {
+          email_verified: true,
+          hd: 'tazzzo.test',
+          ...this.identity,
+          nonce: p.get('nonce'),
+        },
+      })
+      const back = new URL(p.get('redirect_uri') ?? 'about:blank')
+      back.searchParams.set('code', code)
+      back.searchParams.set('state', p.get('state') ?? '')
+      res.writeHead(302, { location: back.toString() })
+      return res.end()
+    }
     if (url.pathname === '/token' && req.method === 'POST') {
       this.tokenRequests += 1
       const body = new URLSearchParams(await readBody(req))
