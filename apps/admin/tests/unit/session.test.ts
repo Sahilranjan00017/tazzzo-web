@@ -121,6 +121,30 @@ describe('session validation', () => {
     expect((await checkSession(store, created!.sessionId, config, now)).status).toBe('valid')
   })
 
+  it('a stale request whose session was deleted mid-flight fails closed and does not resurrect it (LOW-1)', async () => {
+    const created = await createSession(store, TOKEN, expSeconds(8 * 3_600_000), config, now)
+    now = T0 + TOUCH_INTERVAL_MS + 1
+    const realGet = store.get.bind(store)
+    store.get = async (key: string) => {
+      const value = await realGet(key)
+      await endSession(store, created!.sessionId)
+      return value
+    }
+    expect(await checkSession(store, created!.sessionId, config, now)).toEqual({
+      status: 'invalid',
+    })
+    store.get = realGet
+    expect(store.data.size).toBe(0)
+  })
+
+  it('the test store mirrors conditional touch: updates existing keys, never creates', async () => {
+    await store.set('k', 'v1', now + 10_000)
+    expect(await store.touch('k', 'v2', now + 10_000)).toBe(true)
+    expect(await store.get('k')).toBe('v2')
+    expect(await store.touch('missing', 'v', now + 10_000)).toBe(false)
+    expect(store.data.has('missing')).toBe(false)
+  })
+
   it('deletes a session whose token cannot be decrypted (wrong key / tampering)', async () => {
     const created = await createSession(store, TOKEN, expSeconds(3_600_000), config, now)
     const wrong = { ...config, keys: { current: randomBytes(32) } }

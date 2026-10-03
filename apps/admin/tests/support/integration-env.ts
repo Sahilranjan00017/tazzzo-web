@@ -3,7 +3,9 @@ import { GenericContainer, type StartedTestContainer } from 'testcontainers'
 import { FakeBackend } from './fake-backend'
 import { MockOidcProvider } from './mock-oidc'
 
-export const VALKEY_IMAGE = 'valkey/valkey:9.1.2-alpine'
+/** Pinned by the multi-arch OCI index digest (linux/amd64 + linux/arm64 included), verified from Docker Hub. */
+export const VALKEY_IMAGE =
+  'valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11'
 export const CMS_BASE_URL = 'https://cms.test'
 export const SESSION_COOKIE = '__Host-tz_cms_session'
 export const TX_COOKIE = '__Host-tz_cms_tx'

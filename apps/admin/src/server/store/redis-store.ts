@@ -42,6 +42,12 @@ export function createRedisStore(url: string): SessionStore & { quit(): Promise<
       }
       await run(() => client.set(key, value, 'PX', ttlMs))
     },
+    // SET ... XX: atomic "update only if it still exists", so a refresh can never resurrect a deleted session.
+    touch: async (key, value, expiresAtMs) => {
+      const ttlMs = Math.floor(expiresAtMs - Date.now())
+      if (ttlMs <= 0) return false
+      return (await run(() => client.set(key, value, 'PX', ttlMs, 'XX'))) === 'OK'
+    },
     take: (key) => run(() => client.getdel(key)),
     delete: async (key) => {
       await run(() => client.del(key))

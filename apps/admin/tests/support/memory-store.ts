@@ -19,6 +19,11 @@ export class MemoryStore implements SessionStore {
   async set(key: string, value: string, expiresAtMs: number) {
     this.data.set(key, { value, expiresAtMs })
   }
+  async touch(key: string, value: string, expiresAtMs: number) {
+    if (this.live(key) === undefined || expiresAtMs <= this.clock()) return false
+    this.data.set(key, { value, expiresAtMs })
+    return true
+  }
   async take(key: string) {
     const value = this.live(key)?.value ?? null
     this.data.delete(key)

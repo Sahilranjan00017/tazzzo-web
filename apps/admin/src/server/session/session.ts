@@ -93,7 +93,14 @@ export async function checkSession(
     return { status: 'invalid' }
   }
   if (now - record.lastSeenAt >= TOUCH_INTERVAL_MS) {
-    await store.set(key, JSON.stringify({ ...record, lastSeenAt: now }), record.expiresAt)
+    // Conditional refresh (never re-creates the key, keeps the original absolute expiry). If the session was deleted
+    // after we read it (logout, backend 401, expiry), this request is not authenticated from the stale copy.
+    const stillExists = await store.touch(
+      key,
+      JSON.stringify({ ...record, lastSeenAt: now }),
+      record.expiresAt,
+    )
+    if (!stillExists) return { status: 'invalid' }
   }
   return { status: 'valid', idToken, expiresAt: record.expiresAt }
 }

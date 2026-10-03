@@ -7,8 +7,13 @@ import 'server-only'
  */
 export interface SessionStore {
   get(key: string): Promise<string | null>
-  /** Stores `value` until the absolute epoch-millisecond `expiresAtMs`. */
+  /** Creates or replaces `value` until the absolute epoch-millisecond `expiresAtMs` (session creation, transactions). */
   set(key: string, value: string, expiresAtMs: number): Promise<void>
+  /**
+   * Replaces `value` ONLY if `key` still exists (atomic; never creates). Returns false when the key is gone, e.g.
+   * deleted by a concurrent logout, backend 401 or expiry: the caller must then treat the session as revoked.
+   */
+  touch(key: string, value: string, expiresAtMs: number): Promise<boolean>
   /** Atomically reads and deletes (single-use records). */
   take(key: string): Promise<string | null>
   delete(key: string): Promise<void>
