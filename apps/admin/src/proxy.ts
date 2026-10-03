@@ -1,12 +1,29 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { buildContentSecurityPolicy, generateCspNonce } from '@/lib/security/headers'
 
+/** Session cookie names (production `__Host-` and plain-http development). Presence only: never trusted here. */
+const SESSION_COOKIES = ['__Host-tz_cms_session', 'tz_cms_session_dev']
+const PUBLIC_PATHS = new Set(['/login'])
+
 /**
- * Request interception (Next.js 16 `proxy.ts`, formerly `middleware.ts`). W1 responsibility is ONLY the per-request
- * CSP nonce: generate it, pass it to rendering (Next reads it from the request CSP header and applies it to its
- * scripts) and send the CSP on the response. No authentication, no session or cookie checks, no redirects.
+ * Request interception (Next.js 16 `proxy.ts`). Two responsibilities:
+ * 1. the per-request CSP nonce (`cspNonce`; unrelated to the OIDC login nonce);
+ * 2. a UX-only shortcut: a protected page requested with no session cookie at all is sent to /login.
+ * No store lookup, no decryption, no authorization: protected pages validate the session server-side.
  */
 export function proxy(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl
+  if (!PUBLIC_PATHS.has(pathname) && !SESSION_COOKIES.some((name) => request.cookies.has(name))) {
+    const loginPath = `/login?returnTo=${encodeURIComponent(`${pathname}${search}`)}`
+    // Absolute target from CMS_BASE_URL only (Next requires an absolute Location); never the request Host. Without
+    // it (misconfiguration) serve /login in place instead of building a URL from untrusted headers.
+    const base = process.env.CMS_BASE_URL
+    if (!base) return NextResponse.rewrite(new URL('/login', request.nextUrl))
+    const response = NextResponse.redirect(new URL(loginPath, base), 307)
+    response.headers.set('Cache-Control', 'no-store')
+    return response
+  }
+
   const cspNonce = generateCspNonce()
   const csp = buildContentSecurityPolicy({
     cspNonce,

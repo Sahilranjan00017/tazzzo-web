@@ -3,21 +3,36 @@
 Tazzzo web surfaces. Today this repository contains only the **internal Admin/CMS foundation** (`apps/admin`). The
 customer-facing web app will be added later as `apps/web`.
 
-## Current state (W1: foundation)
+## Current state
 
-`apps/admin` is a Next.js App Router application that will become the Tazzzo CMS and its same-origin BFF. W1 provides
-the production-oriented foundation only:
+`apps/admin` is a Next.js App Router application: the Tazzzo CMS and its same-origin BFF.
 
-- pnpm workspace, strict TypeScript, ESLint, Prettier, Vitest, GitHub Actions CI
-- server-only boundary (`src/server/**` uses `server-only`; client-safe code may not import it)
-- validated server environment (`src/server/env.ts`)
-- security headers and a per-request, nonce-based Content Security Policy (`src/proxy.ts`)
-- placeholder sign-in page and app shell
-- standalone production output (container-ready for the planned AWS ECS/Fargate host)
+- **W1 (complete):** pnpm workspace, strict TypeScript, ESLint, Prettier, Vitest, CI, server-only boundary, validated
+  server environment, security headers and a per-request nonce-based CSP (`src/proxy.ts`), standalone output.
+- **W2 (in review):** Google sign-in (authorization code + state + OIDC nonce + PKCE S256 via `openid-client`), a
+  server-side session in Valkey/Redis (opaque `__Host-` HttpOnly cookie; the ID token encrypted at rest; no access or
+  refresh tokens kept), CSRF-checked logout, and the backend `GET /api/v1/admin/me` bootstrap with the human's ID token.
 
-**Not implemented yet** (W2/W3): Google sign-in (OAuth/OIDC), CMS sessions and cookies, backend integration (including
-`GET /api/v1/admin/me`), the BFF API, and every CMS business module. The sign-in button is intentionally disabled; nothing
-in W1 can produce an authenticated state.
+**Not implemented yet:** BFF mutation routes, CMS business modules, audit read, deployment. The backend stays the
+authorization boundary for every request; UI role gating is UX only.
+
+### Sign-in flow
+
+1. `GET /api/auth/google/start` stores `{state, oidcNonce, codeVerifier, returnTo}` in Valkey (600 s, single use) and
+   redirects to Google with only an opaque transaction cookie.
+2. `GET /api/auth/google/callback` consumes the transaction, lets `openid-client` validate state, PKCE, nonce and the ID
+   token, then creates a fresh session (expiry = min(ID token exp - 60 s, `CMS_SESSION_MAX_SECONDS`), idle timeout
+   `CMS_SESSION_IDLE_SECONDS`) and redirects.
+3. Protected pages call `requireAdmin()`: session validated server-side, then `/me` with `Authorization: Bearer <ID
+token>`. Backend 401 ends the session; 403 shows access denied (session kept). There is no service-token fallback.
+4. `POST /api/auth/logout` (same Origin + `X-Tazzzo-CSRF: 1`) deletes the session and expires the cookie.
+
+### Configuration
+
+See [`apps/admin/.env.example`](apps/admin/.env.example). **`GOOGLE_CLIENT_ID` must equal the backend's
+`tazzzo.admin.oidc.audience`.** All OAuth URLs derive from `CMS_BASE_URL`, never the request Host. Production requires
+an https `CMS_BASE_URL`, Google as the only issuer and a TLS (`rediss://`) session store. Plain-http local development
+uses separate `*_dev` cookie names without `Secure`; production cookie settings are never relaxed.
 
 ## Toolchain
 
@@ -40,6 +55,7 @@ pnpm lint         # ESLint
 pnpm format:check # Prettier
 pnpm typecheck    # route type generation + tsc
 pnpm test         # Vitest unit tests
+pnpm test:integration # Valkey (Testcontainers, needs Docker) + mock OIDC + fake backend + real Next runtime
 pnpm build        # production build (standalone output)
 ```
 
@@ -50,8 +66,9 @@ apps/admin/
   src/app/            routes: (auth)/login, (app) shell, root layout
   src/proxy.ts        per-request CSP nonce (no authentication)
   src/lib/security/   header and CSP policy (pure, client-safe)
-  src/server/         server-only modules (environment)
-  tests/unit/         Vitest suites, including repository policy checks
+  src/server/         server-only modules: env, auth (OIDC, transaction, cookies, CSRF), session, store, backend
+  tests/unit/         Vitest unit suites, including repository policy checks
+  tests/integration/  Valkey + mock OIDC provider + fake backend; real-runtime flow
 ```
 
 ## Security notes

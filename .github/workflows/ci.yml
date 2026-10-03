@@ -12,7 +12,7 @@ concurrency:
   group: web-ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Actions are pinned to full commit SHAs (tag in the trailing comment). Node comes from .nvmrc and pnpm from the
+# Actions are pinned to full commit SHAs (tag in the trailing comment) and runners to ubuntu-24.04. Node comes from .nvmrc and pnpm from the
 # root package.json "packageManager" field, so local, CI and container builds use the same toolchain.
 env:
   NEXT_TELEMETRY_DISABLED: '1'
@@ -20,7 +20,7 @@ env:
 jobs:
   lint:
     name: Format & lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
@@ -34,7 +34,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
@@ -47,7 +47,7 @@ jobs:
 
   test:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
@@ -58,9 +58,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Valkey via Testcontainers (runner Docker), a local mock OIDC provider and a fake backend: no Google, no
+      # production services and no secrets.
+      - run: pnpm test:integration
+
   build:
     name: Production build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
@@ -72,10 +87,15 @@ jobs:
       - run: pnpm build
       - name: Standalone server artifact exists
         run: test -f apps/admin/.next/standalone/apps/admin/server.js
+      - name: Client bundle carries no server secret names
+        run: |
+          if grep -rEl 'GOOGLE_CLIENT_SECRET|SESSION_ENCRYPTION_KEY|SESSION_STORE_URL|TAZZZO_BACKEND_URL' apps/admin/.next/static; then
+            echo 'server configuration referenced from the client bundle' && exit 1
+          fi
 
   audit:
     name: Dependency audit (production, high+)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0

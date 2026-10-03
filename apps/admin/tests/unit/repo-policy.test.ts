@@ -70,22 +70,38 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
-  it('has no OAuth, session-store or HTTP-client dependency and no auth or BFF routes in W1', () => {
+  it('uses only the ratified auth/session libraries and exposes only the W2 auth routes (no BFF proxy)', () => {
     const pkg = JSON.parse(read(APP, 'package.json')) as Record<string, Record<string, string>>
+    const runtime = Object.keys(pkg.dependencies ?? {})
+    expect(runtime).toContain('openid-client')
+    expect(runtime).toContain('ioredis')
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
-    for (const banned of [
-      'openid-client',
-      'next-auth',
-      '@auth/core',
-      'redis',
-      'ioredis',
-      'iovalkey',
-      'axios',
-    ]) {
+    for (const banned of ['next-auth', '@auth/core', 'axios', 'redis', 'iovalkey']) {
       expect(deps, banned).not.toContain(banned)
     }
-    const routes = SOURCE.map((f) => relative(join(APP, 'src', 'app'), f))
-    expect(routes.filter((r) => r.startsWith('api') || r.endsWith('route.ts'))).toEqual([])
+    const routes = SOURCE.map((f) => relative(join(APP, 'src', 'app'), f)).filter(
+      (r) => r.startsWith('api') || r.endsWith('route.ts'),
+    )
+    expect(routes.sort()).toEqual([
+      join('api', 'auth', 'expired', 'route.ts'),
+      join('api', 'auth', 'google', 'callback', 'route.ts'),
+      join('api', 'auth', 'google', 'start', 'route.ts'),
+      join('api', 'auth', 'logout', 'route.ts'),
+    ])
+  })
+
+  it('never holds a shared service token for human requests', () => {
+    for (const f of SOURCE) {
+      expect(read(f), relative(APP, f)).not.toMatch(
+        /TAZZZO_(CMS|READ)_TOKEN|CMS_WRITER_TOKEN|service:cms-writer|shared-token/,
+      )
+    }
+  })
+
+  it('has no in-memory session/transaction store in production code (fail closed on store errors)', () => {
+    for (const f of SOURCE.filter((f) => relative(APP, f).startsWith(join('src', 'server')))) {
+      expect(read(f), relative(APP, f)).not.toMatch(/new Map\b|MemoryStore|memory-store/)
+    }
   })
 })
 
@@ -103,6 +119,8 @@ describe('toolchain pins agree', () => {
     const major = nvmrc.split('.')[0]
     expect(rootPkg.engines.node).toBe(`>=${nvmrc} <${Number(major) + 1}`)
     expect(ci).toContain("node-version-file: '.nvmrc'")
+    expect(ci).not.toContain('ubuntu-latest')
+    expect(ci.match(/runs-on: ubuntu-24\.04/g)?.length).toBeGreaterThanOrEqual(6)
     expect(ci).not.toMatch(/node-version:\s/)
   })
 
