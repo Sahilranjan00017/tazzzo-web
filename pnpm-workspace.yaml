@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+
+# Dependency lifecycle scripts are denied unless explicitly reviewed here (pnpm blocks unreviewed ones).
+# unrs-resolver: its postinstall only re-checks a native binding that already ships as a prebuilt optional
+# dependency; not needed, so denied.
+allowBuilds:
+  unrs-resolver: false

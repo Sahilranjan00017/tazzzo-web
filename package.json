@@ -1,0 +1,20 @@
+{
+  "name": "tazzzo-web",
+  "private": true,
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24.21.0 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --filter admin dev",
+    "build": "pnpm --filter admin build",
+    "lint": "pnpm --filter admin lint",
+    "typecheck": "pnpm --filter admin typecheck",
+    "test": "pnpm --filter admin test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.9"
+  }
+}
