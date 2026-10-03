@@ -13,7 +13,11 @@ customer-facing web app will be added later as `apps/web`.
   server-side session in Valkey/Redis (opaque `__Host-` HttpOnly cookie; the ID token encrypted at rest; no access or
   refresh tokens kept), CSRF-checked logout, and the backend `GET /api/v1/admin/me` bootstrap with the human's ID token.
 
-**Not implemented yet:** BFF mutation routes, CMS business modules, audit read, deployment. The backend stays the
+- **W3 (in review):** a narrow BFF mutation layer (explicit routes only, no generic proxy; CSRF, JSON-only, 16 KiB
+  bodies, strict schemas, the human's ID token as the only backend credential, no redirects, 5 s timeout, no retries)
+  with one reference route, `PATCH /api/bff/catalog/products/{id}/title`, and Playwright E2E.
+
+**Not implemented yet:** CMS business modules, audit read, scheduler, deployment. The backend stays the
 authorization boundary for every request; UI role gating is UX only.
 
 ### Sign-in flow
@@ -56,6 +60,7 @@ pnpm format:check # Prettier
 pnpm typecheck    # route type generation + tsc
 pnpm test         # Vitest unit tests
 pnpm test:integration # Valkey (Testcontainers, needs Docker) + mock OIDC + fake backend + real Next runtime
+pnpm test:e2e     # Playwright (Chromium) end to end; first run: pnpm --filter admin exec playwright install chromium
 pnpm build        # production build (standalone output)
 ```
 
@@ -66,9 +71,10 @@ apps/admin/
   src/app/            routes: (auth)/login, (app) shell, root layout
   src/proxy.ts        per-request CSP nonce (no authentication)
   src/lib/security/   header and CSP policy (pure, client-safe)
-  src/server/         server-only modules: env, auth (OIDC, transaction, cookies, CSRF), session, store, backend
+  src/server/         server-only modules: env, auth (OIDC, transaction, cookies, CSRF), session, store, backend, bff
   tests/unit/         Vitest unit suites, including repository policy checks
   tests/integration/  Valkey + mock OIDC provider + fake backend; real-runtime flow
+  tests/e2e/          Playwright browser tests against the real runtime
 ```
 
 ## Security notes

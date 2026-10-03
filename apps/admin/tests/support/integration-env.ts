@@ -21,10 +21,17 @@ export interface Harness {
  * Starts the test-only world (no Google, no production services) and configures the server environment BEFORE any
  * app module is imported, so the app's cached env/config/store are built against it.
  */
-export async function startHarness(options: { redisUrl?: string } = {}): Promise<Harness> {
+export async function startHarness(
+  options: { redisUrl?: string; verifyTokens?: boolean } = {},
+): Promise<Harness> {
   const provider = new MockOidcProvider()
-  const backend = new FakeBackend()
-  await Promise.all([provider.start(), backend.start()])
+  await provider.start()
+  // Verifying fake backend: a forwarded bearer must be a genuine ID token from the mock provider.
+  const backend = options.verifyTokens
+    ? new FakeBackend({ issuer: provider.issuer, audience: provider.clientId })
+    : new FakeBackend()
+  await backend.start()
+  backend.reset()
   let valkey: StartedTestContainer | undefined
   let redisUrl = options.redisUrl
   if (!redisUrl) {
@@ -43,6 +50,9 @@ export async function startHarness(options: { redisUrl?: string } = {}): Promise
   })
   return { valkey, redisUrl, provider, backend }
 }
+
+/** Convenience for tests: the fake backend's product table. */
+export type { FakeBackend }
 
 export async function stopHarness(h: Harness | undefined): Promise<void> {
   if (!h) return
