@@ -6,3 +6,8 @@ packages:
 # dependency; not needed, so denied.
 allowBuilds:
   unrs-resolver: false
+  # Testcontainers (dev only): ssh2/cpu-features build OPTIONAL native speedups used only for SSH-based Docker hosts
+  # (pure-JS fallback exists); protobufjs' postinstall is only a version notice. Local Docker needs none of them.
+  cpu-features: false
+  ssh2: false
+  protobufjs: false

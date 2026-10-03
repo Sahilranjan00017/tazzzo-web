@@ -1,17 +1,19 @@
-import Link from 'next/link'
+import { CMS_WRITER_ROLE } from '@/server/backend/admin-me'
+import { requireAdmin } from '@/server/session/require-session'
 
-/** Placeholder home. Shows no admin data and claims no identity. */
-export default function HomePage() {
+/** Placeholder home. Role display is UX only: the backend authorizes every request. */
+export default async function HomePage() {
+  const access = await requireAdmin()
+  const canWrite = access.view === 'ok' && access.me.roles.includes(CMS_WRITER_ROLE)
   return (
     <section aria-labelledby="home-title">
-      <h1 id="home-title">CMS foundation</h1>
-      <p className="notice" role="status">
-        Authentication integration pending. No session exists, no one is signed in and no admin data
-        or actions are available yet.
-      </p>
+      <h1 id="home-title">Tazzzo Admin</h1>
       <p>
-        <Link href="/login">Go to sign-in</Link>
+        {canWrite
+          ? 'You can view and edit catalogue content.'
+          : 'You have read-only access. Editing controls are hidden.'}
       </p>
+      <p className="muted">CMS modules arrive in later releases.</p>
     </section>
   )
 }

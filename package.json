@@ -12,7 +12,8 @@
     "typecheck": "pnpm --filter admin typecheck",
     "test": "pnpm --filter admin test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:integration": "pnpm --filter admin test:integration"
   },
   "devDependencies": {
     "prettier": "3.9.9"

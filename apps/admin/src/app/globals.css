@@ -69,6 +69,12 @@ body {
   cursor: pointer;
 }
 
+.button {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
 .button:disabled {
   color: #3d4450;
   background: #dfe3ea;
@@ -100,4 +106,20 @@ body {
   max-width: 64rem;
   margin: 0 auto;
   padding: 2rem 1.5rem;
+}
+
+.shell-user {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.link-button {
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  cursor: pointer;
 }
