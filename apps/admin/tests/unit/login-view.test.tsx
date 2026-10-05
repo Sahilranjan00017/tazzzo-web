@@ -4,6 +4,7 @@ import { AppShellView } from '@/components/AppShellView'
 import { LoginView } from '@/components/LoginView'
 
 vi.mock('next/navigation', () => ({
+  usePathname: () => '/',
   useRouter: () => ({ replace: () => undefined, refresh: () => undefined }),
 }))
 
@@ -37,8 +38,7 @@ describe('authenticated shell', () => {
         <p>content</p>
       </AppShellView>,
     )
-    expect(html).toContain('ops@tazzzo.test')
-    expect(html).toContain('cms-writer, reader')
+    expect(html).toContain('Account menu for ops@tazzzo.test')
     expect(html).not.toMatch(/eyJ|google:|Bearer/)
   })
 })

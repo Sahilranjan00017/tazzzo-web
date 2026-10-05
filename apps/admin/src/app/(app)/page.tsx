@@ -1,19 +1,26 @@
-import { CMS_WRITER_ROLE } from '@/server/backend/admin-me'
+import { PageHeader } from '@/components/ui/primitives'
+import { canWrite } from '@/lib/roles'
 import { requireAdmin } from '@/server/session/require-session'
 
-/** Placeholder home. Role display is UX only: the backend authorizes every request. */
+/** Home. Role display is UX only: the backend authorizes every request. */
 export default async function HomePage() {
   const access = await requireAdmin()
-  const canWrite = access.view === 'ok' && access.me.roles.includes(CMS_WRITER_ROLE)
+  const writer = access.view === 'ok' && canWrite(access.me.roles)
   return (
-    <section aria-labelledby="home-title">
-      <h1 id="home-title">Tazzzo Admin</h1>
-      <p>
-        {canWrite
-          ? 'You can view and edit catalogue content.'
-          : 'You have read-only access. Editing controls are hidden.'}
-      </p>
-      <p className="muted">CMS modules arrive in later releases.</p>
-    </section>
+    <>
+      <PageHeader
+        title="Tazzzo Admin"
+        description={
+          writer
+            ? 'You can view and edit catalogue content.'
+            : 'Editing controls are hidden for your roles.'
+        }
+      />
+      <section className="panel">
+        <p className="muted">
+          Modules marked “Soon” in the sidebar are not built yet. Nothing here is sample data.
+        </p>
+      </section>
+    </>
   )
 }

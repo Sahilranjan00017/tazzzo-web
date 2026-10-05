@@ -19,6 +19,16 @@ export default defineConfig({
       },
       {
         resolve: { alias },
+        oxc: { jsx: { runtime: 'automatic' } },
+        test: {
+          name: 'component',
+          environment: 'jsdom',
+          include: ['tests/component/**/*.test.tsx'],
+          setupFiles: ['tests/support/component-setup.ts'],
+        },
+      },
+      {
+        resolve: { alias },
         test: {
           name: 'integration',
           environment: 'node',

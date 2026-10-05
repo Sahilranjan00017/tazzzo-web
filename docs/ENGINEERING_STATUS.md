@@ -4,7 +4,8 @@
 | --------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
 | W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28        |
 | W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97 |
-| W3 narrow BFF mutation layer + auth/audit hardening | IN REVIEW   |                                                                                                    |
+| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3                                                                                              |
+| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED              |
 | CMS business modules                                | NOT STARTED |                                                                                                    |
 | Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                            |
 | Customer web app (`apps/web`)                       | NOT STARTED |                                                                                                    |
@@ -26,6 +27,12 @@ first real admin mutation slice.
 **Not yet:** production deployment, humans moved off the shared `cms-writer` token, audit-read API, fine-grained
 permissions, the six backend deployment gates, Pricing LOW-1 (before Pricing Admin). Sensitive admin modules are not
 ready. Payment is deferred and comes last.
+
+**Backend contracts:** `docs/backend-contracts/` holds the endpoint references extracted from the backend PRs
+(#54-#81, read from an integration checkout, not from `main`). Most of those endpoints are not on backend `main` yet,
+so every module built against them is UI-only until it is verified on staging. Notable: concurrency uses
+`expectedVersion` in the body (products use `If-Match: <int>`), there is no notification-outbox admin API, no price or
+inventory list API, and media uploads return 503 until a storage provider exists.
 
 ## Scheduler / cron (architecture note, not implemented)
 
