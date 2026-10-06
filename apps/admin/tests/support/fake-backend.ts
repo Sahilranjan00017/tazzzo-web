@@ -92,6 +92,31 @@ export class FakeBackend {
       messages: { id: string; author: string; staffId?: string; text: string; at: string }[]
     }
   >()
+  readonly areas = new Map<
+    string,
+    {
+      pincode: string
+      serviceAreaId: string
+      active: boolean
+      version: number
+      routes: { fulfillmentLocationId: string; priority: number; active: boolean }[]
+    }
+  >()
+  readonly windows = new Map<
+    string,
+    {
+      serviceAreaId: string
+      windowId: string
+      label: string
+      startMinute: number
+      endMinute: number
+      cutoffMinutes: number
+      capacity: number
+      days: number[]
+      active: boolean
+      version: number
+    }
+  >()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -125,6 +150,28 @@ export class FakeBackend {
     this.nodes.clear()
     this.prices.clear()
     this.orders.clear()
+    this.cases.clear()
+    this.areas.clear()
+    this.windows.clear()
+    this.areas.set('560047', {
+      pincode: '560047',
+      serviceAreaId: 'Ejipura',
+      active: true,
+      version: 2,
+      routes: [{ fulfillmentLocationId: 'LOC-1', priority: 1, active: true }],
+    })
+    this.windows.set('Ejipura|evening', {
+      serviceAreaId: 'Ejipura',
+      windowId: 'evening',
+      label: 'Evening',
+      startMinute: 1080,
+      endMinute: 1200,
+      cutoffMinutes: 60,
+      capacity: 20,
+      days: [1, 2, 3, 4, 5],
+      active: true,
+      version: 1,
+    })
     this.cases.clear()
     this.cases.set('SUP_1', {
       caseId: 'SUP_1',
@@ -319,6 +366,84 @@ export class FakeBackend {
         }
       }
       return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
+    }
+    if (url.pathname === '/api/v1/admin/service-areas' && req.method === 'GET')
+      return json(200, { items: [...this.areas.values()] })
+    const areaM = url.pathname.match(
+      /^\/api\/v1\/admin\/service-areas\/(\d{6})(\/activate|\/deactivate)?$/,
+    )
+    if (areaM) {
+      const pin = areaM[1]!
+      const a = this.areas.get(pin)
+      if (req.method === 'GET')
+        return a ? json(200, a) : json(404, { error: { code: 'NOT_FOUND' } })
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body || '{}') as {
+        serviceAreaId?: string
+        routes?: { fulfillmentLocationId: string; priority: number; active: boolean }[]
+        expectedVersion?: number
+      }
+      if (req.method === 'PUT') {
+        if (b.expectedVersion === undefined ? a !== undefined : a?.version !== b.expectedVersion)
+          return json(a ? 409 : 404, { error: { code: a ? 'STALE_VERSION' : 'NOT_FOUND' } })
+        const next = {
+          pincode: pin,
+          serviceAreaId: String(b.serviceAreaId),
+          active: a?.active ?? true,
+          version: (a?.version ?? 0) + 1,
+          routes: b.routes ?? [],
+        }
+        this.areas.set(pin, next)
+        return json(a ? 200 : 201, next)
+      }
+      if (req.method === 'POST' && a && areaM[2]) {
+        if (b.expectedVersion !== a.version) return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = { ...a, active: areaM[2] === '/activate', version: a.version + 1 }
+        this.areas.set(pin, next)
+        return json(200, next)
+      }
+    }
+    const winL = url.pathname.match(/^\/api\/v1\/admin\/delivery-slots\/([^/]+)$/)
+    if (winL && req.method === 'GET') {
+      const area = decodeURIComponent(winL[1]!)
+      return json(200, {
+        items: [...this.windows.values()].filter((w) => w.serviceAreaId === area),
+      })
+    }
+    const winM = url.pathname.match(
+      /^\/api\/v1\/admin\/delivery-slots\/([^/]+)\/([^/]+)(\/activate|\/deactivate)?$/,
+    )
+    if (winM) {
+      const area = decodeURIComponent(winM[1]!)
+      const key = `${area}|${winM[2]}`
+      const w = this.windows.get(key)
+      if (!roles.includes('cms-writer') && req.method !== 'GET')
+        return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body || '{}') as Record<string, number | string | number[]>
+      if (req.method === 'PUT') {
+        if (b.expectedVersion === undefined ? w !== undefined : w?.version !== b.expectedVersion)
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = {
+          serviceAreaId: area,
+          windowId: winM[2]!,
+          label: String(b.label),
+          startMinute: Number(b.startMinute),
+          endMinute: Number(b.endMinute),
+          cutoffMinutes: Number(b.cutoffMinutes),
+          capacity: Number(b.capacity),
+          days: b.days as number[],
+          active: w?.active ?? true,
+          version: (w?.version ?? 0) + 1,
+        }
+        this.windows.set(key, next)
+        return json(w ? 200 : 201, next)
+      }
+      if (req.method === 'POST' && w && winM[3]) {
+        if (b.expectedVersion !== w.version) return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = { ...w, active: winM[3] === '/activate', version: w.version + 1 }
+        this.windows.set(key, next)
+        return json(200, next)
+      }
     }
     const caseView = (c: NonNullable<ReturnType<typeof this.cases.get>>) => ({
       ...c,

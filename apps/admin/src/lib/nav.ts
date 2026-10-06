@@ -98,14 +98,14 @@ export const NAV: readonly NavSection[] = [
         label: 'Service areas',
         href: '/delivery/service-areas',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'slots',
         label: 'Delivery slots',
         href: '/delivery/slots',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'support',
