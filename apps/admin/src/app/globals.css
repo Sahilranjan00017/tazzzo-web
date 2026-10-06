@@ -748,3 +748,14 @@ fieldset {
   margin: 0 0 1rem;
   font-size: 0.875rem;
 }
+
+.map-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  margin-bottom: 0.75rem;
+}
+.data-table td.wrap {
+  max-width: 28rem;
+  white-space: normal;
+}

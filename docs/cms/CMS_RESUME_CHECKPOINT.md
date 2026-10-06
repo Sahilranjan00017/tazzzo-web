@@ -75,3 +75,9 @@ Next: CMS-04 pricing, CMS-05 inventory (both product-discovery based; no list en
 Gates: eslint, tsc, 193 unit+component, 37 integration, 19 Playwright (mock), build, prettier pass.
 Dashboard no longer links low/out-of-stock counts to a page (no list endpoint exists; link would mislead).
 Stack: main <- #5 <- #6 <- #8 <- #9 <- this. Next: CMS-06 imports (needs contract 3.5), then serviceability, slots, orders, support, audit.
+
+## Update: CMS-06 imports (branch `cms/06-imports`, stacked on `cms/04-pricing-inventory`)
+
+BFF mutation layer gained per-spec `maxBodyBytes`, `timeoutMs`, `errorDetail` (defaults unchanged, tested). Import lib/wizard,
+`/api/bff/imports/[kind]`. Gates: eslint, tsc, 213+ unit/component, 22 Playwright (mock) pass. XLSX deliberately not supported.
+Next: serviceability, delivery slots, orders, support, audit, home content/FAQ/app-config (channel work gated), media, system status.
