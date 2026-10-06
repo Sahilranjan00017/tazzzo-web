@@ -126,3 +126,9 @@ Remaining: global search + polish, security review doc, release-readiness doc, v
 Access matrix on the account page, go-to-id box (`lib/goto.ts`, `/` shortcut), Imports nav now cms-writer only (matrix test found it),
 `useBffAction` disables all actions while a server refresh is pending (shared flag; fixed a stale-version race), ProductEditor moved onto it.
 Gates: eslint, tsc, 383 unit/component, 42 Playwright x2 (mock). Remaining: security review doc, visual QA (browser), release readiness, final report.
+
+## Update: CMS-16 QA, security review, release readiness (branch `cms/16-qa-security`, stacked on `cms/12b-rbac-search`)
+
+Responsive sweep spec (`tests/e2e/responsive.spec.ts`), CSS fixes (360 px overflow, desktop drawer toggle, 2-column KPIs), docs:
+CMS_SECURITY_REVIEW, CMS_VISUAL_QA, CMS_INTEGRATION_EVIDENCE, CMS_RELEASE_READINESS. Master gate: FAIL (see readiness doc).
+Stack tip: #18 <- this. Nothing is merged except PR #4. Pending CI check on #15-#19. Independent work left: advanced catalogue ops, taxonomy move/merge/split, attribute schemas.
