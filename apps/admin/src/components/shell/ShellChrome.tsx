@@ -37,10 +37,14 @@ export function ShellChrome({
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!menu) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenuPath(null)
+    if (!menu && !drawer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setMenuPath(null)
+      setDrawerPath(null)
+    }
     const onClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuPath(null)
+      if (menu && menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuPath(null)
     }
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onClick)
@@ -48,7 +52,7 @@ export function ShellChrome({
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onClick)
     }
-  }, [menu])
+  }, [menu, drawer])
 
   const initial = (identity.label.trim()[0] ?? '?').toUpperCase()
 
@@ -113,18 +117,18 @@ export function ShellChrome({
               <button
                 type="button"
                 className="avatar"
-                aria-haspopup="menu"
                 aria-expanded={menu}
+                aria-controls="account-menu"
                 aria-label={`Account menu for ${identity.label}`}
                 onClick={() => setMenu(!menu)}
               >
                 {initial}
               </button>
               {menu ? (
-                <div className="menu" role="menu">
+                <div className="menu" id="account-menu">
                   <p className="menu-id">{identity.label}</p>
                   <p className="muted menu-roles">{identity.roles.join(', ') || 'no roles'}</p>
-                  <Link href="/account" role="menuitem" className="menu-item">
+                  <Link href="/account" className="menu-item">
                     Profile &amp; access
                   </Link>
                   <LogoutButton />

@@ -1,5 +1,7 @@
 'use client'
 
+import './globals.css'
+
 /** Last-resort boundary (root layout failure, e.g. invalid server configuration). Deliberately minimal and generic. */
 export default function GlobalError({
   retry,
@@ -9,7 +11,7 @@ export default function GlobalError({
 }) {
   return (
     <html lang="en">
-      <body style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem' }}>
+      <body className="fatal">
         <h1>Tazzzo Admin is unavailable</h1>
         <p>Something went wrong starting the application. Try again shortly.</p>
         <button type="button" onClick={() => retry()}>

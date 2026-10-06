@@ -158,6 +158,9 @@ a {
 }
 
 /* ---- app shell ---- */
+.fatal {
+  padding: 2rem;
+}
 .skip-link {
   position: absolute;
   left: -999px;
@@ -342,10 +345,16 @@ a.nav-link:hover {
     z-index: 30;
     width: var(--sidebar-w);
     transform: translateX(-100%);
-    transition: transform 0.15s ease;
+    /* Closed drawer is removed from the tab order and accessibility tree; visibility flips after the slide-out. */
+    visibility: hidden;
+    transition:
+      transform 0.15s ease,
+      visibility 0s linear 0.15s;
   }
   .sidebar-open {
     transform: none;
+    visibility: visible;
+    transition: transform 0.15s ease;
   }
   .menu-toggle {
     display: inline-block;
@@ -357,7 +366,8 @@ a.nav-link:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .sidebar,
+  .sidebar-open {
     transition: none;
   }
 }

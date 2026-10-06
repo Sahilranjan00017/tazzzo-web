@@ -34,13 +34,20 @@ describe('app shell', () => {
   it('opens the profile menu with identity and roles, and Escape closes it', async () => {
     const user = userEvent.setup()
     render(shell(['reader', 'audit-reader']))
+    const trigger = screen.getByRole('button', { name: /Account menu for ops@tazzzo.test/ })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    await user.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    const panel = document.getElementById(trigger.getAttribute('aria-controls') ?? '')
+    expect(panel).toHaveTextContent('ops@tazzzo.test')
+    expect(panel).toHaveTextContent('reader, audit-reader')
+    // Plain disclosure semantics: no half-implemented ARIA menu roles.
     expect(screen.queryByRole('menu')).toBeNull()
-    await user.click(screen.getByRole('button', { name: /Account menu for ops@tazzzo.test/ }))
-    const menu = screen.getByRole('menu')
-    expect(menu).toHaveTextContent('ops@tazzzo.test')
-    expect(menu).toHaveTextContent('reader, audit-reader')
+    expect(screen.queryByRole('menuitem')).toBeNull()
+    expect(trigger).not.toHaveAttribute('aria-haspopup')
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(document.getElementById('account-menu')).toBeNull()
   })
 
   it('toggles the mobile drawer with an accessible expanded state', async () => {
@@ -50,6 +57,8 @@ describe('app shell', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard('{Escape}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('never renders token-like or actor data', () => {
