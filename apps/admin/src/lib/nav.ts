@@ -49,7 +49,7 @@ export const NAV: readonly NavSection[] = [
         label: 'Products',
         href: '/catalogue/products',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'taxonomy',
