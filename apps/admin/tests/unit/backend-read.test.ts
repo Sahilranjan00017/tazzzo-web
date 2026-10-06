@@ -16,7 +16,12 @@ describe('backendRead', () => {
   it('sends only the bearer, never follows redirects, and validates the body', async () => {
     const f = reply(200, { n: 1 }, { 'x-request-id': 'req_0123456789abcdef0123' })
     const r = await backendRead(deps(f), '/api/v1/x', schema)
-    expect(r).toEqual({ kind: 'ok', data: { n: 1 }, backendRequestId: 'req_0123456789abcdef0123' })
+    expect(r).toEqual({
+      kind: 'ok',
+      data: { n: 1 },
+      httpStatus: 200,
+      backendRequestId: 'req_0123456789abcdef0123',
+    })
     const [url, init] = f.mock.calls[0]!
     expect(String(url)).toBe('https://api.test/api/v1/x')
     expect(init).toMatchObject({ method: 'GET', redirect: 'error', cache: 'no-store' })

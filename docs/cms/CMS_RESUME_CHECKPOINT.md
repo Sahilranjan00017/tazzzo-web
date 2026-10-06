@@ -99,3 +99,9 @@ Next: serviceability (CMS-09), delivery slots (CMS-10), audit + system status (C
 `lib/delivery.ts`, backend readers, 4 BFF routes (area put/toggle, window put/toggle), service-area and slots pages.
 Gates: eslint, tsc, 283 unit/component, 31 Playwright (mock). Stack: ... <- #13 <- this.
 Next: audit viewer + system status (CMS-14), media (CMS-07), home content/FAQ/app config (CMS-12/13), account/RBAC page refinement, security review, visual QA.
+
+## Update: CMS-14 audit, notifications, system status (branch `cms/14-audit-status`, stacked on `cms/09-delivery`)
+
+`backendRead` gained anonymous mode and `parseAlso` (health 503 body); `lib/{audit,health}.ts`; 3 pages; nav entries Notifications + System status.
+Gates: eslint, tsc, 300 unit/component, 35 Playwright (mock). Stack: ... <- #14 <- this.
+Remaining: media (CMS-07, BLOCKED_BY_EXTERNAL_PROVIDER for real upload), home content + FAQ + app config (CMS-12/13, channel work needs backend change first), global search, security review doc, visual QA, release readiness doc, final report.
