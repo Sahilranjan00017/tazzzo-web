@@ -682,3 +682,49 @@ test('notifications (mock backend): only the two counters; per-message detail is
   await expect(page.getByText(/Not available from the backend/)).toBeVisible()
   await expect(page.getByRole('button', { name: /retry|resend/i })).toHaveCount(0)
 })
+
+test('media (mock backend): edit metadata as a whole-set replace; removed assets leave the set', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/media?type=product&id=TZP-REF-1')
+  await expect(page.getByText(/without checking they exist/)).toBeVisible()
+  expect(await page.locator('img').count()).toBe(0)
+  await page.getByLabel('Alt text for A2').fill('Side view')
+  await page.getByLabel('Remove A1').check()
+  await page.getByLabel('Role for A2').selectOption('PRIMARY')
+  await page.getByLabel('Order for A2').fill('0')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save media' }).click()
+  await expect(page.getByText('Media saved.')).toBeVisible()
+  const put = (await backendRequests(request)).filter((r) => r.method === 'PUT')
+  expect(put).toHaveLength(1)
+  const body = JSON.parse((put[0] as unknown as { body: string }).body)
+  expect(body.expectedVersion).toBe(3)
+  expect(body.assets).toHaveLength(1)
+  expect(put[0]!.sub).toBe(WRITER_SUB)
+})
+
+test('media (mock backend): upload readiness shows the storage blocker and leaks no backend detail', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/media?type=product&id=TZP-REF-1')
+  await page
+    .getByLabel('Image file')
+    .setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('abc') })
+  await page.getByRole('button', { name: 'Check upload readiness' }).click()
+  await expect(page.getByText(/no media storage provider is configured/)).toBeVisible()
+  expect(await page.content()).not.toContain('bucket none')
+  await expect(page.getByText(/uploaded successfully/i)).toHaveCount(0)
+})
+
+test('media (mock backend): a reader sees the set read-only and no upload control', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/catalogue/media?type=product&id=TZP-REF-1')
+  await expect(page.getByText('Read-only: changing media needs the cms-writer role')).toBeVisible()
+  await expect(page.getByLabel('Image file')).toHaveCount(0)
+})

@@ -816,3 +816,8 @@ textarea {
 details summary {
   cursor: pointer;
 }
+
+.row-removed {
+  opacity: 0.5;
+  text-decoration: line-through;
+}

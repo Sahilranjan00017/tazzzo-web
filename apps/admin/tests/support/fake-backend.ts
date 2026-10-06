@@ -120,6 +120,7 @@ export class FakeBackend {
       version: number
     }
   >()
+  readonly media = new Map<string, { version: number; assets: Record<string, unknown>[] }>()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -156,6 +157,23 @@ export class FakeBackend {
     this.orders.clear()
     this.cases.clear()
     this.areas.clear()
+    this.media.clear()
+    this.media.set('product|TZP-REF-1', {
+      version: 3,
+      assets: [
+        {
+          assetId: 'A1',
+          assetKey: 'p/product/tzp-ref-1/a.jpg',
+          role: 'PRIMARY',
+          sortOrder: 0,
+          altText: 'Front',
+          width: 800,
+          height: 800,
+          contentType: 'image/jpeg',
+        },
+        { assetId: 'A2', assetKey: 'p/product/tzp-ref-1/b.png', role: 'GALLERY', sortOrder: 1 },
+      ],
+    })
     this.windows.clear()
     this.areas.set('560047', {
       pincode: '560047',
@@ -434,6 +452,44 @@ export class FakeBackend {
     }
     if (url.pathname === '/api/v1/admin/service-areas' && req.method === 'GET')
       return json(200, { items: [...this.areas.values()] })
+    if (url.pathname === '/api/v1/admin/media/uploads' && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      // Today's real backend answer: no storage provider is configured.
+      return json(503, {
+        error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'internal detail: bucket none' },
+      })
+    }
+    const mediaM = url.pathname.match(/^\/api\/v1\/admin\/media\/(product|sku)\/([^/]+)$/)
+    if (mediaM) {
+      const key = `${mediaM[1]}|${decodeURIComponent(mediaM[2]!)}`
+      const m = this.media.get(key)
+      if (req.method === 'GET')
+        return m
+          ? json(200, {
+              ownerType: mediaM[1],
+              ownerId: decodeURIComponent(mediaM[2]!),
+              version: m.version,
+              active: true,
+              assets: m.assets,
+            })
+          : json(404, { error: { code: 'NOT_FOUND' } })
+      if (req.method === 'PUT') {
+        if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+        const b = JSON.parse(body) as {
+          assets: Record<string, unknown>[]
+          expectedVersion?: number
+        }
+        if (b.expectedVersion === undefined ? m !== undefined : m?.version !== b.expectedVersion)
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = { version: (m?.version ?? 0) + 1, assets: b.assets }
+        this.media.set(key, next)
+        return json(m ? 200 : 201, {
+          ownerType: mediaM[1],
+          ownerId: decodeURIComponent(mediaM[2]!),
+          version: next.version,
+        })
+      }
+    }
     const areaM = url.pathname.match(
       /^\/api\/v1\/admin\/service-areas\/(\d{6})(\/activate|\/deactivate)?$/,
     )

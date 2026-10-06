@@ -281,6 +281,20 @@ describe('backend call', () => {
     }
   })
 
+  it('503 passes only a well-formed backend code, never the message', async () => {
+    const ok = await run(
+      request(),
+      backend(503, {
+        error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'secret internal detail' },
+      }),
+    )
+    expect(ok.res.status).toBe(502)
+    expect(ok.body).toMatchObject({ error: 'upstream_error', code: 'MEDIA_STORAGE_NOT_CONFIGURED' })
+    expect(JSON.stringify(ok.body)).not.toContain('secret')
+    const bad = await run(request(), backend(503, { error: { code: '<script>', message: 'x' } }))
+    expect(bad.body).not.toHaveProperty('code')
+  })
+
   it('409 passes only a well-formed backend code (e.g. STALE_VERSION)', async () => {
     const stale = await run(
       request(),

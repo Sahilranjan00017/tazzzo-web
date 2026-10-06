@@ -102,6 +102,8 @@ describe('no fake or browser-held identity', () => {
         ),
         join('api', 'bff', 'delivery', 'slots', '[serviceAreaId]', '[windowId]', 'route.ts'),
         join('api', 'bff', 'imports', '[kind]', 'route.ts'),
+        join('api', 'bff', 'media', '[ownerType]', '[ownerId]', 'route.ts'),
+        join('api', 'bff', 'media', 'uploads', 'route.ts'),
         join('api', 'bff', 'orders', '[orderId]', 'transition', 'route.ts'),
         join('api', 'bff', 'support', '[caseId]', 'assign', 'route.ts'),
         join('api', 'bff', 'support', '[caseId]', 'messages', 'route.ts'),
