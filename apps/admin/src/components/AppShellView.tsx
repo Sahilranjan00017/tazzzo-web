@@ -1,12 +1,11 @@
 import type { ReactNode } from 'react'
+import { navFor } from '@/lib/nav'
 import { LogoutButton } from './LogoutButton'
+import { ShellChrome, type ShellIdentity } from './shell/ShellChrome'
 
-/** Authenticated shell (pure view). Receives display data only: never a token or credential. */
-export interface ShellIdentity {
-  label: string
-  roles: string[]
-}
+export type { ShellIdentity }
 
+/** Authenticated shell (server view). Nav is filtered by the backend roles here: UX only, never authorization. */
 export function AppShellView({
   identity,
   children,
@@ -15,17 +14,9 @@ export function AppShellView({
   children: ReactNode
 }) {
   return (
-    <>
-      <header className="shell-header">
-        <strong>Tazzzo Admin</strong>
-        <span className="shell-user">
-          <span>{identity.label}</span>
-          <span className="muted">{identity.roles.join(', ')}</span>
-          <LogoutButton />
-        </span>
-      </header>
-      <main className="shell-main">{children}</main>
-    </>
+    <ShellChrome identity={identity} sections={navFor(identity.roles)}>
+      {children}
+    </ShellChrome>
   )
 }
 

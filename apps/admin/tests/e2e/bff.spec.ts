@@ -36,7 +36,9 @@ async function signIn(page: Page, sub: string) {
   await expect(page).toHaveURL(/\/login\?returnTo=/)
   await page.getByRole('link', { name: 'Sign in with Google' }).click()
   await expect(page).toHaveURL(`${BASE}/`)
-  await expect(page.getByText(`${sub}@tazzzo.test`)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: `Account menu for ${sub}@tazzzo.test` }),
+  ).toBeVisible()
 }
 
 async function renameViaUi(page: Page, title: string, version: number) {
@@ -76,7 +78,9 @@ test('a reader is denied by the backend and stays signed in', async ({ page }) =
     'Access denied: your role cannot make this change.',
   )
   await page.goto('/')
-  await expect(page.getByText(`${READER_SUB}@tazzzo.test`)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: `Account menu for ${READER_SUB}@tazzzo.test` }),
+  ).toBeVisible()
 })
 
 test('a backend 401 ends the session and returns the browser to login', async ({

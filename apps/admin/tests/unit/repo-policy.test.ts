@@ -163,3 +163,30 @@ describe('toolchain pins agree', () => {
     }
   })
 })
+
+describe('CSP-safe markup and accessible shell (PR #4 hardening)', () => {
+  it('has no inline style attributes in source (production CSP forbids them)', () => {
+    const offenders = SOURCE.filter(
+      (f) => !f.includes('/tests/') && /\bstyle=\{\{|\bstyle="/.test(readFileSync(f, 'utf8')),
+    ).map((f) => relative(APP, f))
+    expect(offenders).toEqual([])
+  })
+
+  it('global-error pulls in the stylesheet instead of styling inline', () => {
+    const src = read(APP, 'src', 'app', 'global-error.tsx')
+    expect(src).toContain("import './globals.css'")
+    expect(src).toContain('className="fatal"')
+  })
+
+  it('keeps the closed mobile drawer out of the tab order via visibility:hidden', () => {
+    const css = read(APP, 'src', 'app', 'globals.css')
+    const mobile = css.slice(css.indexOf('@media (max-width: 900px)'))
+    expect(mobile).toMatch(/\.sidebar\s*\{[^}]*visibility:\s*hidden/)
+    expect(mobile).toMatch(/\.sidebar-open\s*\{[^}]*visibility:\s*visible/)
+  })
+
+  it('does not use ARIA menu roles on the account popover', () => {
+    const src = read(APP, 'src', 'components', 'shell', 'ShellChrome.tsx')
+    expect(src).not.toMatch(/role="menu(item)?"|aria-haspopup/)
+  })
+})
