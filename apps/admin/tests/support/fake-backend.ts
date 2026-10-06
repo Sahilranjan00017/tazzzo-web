@@ -39,6 +39,8 @@ export class FakeBackend {
     body?: unknown
     delayMs?: number
   }
+  /** Forces a status (and optional body) for the dashboard summary, e.g. 503 to mimic a Mongo outage. */
+  dashboardOverride?: { status: number; body?: unknown }
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<string, { id: string; title: string; version: number }>()
   private server?: Server
@@ -62,6 +64,7 @@ export class FakeBackend {
   reset(): void {
     this.status = 200
     this.mutationOverride = undefined
+    this.dashboardOverride = undefined
     this.requests.length = 0
     this.products.clear()
     this.products.set('TZP-REF-1', { id: 'TZP-REF-1', title: 'Basmati 5 kg', version: 3 })
@@ -114,6 +117,29 @@ export class FakeBackend {
         actorId: `google:${claims!.sub}`,
         email: String(claims!.email ?? ''),
         roles,
+      })
+    }
+
+    if (url.pathname === '/api/v1/admin/dashboard/summary' && req.method === 'GET') {
+      const o = this.dashboardOverride
+      if (o) return json(o.status, o.body ?? { error: { code: 'SERVICE_UNAVAILABLE' } })
+      const c = (value: number, capped = false) => ({ value, capped })
+      return json(200, {
+        orders: {
+          open_confirmed: c(7),
+          open_out_for_delivery: c(2),
+          last24h_confirmed: c(3),
+          last24h_out_for_delivery: c(1),
+          last24h_delivered: c(9),
+          last24h_cancelled: c(0),
+        },
+        inventory: { out_of_stock: c(4), low_stock: c(10000, true) },
+        catalog: { products_total: c(120), active: c(100), draft: c(20) },
+        serviceability: { service_areas_total: c(1), active: c(1) },
+        support: { open: c(5), in_progress: c(1) },
+        notifications: { pending: c(0), failed: c(2) },
+        generatedAt: '2026-10-06T03:30:00Z',
+        bounds: { cap: 10000, maxTimeMs: 2000, recentWindowHours: 24 },
       })
     }
 
@@ -170,6 +196,12 @@ export class FakeBackend {
     if (url.pathname === '/__control/requests') return json(200, this.requests)
     if (url.pathname === '/__control/reset' && method === 'POST') {
       this.reset()
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/dashboard' && method === 'POST') {
+      this.dashboardOverride = body
+        ? (JSON.parse(body) as FakeBackend['dashboardOverride'])
+        : undefined
       return json(200, { ok: true })
     }
     if (url.pathname === '/__control/mutation' && method === 'POST') {

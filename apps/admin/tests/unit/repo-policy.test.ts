@@ -101,7 +101,7 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
-  it('reaches the backend only from the two declared server modules, built from TAZZZO_BACKEND_URL', () => {
+  it('reaches the backend only from the three declared server modules, built from TAZZZO_BACKEND_URL', () => {
     const serverFetchers = SOURCE.filter(
       (f) =>
         /\bfetch(Impl)?\(|fetchImpl\(/.test(read(f)) &&
@@ -109,8 +109,14 @@ describe('no fake or browser-held identity', () => {
     )
     expect(serverFetchers.map((f) => relative(APP, f)).sort()).toEqual([
       join('src', 'server', 'backend', 'admin-me.ts'),
+      join('src', 'server', 'backend', 'read.ts'),
       join('src', 'server', 'bff', 'mutation.ts'),
     ])
+    // The read helper takes its URL from the caller (session-read.ts passes TAZZZO_BACKEND_URL) and never follows redirects.
+    expect(read(join(APP, 'src', 'server', 'backend', 'read.ts'))).toMatch(/redirect: 'error'/)
+    expect(read(join(APP, 'src', 'server', 'backend', 'session-read.ts'))).toMatch(
+      /backendUrl: env\.TAZZZO_BACKEND_URL/,
+    )
     expect(read(join(APP, 'src', 'server', 'bff', 'mutation.ts'))).toMatch(
       /new URL\(call\.path, env\.TAZZZO_BACKEND_URL\)/,
     )
