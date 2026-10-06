@@ -72,8 +72,14 @@ export const NAV: readonly NavSection[] = [
     id: 'commerce',
     label: 'Commerce',
     items: [
-      { id: 'pricing', label: 'Pricing', href: '/pricing', roles: GENERAL, state: 'planned' },
-      { id: 'inventory', label: 'Inventory', href: '/inventory', roles: GENERAL, state: 'planned' },
+      { id: 'pricing', label: 'Pricing', href: '/pricing', roles: GENERAL, state: 'available' },
+      {
+        id: 'inventory',
+        label: 'Inventory',
+        href: '/inventory',
+        roles: GENERAL,
+        state: 'available',
+      },
     ],
   },
   {

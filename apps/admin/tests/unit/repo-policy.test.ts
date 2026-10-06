@@ -82,19 +82,33 @@ describe('no fake or browser-held identity', () => {
     const routes = SOURCE.map((f) => relative(join(APP, 'src', 'app'), f)).filter(
       (r) => r.startsWith('api') || r.endsWith('route.ts'),
     )
-    expect(routes.sort()).toEqual([
-      join('api', 'auth', 'expired', 'route.ts'),
-      join('api', 'auth', 'google', 'callback', 'route.ts'),
-      join('api', 'auth', 'google', 'start', 'route.ts'),
-      join('api', 'auth', 'logout', 'route.ts'),
-      join('api', 'bff', 'catalog', 'products', '[productId]', 'lifecycle', '[action]', 'route.ts'),
-      join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
-      join('api', 'bff', 'catalog', 'products', 'route.ts'),
-      join('api', 'bff', 'catalog', 'taxonomy', 'nodes', '[nodeId]', '[action]', 'route.ts'),
-      join('api', 'bff', 'catalog', 'taxonomy', 'nodes', 'route.ts'),
-      join('api', 'bff', 'catalog', 'taxonomy', 'releases', '[releaseId]', 'publish', 'route.ts'),
-      join('api', 'bff', 'catalog', 'taxonomy', 'releases', 'route.ts'),
-    ])
+    expect(routes.sort()).toEqual(
+      [
+        join('api', 'auth', 'expired', 'route.ts'),
+        join('api', 'auth', 'google', 'callback', 'route.ts'),
+        join('api', 'auth', 'google', 'start', 'route.ts'),
+        join('api', 'auth', 'logout', 'route.ts'),
+        join('api', 'bff', 'inventory', '[skuId]', '[locationId]', '[action]', 'route.ts'),
+        join('api', 'bff', 'inventory', '[skuId]', '[locationId]', 'route.ts'),
+        join('api', 'bff', 'pricing', '[skuId]', 'route.ts'),
+        join(
+          'api',
+          'bff',
+          'catalog',
+          'products',
+          '[productId]',
+          'lifecycle',
+          '[action]',
+          'route.ts',
+        ),
+        join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
+        join('api', 'bff', 'catalog', 'products', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'nodes', '[nodeId]', '[action]', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'nodes', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'releases', '[releaseId]', 'publish', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'releases', 'route.ts'),
+      ].sort(),
+    )
   })
 
   it('has no generic proxy: no catch-all routes, no request-chosen backend target', () => {
