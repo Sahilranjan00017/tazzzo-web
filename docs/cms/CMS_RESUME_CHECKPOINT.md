@@ -87,3 +87,9 @@ Next: serviceability, delivery slots, orders, support, audit, home content/FAQ/a
 Orders list/detail/transition, `ConfirmDialog` gained `children` + `confirmDisabled`, role helpers `canOperateOrders`/`canWorkSupport`,
 dashboard metric links are now role-aware (`moduleHref(id, roles)`), fake backend models the staff-role access matrix.
 Gates: eslint, tsc, 235 unit/component, 25 Playwright (mock). Next: CMS-11 support (same staff namespace), then serviceability, slots, audit, content, media, status.
+
+## Update: CMS-11 support (branch `cms/11-support`, stacked on `cms/08-orders`)
+
+Support list/case/actions + 3 BFF routes. Shell test no longer hard-codes a planned module. Gates: eslint, tsc, 249 unit/component, 28 Playwright (mock).
+Stack: main <- #5 <- #6 <- #8 <- #9 <- #10 <- #11 <- #12 <- this.
+Next: serviceability (CMS-09), delivery slots (CMS-10), audit + system status (CMS-14), media (CMS-07, 503 until provider), home content/FAQ/app config (CMS-12/13; channel work gated by approval), RBAC/account refinements, security audit (CMS-16), visual QA.

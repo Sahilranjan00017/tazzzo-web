@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AppShellView } from '@/components/AppShellView'
+import { NAV } from '@/lib/nav'
 
 const pathname = '/'
 vi.mock('next/navigation', () => ({
@@ -27,7 +28,7 @@ describe('app shell', () => {
     render(shell(['order-ops']))
     const nav = screen.getByRole('navigation', { name: 'Modules' })
     expect(within(nav).getByRole('link', { name: 'Orders' })).toHaveAttribute('href', '/orders')
-    expect(within(nav).getByText('Support')).toHaveAttribute('aria-disabled', 'true')
+    expect(within(nav).getByRole('link', { name: 'Support' })).toHaveAttribute('href', '/support')
     expect(within(nav).queryByText('Products')).toBeNull()
     expect(within(nav).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
@@ -49,6 +50,17 @@ describe('app shell', () => {
     await user.keyboard('{Escape}')
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     expect(document.getElementById('account-menu')).toBeNull()
+  })
+
+  it('renders any not-yet-built module as disabled text, never a link', () => {
+    const planned = NAV.flatMap((sec) => sec.items).filter((i) => i.state === 'planned')
+    for (const item of planned) {
+      const { unmount } = render(shell(item.roles ? [...item.roles] : ['reader']))
+      const nav = screen.getByRole('navigation', { name: 'Modules' })
+      expect(within(nav).getByText(item.label)).toHaveAttribute('aria-disabled', 'true')
+      expect(within(nav).queryByRole('link', { name: item.label })).toBeNull()
+      unmount()
+    }
   })
 
   it('toggles the mobile drawer with an accessible expanded state', async () => {

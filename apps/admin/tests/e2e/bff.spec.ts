@@ -498,3 +498,55 @@ test('orders (mock backend): a general role is refused by the backend and sees a
   await expect(page.locator('.panel-error')).toContainText('Not permitted')
   await expect(page.getByRole('table')).toHaveCount(0)
 })
+
+test('support (mock backend): support-agent opens a case, assigns, replies and resolves; message HTML stays inert', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, SUPPORT_SUB)
+  await page.goto('/support')
+  await page.getByRole('link', { name: 'Late order' }).click()
+  await expect(page.getByText('<b>where</b> is my order')).toBeVisible()
+  await expect(page.locator('.msg-text b')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Assign to me' }).click()
+  await expect(page.getByText('Assigned to you.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Assign to me' })).toHaveCount(0)
+
+  await page.getByLabel('Reply to the customer').fill('We are checking this now.')
+  await page.getByRole('button', { name: 'Send reply' }).click()
+  await expect(page.getByText('Reply sent.')).toBeVisible()
+  await expect(page.getByText('We are checking this now.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Mark resolved' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Mark resolved' }).click()
+  await expect(page.getByText('Status updated.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible()
+
+  const writes = (await backendRequests(request)).filter((r) => r.method === 'POST')
+  expect(writes.map((w) => w.path.split('/').pop())).toEqual(['assign', 'messages', 'status'])
+  expect(writes.every((w) => w.sub === SUPPORT_SUB)).toBe(true)
+})
+
+test('support (mock backend): order-ops reads cases but cannot work them; a general role is refused', async ({
+  page,
+}) => {
+  await signIn(page, OPS_SUB)
+  await page.goto('/support/SUP_1')
+  await expect(
+    page.getByText('Read-only: replying and changing cases needs the support-agent role'),
+  ).toBeVisible()
+  await expect(page.getByRole('link', { name: 'O-100' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send reply' })).toHaveCount(0)
+  const denied = await page.request.post('/api/bff/support/SUP_1/messages', {
+    headers: { origin: BASE, 'x-tazzzo-csrf': '1', 'content-type': 'application/json' },
+    data: { message: 'hi' },
+  })
+  expect(denied.status()).toBe(403)
+})
+
+test('support (mock backend): a general role sees a permission state', async ({ page }) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/support')
+  await expect(page.locator('.panel-error')).toContainText('Not permitted')
+})

@@ -112,7 +112,7 @@ export const NAV: readonly NavSection[] = [
         label: 'Support',
         href: '/support',
         roles: ['support-agent', 'order-ops'],
-        state: 'planned',
+        state: 'available',
       },
     ],
   },
