@@ -121,6 +121,25 @@ export class FakeBackend {
     }
   >()
   readonly media = new Map<string, { version: number; assets: Record<string, unknown>[] }>()
+  readonly blocks = new Map<
+    string,
+    Record<string, unknown> & { blockId: string; status: string; version: number }
+  >()
+  appConfig: Record<string, unknown> & { version: number } = {
+    storeOpen: true,
+    maintenance: false,
+    maintenanceMessage: null,
+    minAndroid: '1.0.0',
+    latestAndroid: '1.2.0',
+    minIos: null,
+    latestIos: null,
+    supportPhone: null,
+    supportEmail: null,
+    termsUrl: null,
+    privacyUrl: null,
+    refundPolicyUrl: null,
+    version: 0,
+  }
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -158,6 +177,36 @@ export class FakeBackend {
     this.cases.clear()
     this.areas.clear()
     this.media.clear()
+    this.blocks.clear()
+    this.blocks.set('CB_faqseed000000001', {
+      blockId: 'CB_faqseed000000001',
+      placement: 'HELP',
+      type: 'FAQ',
+      title: 'Delivery times',
+      sort: 1,
+      status: 'PUBLISHED',
+      version: 2,
+      payload: {
+        faqCategory: 'DELIVERY',
+        question: 'When do you deliver?',
+        answer: 'Evenings.\nSeven days a week.',
+      },
+    })
+    this.appConfig = {
+      storeOpen: true,
+      maintenance: false,
+      maintenanceMessage: null,
+      minAndroid: '1.0.0',
+      latestAndroid: '1.2.0',
+      minIos: null,
+      latestIos: null,
+      supportPhone: null,
+      supportEmail: null,
+      termsUrl: null,
+      privacyUrl: null,
+      refundPolicyUrl: null,
+      version: 0,
+    }
     this.media.set('product|TZP-REF-1', {
       version: 3,
       assets: [
@@ -458,6 +507,77 @@ export class FakeBackend {
       return json(503, {
         error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'internal detail: bucket none' },
       })
+    }
+    if (url.pathname === '/api/v1/admin/app-config') {
+      if (req.method === 'GET') return json(200, this.appConfig)
+      if (req.method === 'PUT') {
+        if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+        const b = JSON.parse(body) as Record<string, unknown> & {
+          expectedVersion: number
+          maintenance: boolean
+          maintenanceMessage: string | null
+        }
+        if (b.expectedVersion !== this.appConfig.version)
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        if (Object.values(b).some((v) => v === ''))
+          return json(422, {
+            error: { code: 'INVALID_CONTENT', message: 'empty string not allowed' },
+          })
+        const { expectedVersion, ...rest } = b
+        this.appConfig = { ...this.appConfig, ...rest, version: expectedVersion + 1 }
+        return json(200, this.appConfig)
+      }
+    }
+    if (url.pathname === '/api/v1/admin/content/blocks' && req.method === 'GET') {
+      const placement = url.searchParams.get('placement') ?? 'HOME'
+      const st = url.searchParams.get('status')
+      return json(200, {
+        items: [...this.blocks.values()].filter(
+          (x) => x.placement === placement && (!st || x.status === st),
+        ),
+      })
+    }
+    if (url.pathname === '/api/v1/admin/content/blocks' && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body) as Record<string, unknown>
+      const id = `CB_new${String(this.blocks.size).padStart(13, '0')}`
+      const created = { ...b, blockId: id, status: 'DRAFT', version: 1 }
+      this.blocks.set(id, created as never)
+      return json(201, created)
+    }
+    const blk = url.pathname.match(
+      /^\/api\/v1\/admin\/content\/blocks\/(CB_[A-Za-z0-9_-]+)(\/status)?$/,
+    )
+    if (blk) {
+      const cur = this.blocks.get(blk[1]!)
+      if (!cur) return json(404, { error: { code: 'NOT_FOUND' } })
+      if (req.method === 'GET') return json(200, cur)
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body) as Record<string, unknown> & {
+        expectedVersion: number
+        to?: string
+      }
+      if (b.expectedVersion !== cur.version) return json(409, { error: { code: 'STALE_VERSION' } })
+      if (cur.status === 'ARCHIVED') return json(409, { error: { code: 'STATE_CONFLICT' } })
+      if (req.method === 'POST' && blk[2]) {
+        if (b.to === cur.status) return json(409, { error: { code: 'STATE_CONFLICT' } })
+        const next = { ...cur, status: String(b.to), version: cur.version + 1 }
+        this.blocks.set(cur.blockId, next)
+        return json(200, next)
+      }
+      if (req.method === 'PUT') {
+        const { expectedVersion, ...rest } = b
+        const next = {
+          blockId: cur.blockId,
+          placement: cur.placement,
+          type: cur.type,
+          status: cur.status,
+          ...rest,
+          version: expectedVersion + 1,
+        }
+        this.blocks.set(cur.blockId, next as never)
+        return json(200, next)
+      }
     }
     const mediaM = url.pathname.match(/^\/api\/v1\/admin\/media\/(product|sku)\/([^/]+)$/)
     if (mediaM) {

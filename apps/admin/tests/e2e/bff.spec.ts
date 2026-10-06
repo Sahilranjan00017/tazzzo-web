@@ -728,3 +728,86 @@ test('media (mock backend): a reader sees the set read-only and no upload contro
   await expect(page.getByText('Read-only: changing media needs the cms-writer role')).toBeVisible()
   await expect(page.getByLabel('Image file')).toHaveCount(0)
 })
+
+test('FAQs (mock backend): create a draft, publish it with the delay disclosed, edit live content, unpublish', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/faqs')
+  await expect(page.getByText('When do you deliver?')).toBeVisible()
+  await expect(page.getByText('live', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('link', { name: 'New FAQ' }).click()
+  await page.getByLabel('Question', { exact: true }).fill('Do you deliver on Sundays?')
+  await page.getByRole('textbox', { name: 'Answer', exact: true }).fill('Yes, every day.')
+  await page.getByRole('button', { name: 'Review new FAQ' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/\/content\/faqs\/CB_/)
+  await expect(page.getByText('draft', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: 'Publish' }).click()
+  await expect(page.getByRole('dialog')).toContainText('emergency unpublish')
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click()
+  await expect(page.getByText('Published.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Unpublish' })).toBeVisible()
+
+  await page.getByRole('textbox', { name: 'Answer', exact: true }).fill('Yes, every single day.')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('dialog')).toContainText('changes what customers see')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('FAQ saved.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Unpublish' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Unpublish' }).click()
+  await expect(page.getByText('Unpublished.', { exact: true })).toBeVisible()
+  const writes = (await backendRequests(request)).filter(
+    (r) => r.method !== 'GET' && r.path.includes('/content/'),
+  )
+  expect(writes.map((w) => `${w.method} ${w.path.split('/').slice(-1)[0]}`)).toEqual([
+    'POST blocks',
+    'POST status',
+    'PUT ' + writes[2]!.path.split('/').slice(-1)[0],
+    'POST status',
+  ])
+  expect(writes.every((w) => w.sub === WRITER_SUB)).toBe(true)
+})
+
+test('FAQs (mock backend): a reader sees content read-only with inert text', async ({ page }) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/content/faqs/CB_faqseed000000001')
+  await expect(
+    page.getByText('Read-only: changing content needs the cms-writer role'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Publish' })).toHaveCount(0)
+})
+
+test('app config (mock backend): insecure links are blocked, first save sends nulls for blanks, closing the store is flagged', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/app-config')
+  await expect(page.getByText(/backend defaults/)).toBeVisible()
+  await page.getByLabel('Terms of service URL').fill('http://insecure.example')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.locator('.field-error')).toContainText('https://')
+  await page.getByLabel('Terms of service URL').fill('https://tazzzo.com/terms')
+  await page.getByLabel('Store open for orders').uncheck()
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('dialog')).toContainText('CLOSED for orders')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save configuration' }).click()
+  await expect(page.getByText('Configuration saved.')).toBeVisible()
+  const put = (await backendRequests(request)).filter(
+    (r) => r.method === 'PUT' && r.path.endsWith('/app-config'),
+  )
+  const body = JSON.parse((put[0] as unknown as { body: string }).body)
+  expect(body).toMatchObject({
+    storeOpen: false,
+    expectedVersion: 0,
+    termsUrl: 'https://tazzzo.com/terms',
+    supportEmail: null,
+  })
+  await expect(page.getByText('Store closed')).toBeVisible()
+})
