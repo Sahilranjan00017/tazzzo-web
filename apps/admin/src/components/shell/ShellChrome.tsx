@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { breadcrumbsFor, isActive, type NavSection } from '@/lib/nav'
 import { Breadcrumbs } from './Breadcrumbs'
 import { LogoutButton } from '@/components/LogoutButton'
+import { GotoBox } from './GotoBox'
 import { ToastProvider } from '@/components/ui/Toast'
 
 export interface ShellIdentity {
@@ -113,6 +114,7 @@ export function ShellChrome({
               ☰
             </button>
             <Breadcrumbs crumbs={breadcrumbsFor(pathname)} />
+            <GotoBox roles={identity.roles} />
             <div className="profile" ref={menuRef}>
               <button
                 type="button"

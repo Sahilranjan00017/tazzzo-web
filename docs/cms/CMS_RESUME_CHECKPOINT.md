@@ -120,3 +120,9 @@ Gates: eslint, tsc, 366 unit/component, 37 integration, 41 Playwright (mock) all
 (waits for the backend channel contract; see docs/cms/CMS_MULTICHANNEL_SCOPE_PROPOSAL.md, PR #7).
 Lesson: kill stray `playwright`/`next dev` processes before re-running E2E (a leftover run polluted the shared fake backend).
 Remaining: global search + polish, security review doc, release-readiness doc, visual QA with a browser, final report.
+
+## Update: RBAC matrix + go-to box (branch `cms/12b-rbac-search`, stacked on `cms/13-faq-config`)
+
+Access matrix on the account page, go-to-id box (`lib/goto.ts`, `/` shortcut), Imports nav now cms-writer only (matrix test found it),
+`useBffAction` disables all actions while a server refresh is pending (shared flag; fixed a stale-version race), ProductEditor moved onto it.
+Gates: eslint, tsc, 383 unit/component, 42 Playwright x2 (mock). Remaining: security review doc, visual QA (browser), release readiness, final report.

@@ -1,11 +1,13 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { useToast } from '@/components/ui/Toast'
-import { bffErrorMessage, callBff } from '@/lib/bff-client'
+import { useBffAction } from '@/components/useBffAction'
+import { bffErrorMessage, type BffResult } from '@/lib/bff-client'
 import { ACTIONS_BY_STATE, ACTION_COPY, type LifecycleAction } from '@/lib/products'
+
+const describe = (f: Extract<BffResult<unknown>, { ok: false }>) =>
+  bffErrorMessage(f, 'product change')
 
 /**
  * Title edit and lifecycle actions for one product. Mounted with `key={id:version}` by the page, so a refresh after a
@@ -19,10 +21,8 @@ export function ProductEditor({
   product: { id: string; title: string; lifecycle: string; version: number }
   canWrite: boolean
 }) {
-  const router = useRouter()
-  const { toast } = useToast()
+  const { run: bffRun, busy } = useBffAction(describe)
   const [title, setTitle] = useState(product.title)
-  const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<LifecycleAction>()
   const dirty = title.trim() !== product.title
 
@@ -35,23 +35,8 @@ export function ProductEditor({
 
   const base = `/api/bff/catalog/products/${encodeURIComponent(product.id)}`
 
-  async function run(path: string, method: 'PATCH' | 'POST', body: unknown, success: string) {
-    setBusy(true)
-    const result = await callBff(path, method, body)
-    setBusy(false)
-    if (result.ok) {
-      toast('success', success)
-    } else {
-      if (result.status === 401) {
-        router.replace('/login?error=expired')
-        router.refresh()
-        return
-      }
-      toast('error', bffErrorMessage(result, 'product change'))
-    }
-    // Success or conflict: re-read the authoritative product. Other failures keep the form as typed.
-    if (result.ok || result.status === 409 || result.status === 404) router.refresh()
-  }
+  const run = (path: string, method: 'PATCH' | 'POST', body: unknown, success: string) =>
+    bffRun(path, method, body, success)
 
   function saveTitle(event: FormEvent) {
     event.preventDefault()

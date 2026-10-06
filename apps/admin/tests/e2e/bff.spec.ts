@@ -811,3 +811,18 @@ test('app config (mock backend): insecure links are blocked, first save sends nu
   })
   await expect(page.getByText('Store closed')).toBeVisible()
 })
+
+test('go-to box and access matrix (mock backend)', async ({ page }) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/account')
+  await expect(page.getByRole('heading', { name: 'What each role can do' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: /cms-writer.*\(you\)/ })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Go to an id' }).fill('TZP-REF-1')
+  await page.getByRole('textbox', { name: 'Go to an id' }).press('Enter')
+  await expect(page).toHaveURL(/\/catalogue\/products\/TZP-REF-1$/)
+  await page.keyboard.press('/')
+  await expect(page.getByRole('textbox', { name: 'Go to an id' })).toBeFocused()
+  await page.getByRole('textbox', { name: 'Go to an id' }).fill('ORD_abcdef12')
+  await page.getByRole('textbox', { name: 'Go to an id' }).press('Enter')
+  await expect(page.locator('.goto-error')).toContainText('cannot open Orders')
+})
