@@ -28,5 +28,5 @@ export default async function DashboardPage() {
       </>
     )
   }
-  return <DashboardView result={await readDashboard()} />
+  return <DashboardView result={await readDashboard()} roles={roles} />
 }

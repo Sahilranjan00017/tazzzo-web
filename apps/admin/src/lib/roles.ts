@@ -46,3 +46,13 @@ export function describeRoles(roles: readonly string[]): RoleView[] {
 export function canWrite(roles: readonly string[]): boolean {
   return roles.includes('cms-writer')
 }
+
+/** Staff order transitions are order-ops only on the backend; support-agent can read orders. UX gate, never security. */
+export function canOperateOrders(roles: readonly string[]): boolean {
+  return roles.includes('order-ops')
+}
+
+/** Support replies/status/assignment are support-agent only on the backend; order-ops can read cases. */
+export function canWorkSupport(roles: readonly string[]): boolean {
+  return roles.includes('support-agent')
+}

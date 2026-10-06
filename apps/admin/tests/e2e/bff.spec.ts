@@ -5,7 +5,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test'
-import { READER_SUB, WRITER_SUB } from '../support/fake-backend'
+import { OPS_SUB, READER_SUB, SUPPORT_SUB, WRITER_SUB } from '../support/fake-backend'
 
 const BASE = `http://localhost:3988`
 const OIDC = () => process.env.E2E_OIDC_URL!
@@ -435,4 +435,66 @@ test('imports (mock backend): invalid local rows block the run until skipped; no
   await expect(
     page.getByRole('button', { name: 'Validate with the backend (dry run)' }),
   ).toBeEnabled()
+})
+
+test('orders (mock backend): order-ops lists, opens, advances and cancels with a required reason', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, OPS_SUB)
+  await page.goto('/orders')
+  await expect(page.getByRole('link', { name: 'O-100' })).toBeVisible()
+  await page.getByRole('link', { name: 'O-100' }).click()
+  await expect(page.getByRole('heading', { name: 'Order O-100' })).toBeVisible()
+  await expect(page.getByText('Basmati 5 kg')).toBeVisible()
+  expect(await page.content()).not.toContain('77.6')
+
+  await page.getByRole('button', { name: 'Mark out for delivery' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Mark out for delivery' }).click()
+  await expect(page.getByText('Order is out for delivery.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Mark delivered' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Cancel order' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('button', { name: 'Cancel order' })).toBeDisabled()
+  await dialog.getByLabel('Cancellation reason (required)').selectOption('CUSTOMER_UNREACHABLE')
+  await dialog.getByRole('button', { name: 'Cancel order' }).click()
+  await expect(page.getByText('Order cancelled.')).toBeVisible()
+  await expect(page.getByText(/final and has no further actions/)).toBeVisible()
+  await expect(page.getByText(/Customer unreachable/)).toBeVisible()
+
+  const writes = (await backendRequests(request)).filter((r) => r.method === 'POST')
+  expect(writes.map((w) => w.path)).toEqual([
+    '/api/v1/admin/orders/O-100/transition',
+    '/api/v1/admin/orders/O-100/transition',
+  ])
+  expect(writes.every((w) => w.sub === OPS_SUB)).toBe(true)
+})
+
+test('orders (mock backend): support-agent reads orders but cannot transition (UI hidden, backend 403)', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, SUPPORT_SUB)
+  await page.goto('/orders/O-100')
+  await expect(
+    page.getByText('Read-only: changing an order needs the order-ops role'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Cancel order' })).toHaveCount(0)
+  // Direct POST as support-agent is refused by the (mock) backend with 403 and stays signed in.
+  const r = await page.request.post('/api/bff/orders/O-100/transition', {
+    headers: { origin: BASE, 'x-tazzzo-csrf': '1', 'content-type': 'application/json' },
+    data: { to: 'OUT_FOR_DELIVERY', expectedVersion: 2 },
+  })
+  expect(r.status()).toBe(403)
+  await request.post(`${BACKEND()}/__control/reset`)
+})
+
+test('orders (mock backend): a general role is refused by the backend and sees a permission state', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/orders')
+  await expect(page.locator('.panel-error')).toContainText('Not permitted')
+  await expect(page.getByRole('table')).toHaveCount(0)
 })

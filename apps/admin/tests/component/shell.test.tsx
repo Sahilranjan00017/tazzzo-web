@@ -26,7 +26,8 @@ describe('app shell', () => {
   it('filters the sidebar by role and disables unbuilt modules instead of linking to nowhere', () => {
     render(shell(['order-ops']))
     const nav = screen.getByRole('navigation', { name: 'Modules' })
-    expect(within(nav).getByText('Orders')).toHaveAttribute('aria-disabled', 'true')
+    expect(within(nav).getByRole('link', { name: 'Orders' })).toHaveAttribute('href', '/orders')
+    expect(within(nav).getByText('Support')).toHaveAttribute('aria-disabled', 'true')
     expect(within(nav).queryByText('Products')).toBeNull()
     expect(within(nav).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })

@@ -12,19 +12,21 @@ export type DashboardResult = Exclude<
 >
 
 function Metric({
+  roles,
   label,
   count,
   moduleId,
   tone,
   hint,
 }: {
+  roles: readonly string[]
   label: string
   count: BoundedCount
   moduleId?: string
   tone?: Tone
   hint?: string
 }) {
-  const href = moduleId ? moduleHref(moduleId) : undefined
+  const href = moduleId ? moduleHref(moduleId, roles) : undefined
   return (
     <div className="kpi">
       <p className="kpi-label">{label}</p>
@@ -83,7 +85,13 @@ function Distribution({
 }
 
 /** Presentational dashboard: every backend outcome has its own state; nothing is estimated or invented. */
-export function DashboardView({ result }: { result: DashboardResult }) {
+export function DashboardView({
+  result,
+  roles = [],
+}: {
+  result: DashboardResult
+  roles?: readonly string[]
+}) {
   const refresh = <RefreshButton />
   if (result.kind !== 'ok') return <Failure result={result} refresh={refresh} />
   const d = result.data
@@ -106,37 +114,64 @@ export function DashboardView({ result }: { result: DashboardResult }) {
 
       <h2 className="section-title">Orders</h2>
       <div className="kpi-grid">
-        <Metric label="Open: confirmed" count={d.orders.open_confirmed} moduleId="orders" />
         <Metric
+          roles={roles}
+          label="Open: confirmed"
+          count={d.orders.open_confirmed}
+          moduleId="orders"
+        />
+        <Metric
+          roles={roles}
           label="Open: out for delivery"
           count={d.orders.open_out_for_delivery}
           moduleId="orders"
         />
-        <Metric label={`Confirmed, last ${hours}h`} count={d.orders.last24h_confirmed} />
         <Metric
+          roles={roles}
+          label={`Confirmed, last ${hours}h`}
+          count={d.orders.last24h_confirmed}
+        />
+        <Metric
+          roles={roles}
           label={`Out for delivery, last ${hours}h`}
           count={d.orders.last24h_out_for_delivery}
         />
-        <Metric label={`Delivered, last ${hours}h`} count={d.orders.last24h_delivered} />
-        <Metric label={`Cancelled, last ${hours}h`} count={d.orders.last24h_cancelled} />
+        <Metric
+          roles={roles}
+          label={`Delivered, last ${hours}h`}
+          count={d.orders.last24h_delivered}
+        />
+        <Metric
+          roles={roles}
+          label={`Cancelled, last ${hours}h`}
+          count={d.orders.last24h_cancelled}
+        />
       </div>
 
       <h2 className="section-title">Catalogue and stock</h2>
       <div className="kpi-grid">
-        <Metric label="Products" count={d.catalog.products_total} moduleId="products" />
         <Metric
+          roles={roles}
+          label="Products"
+          count={d.catalog.products_total}
+          moduleId="products"
+        />
+        <Metric
+          roles={roles}
           label="Low-stock"
           count={d.inventory.low_stock}
           tone="warning"
           hint="Counts on-hand only; reserved stock is not subtracted."
         />
         <Metric
+          roles={roles}
           label="Out-of-stock"
           count={d.inventory.out_of_stock}
           tone="danger"
           hint="Counts on-hand only; reserved stock is not subtracted."
         />
         <Metric
+          roles={roles}
           label="Service areas"
           count={d.serviceability.service_areas_total}
           moduleId="service-areas"
@@ -160,14 +195,25 @@ export function DashboardView({ result }: { result: DashboardResult }) {
 
       <h2 className="section-title">Support and notifications</h2>
       <div className="kpi-grid">
-        <Metric label="Open cases" count={d.support.open} moduleId="support" />
-        <Metric label="In-progress cases" count={d.support.in_progress} moduleId="support" />
+        <Metric roles={roles} label="Open cases" count={d.support.open} moduleId="support" />
         <Metric
+          roles={roles}
+          label="In-progress cases"
+          count={d.support.in_progress}
+          moduleId="support"
+        />
+        <Metric
+          roles={roles}
           label="Pending notifications"
           count={d.notifications.pending}
           hint="No notification provider ships yet, so rows can stay pending."
         />
-        <Metric label="Failed notifications" count={d.notifications.failed} tone="danger" />
+        <Metric
+          roles={roles}
+          label="Failed notifications"
+          count={d.notifications.failed}
+          tone="danger"
+        />
       </div>
     </>
   )

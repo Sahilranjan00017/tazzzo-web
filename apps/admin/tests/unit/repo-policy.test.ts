@@ -89,6 +89,7 @@ describe('no fake or browser-held identity', () => {
         join('api', 'auth', 'google', 'start', 'route.ts'),
         join('api', 'auth', 'logout', 'route.ts'),
         join('api', 'bff', 'imports', '[kind]', 'route.ts'),
+        join('api', 'bff', 'orders', '[orderId]', 'transition', 'route.ts'),
         join('api', 'bff', 'inventory', '[skuId]', '[locationId]', '[action]', 'route.ts'),
         join('api', 'bff', 'inventory', '[skuId]', '[locationId]', 'route.ts'),
         join('api', 'bff', 'pricing', '[skuId]', 'route.ts'),
