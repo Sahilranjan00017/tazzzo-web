@@ -41,6 +41,20 @@ export class FakeBackend {
   }
   /** Forces a status (and optional body) for the dashboard summary, e.g. 503 to mimic a Mongo outage. */
   dashboardOverride?: { status: number; body?: unknown }
+  /** Taxonomy mock: id of the open release (writes need one), release statuses and nodes. */
+  openRelease?: string
+  readonly releases = new Map<string, string>()
+  readonly nodes = new Map<
+    string,
+    {
+      id: string
+      nodeType: string
+      name: string
+      parentId: string | null
+      status: string
+      version: number
+    }
+  >()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -69,6 +83,25 @@ export class FakeBackend {
     this.mutationOverride = undefined
     this.dashboardOverride = undefined
     this.requests.length = 0
+    this.openRelease = undefined
+    this.releases.clear()
+    this.nodes.clear()
+    this.nodes.set('TZS-000001', {
+      id: 'TZS-000001',
+      nodeType: 'super_category',
+      name: 'Staples',
+      parentId: null,
+      status: 'active',
+      version: 1,
+    })
+    this.nodes.set('TZC-000001', {
+      id: 'TZC-000001',
+      nodeType: 'category',
+      name: 'Rice',
+      parentId: 'TZS-000001',
+      status: 'active',
+      version: 2,
+    })
     this.products.clear()
     this.products.set('TZP-REF-1', {
       id: 'TZP-REF-1',
@@ -151,6 +184,64 @@ export class FakeBackend {
       })
     }
 
+    if (url.pathname.startsWith('/api/v1/taxonomy/')) {
+      const t = url.pathname.slice('/api/v1/taxonomy/'.length)
+      const nodeOut = (n: { id: string }) => ({ ...n, attributeSchemaId: null })
+      if (req.method === 'GET' && t === 'nodes') {
+        const parent = url.searchParams.get('parentId')
+        const type = url.searchParams.get('nodeType')
+        const items = [...this.nodes.values()].filter((n) =>
+          parent ? n.parentId === parent : n.nodeType === type,
+        )
+        return json(200, { items: items.map(nodeOut) })
+      }
+      const one = t.match(/^nodes\/([^/]+)(\/path|\/rename)?$/)
+      if (one) {
+        const n = this.nodes.get(decodeURIComponent(one[1]!))
+        if (!n) return json(404, { error: { code: 'NODE_NOT_FOUND' } })
+        if (req.method === 'GET' && !one[2]) return json(200, nodeOut(n))
+        if (req.method === 'GET' && one[2] === '/path')
+          return json(200, {
+            verticalId: n.id,
+            path: n.name,
+            nodes: [{ id: n.id, name: n.name, nodeType: n.nodeType }],
+          })
+        if (req.method === 'POST' && one[2] === '/rename') {
+          if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+          if (!this.openRelease) return json(409, { error: { code: 'NO_OPEN_RELEASE' } })
+          const b = JSON.parse(body) as { name: string; expectedVersion: number }
+          if (b.expectedVersion !== n.version)
+            return json(409, { error: { code: 'STALE_VERSION' } })
+          const next = { ...n, name: b.name, version: n.version + 1 }
+          this.nodes.set(n.id, next)
+          return json(200, nodeOut(next))
+        }
+      }
+      if (req.method === 'POST' && t === 'releases') {
+        if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+        if (this.openRelease) return json(409, { error: { code: 'RELEASE_ALREADY_OPEN' } })
+        const b = JSON.parse(body) as { releaseId: string }
+        this.openRelease = b.releaseId
+        this.releases.set(b.releaseId, 'publishing')
+        return json(201, { id: b.releaseId, version: null })
+      }
+      const rel = t.match(/^releases\/([^/]+)(\/publish)?$/)
+      if (rel) {
+        const id = decodeURIComponent(rel[1]!)
+        const status = this.releases.get(id)
+        if (req.method === 'GET')
+          return status
+            ? json(200, { id, status, basedOn: null })
+            : json(404, { error: { code: 'NOT_FOUND' } })
+        if (req.method === 'POST' && rel[2]) {
+          if (status !== 'publishing') return json(409, { error: { code: 'RELEASE_NOT_OPEN' } })
+          this.releases.set(id, 'active')
+          this.openRelease = undefined
+          return json(200, { id, version: null })
+        }
+      }
+      return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
+    }
     const full = (p: { id: string; title: string; version: number; lifecycle: string }) => ({
       ...p,
       productType: 'single',
