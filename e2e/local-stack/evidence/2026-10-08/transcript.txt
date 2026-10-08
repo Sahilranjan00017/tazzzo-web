@@ -1,0 +1,381 @@
+Local E2E-MEDIA transcript — run 174021 — 2026-10-08T17:40:21.483Z
+backend=http://localhost:8080 cdn=https://localhost:8443 storefront=http://localhost:3100 cms-origin=http://localhost:3000
+Tokens are local random values and are printed as [role]; presigned query strings are redacted.
+
+==================== SETUP: archive blocks left by earlier runs (admin API) so the home shows only this run ====================
+
+==================== TEST 1: upload target (CMS BFF media.upload-request equivalent) ====================
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":3697}
+  -> 201 {"assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"3697","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.059522Z","maxBytes":5242880}
+
+==================== TEST 2: browser-direct presigned PUT from the CMS origin -> object in versitygw ====================
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=3697
+  -> 200
+$ node lib/s3-admin.mjs head p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png
+  HEAD p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -> 200 content-type=image/png content-length=3697 etag="2e4cc0da11213ffb443cc7bb7f513292"
+
+==================== TEST 3: media set referencing the key (backend verifies the stored object) — CMS media.set equivalent ====================
+$ GET /api/v1/admin/media/product/TZP-90000101  [cms-writer]
+  -> 404 {"error":{"code":"NOT_FOUND","message":"no media set for this owner","request_id":"req_0168f8e458b1465b8380"}}
+$ PUT /api/v1/admin/media/product/TZP-90000101  [cms-writer]  {"assets":[{"assetId":"img-1f445b0e-9d79-48d1-96d5-64cf743c4619","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"altText":"Local E2E basmati pack","width":800,"height":800,"contentType":"image/png"}]}
+  -> 201 {"ownerType":"product","ownerId":"TZP-90000101","version":1,"active":true,"assets":[{"assetId":"img-1f445b0e-9d79-48d1-96d5-64cf743c4619","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"altText":"Local E2E basmati pack","width":800,"height":800,"contentType":"image/png","url":"https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png"}]}
+
+==================== TEST 4: readable through the CDN stand-in (signed S3 read, immutable caching) ====================
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "2e4cc0da11213ffb443cc7bb7f513292"
+  content-length: 3697
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:22 GMT
+  Date: Thu, 08 Oct 2026 17:40:22 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+$ curl -sS --cacert run/certs/cdn.crt -o run/cdn-get.png -w GET %{http_code} %{size_download} bytes
+ https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png
+  GET 200 3697 bytes
+  CDN body sha256 equals uploaded bytes: true
+$ GET /v1/products/TZP-90000101  [anonymous]
+  -> 200 {"skuId":"TZP-90000101","productId":"TZP-90000101","name":"Local E2E Basmati Rice 5 kg","brandCode":"BR","sellingPricePaise":24900,"mrpPaise":29900,"discountPercent":16,"discountAmountPaise":5000,"verticalId":"TZV-000001","sponsored":false,"stockState":"UNKNOWN","maxOrderQuantity":0,"minimumOrderQuantity":1,"buyable":false,"gallery":[{"url":"https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","order":0,"alt":"Local E2E basmati pack","width":800,"height":800}],"attributes":[],"resolvedReleaseId":"R1","requestId":"req_61bac27669fb461ebdc0"}
+
+==================== Write-once: re-PUT on the same presigned URL ====================
+$ PUT http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=3697
+  -> 412 <?xml version="1.0" encoding="UTF-8"?> <Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold.</Message><Condition>If-None-Match</Condition><RequestId>GEZCQFGT3K9QOC6I</RequestId><HostId>YqPpvB3OqWz4ylCJUikH0FxhXR5EWngI0kowTWtxNIjXvjaQ2Iqs7GFVmEW
+$ node lib/s3-admin.mjs head p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png
+  HEAD p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -> 200 content-type=image/png content-length=3697 etag="2e4cc0da11213ffb443cc7bb7f513292"
+
+==================== Invalid MIME (image/gif, text/plain) -> 422 ====================
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/gif","sizeBytes":100}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"unsupported contentType","request_id":"req_3b7f4ee8b442430d9ead"}}
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"text/plain","sizeBytes":100}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"unsupported contentType","request_id":"req_4825af1adb6040dfa808"}}
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/svg+xml","sizeBytes":100}
+  -> 422 {"error":{"code":"INVALID_CONTENT","message":"unsupported contentType","request_id":"req_eda2cd481d554e3c8a15"}}
+
+==================== Oversize (5 MiB + 1) -> 422; body larger than the signed Content-Length -> store 403 ====================
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":5242881}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"sizeBytes must be between 1 and 5242880","request_id":"req_cd0205b323be499ca62c"}}
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":83}
+  -> 201 {"assetKey":"p/product/TZP-90000101/264bfa9b-64cb-4736-bba6-24a4a8cbd231.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/264bfa9b-64cb-4736-bba6-24a4a8cbd231.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"83","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.509880Z","maxBytes":5242880}
+$ PUT http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/264bfa9b-64cb-4736-bba6-24a4a8cbd231.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1107
+  -> 403 <?xml version="1.0" encoding="UTF-8"?> <Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match the signature you provided. Check your key and signing method.</Message><AWSAccessKeyId>(redacted)</AWSAccessKeyId><StringToSign>AWS4-HMAC-SHA256&#xA;202
+
+==================== Non-image bytes under an image/png key: the store accepts (it does not sniff); the backend refuses to reference it -> 422 ====================
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":64}
+  -> 201 {"assetKey":"p/product/TZP-90000101/913795f6-7cd5-4b00-a6ca-7c824c1e76bd.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/913795f6-7cd5-4b00-a6ca-7c824c1e76bd.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"64","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.516267Z","maxBytes":5242880}
+$ PUT http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/913795f6-7cd5-4b00-a6ca-7c824c1e76bd.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=64
+  -> 200 
+$ PUT /api/v1/admin/media/product/TZP-90000101  [cms-writer]  {"assets":[{"assetId":"img-61e72210-36a5-422b-8bb9-498fac37dd96","assetKey":"p/product/TZP-90000101/913795f6-7cd5-4b00-a6ca-7c824c1e76bd.png","role":"PRIMARY","sortOrder":0,"contentType":"image/png"}],"expectedVersion":1}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"stored object is not an allowed image","request_id":"req_44f8f06ccce442ee877a"}}
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":64}
+  -> 201 {"assetKey":"c/home/e42151b2-3be8-4ae0-bc6d-97295f1a4674.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/e42151b2-3be8-4ae0-bc6d-97295f1a4674.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"64","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.530260Z","maxBytes":5242880}
+$ PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/e42151b2-3be8-4ae0-bc6d-97295f1a4674.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=64
+  -> 200 
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Bad bytes 174021","sort":900,"audience":"BOTH","payload":{"imageAssetKey":"c/home/e42151b2-3be8-4ae0-bc6d-97295f1a4674.png","link":"search:rice"}}
+  -> 422 {"error":{"code":"INVALID_CONTENT","message":"stored object is not an allowed image","request_id":"req_1f9067f424a240598de0"}}
+
+==================== Missing object (target issued, nothing uploaded) -> 422 ====================
+$ POST /api/v1/admin/media/uploads  [cms-writer]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":1234}
+  -> 201 {"assetKey":"p/product/TZP-90000101/0432976a-8c94-46b2-8b4c-d06b103b622c.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/0432976a-8c94-46b2-8b4c-d06b103b622c.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1234","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.548144Z","maxBytes":5242880}
+$ PUT /api/v1/admin/media/product/TZP-90000101  [cms-writer]  {"assets":[{"assetId":"img-49f1ad2b-afae-41fb-80d5-87b6ca47abbd","assetKey":"p/product/TZP-90000101/0432976a-8c94-46b2-8b4c-d06b103b622c.png","role":"PRIMARY","sortOrder":0,"contentType":"image/png"}],"expectedVersion":1}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"asset not found in storage: upload it first","request_id":"req_4c88a0407af445e8be09"}}
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1234}
+  -> 201 {"assetKey":"c/home/fd7267be-bd02-463e-8975-51a36ee973e5.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/fd7267be-bd02-463e-8975-51a36ee973e5.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1234","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:22.563749Z","maxBytes":5242880}
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Missing 174021","sort":900,"audience":"BOTH","payload":{"imageAssetKey":"c/home/fd7267be-bd02-463e-8975-51a36ee973e5.png","link":"search:rice"}}
+  -> 422 {"error":{"code":"INVALID_CONTENT","message":"asset not found in storage: upload it first","request_id":"req_4b5c4dd7f23e48dcaf30"}}
+
+==================== Another product's key -> 422 ====================
+$ GET /api/v1/admin/media/product/TZP-90000102  [cms-writer]
+  -> 404 {"error":{"code":"NOT_FOUND","message":"no media set for this owner","request_id":"req_ac4753a41c6c42219144"}}
+$ PUT /api/v1/admin/media/product/TZP-90000102  [cms-writer]  {"assets":[{"assetId":"img-4909ef45-85eb-440c-9d62-6112e9479a13","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"contentType":"image/png"}]}
+  -> 422 {"error":{"code":"INVALID_MEDIA","message":"asset key was not uploaded for this owner","request_id":"req_336ad00ca5d5401d92c6"}}
+
+==================== State after the rejections: the media set is unchanged ====================
+$ GET /api/v1/admin/media/product/TZP-90000101  [cms-writer]
+  -> 200 {"ownerType":"product","ownerId":"TZP-90000101","version":1,"active":true,"assets":[{"assetId":"img-1f445b0e-9d79-48d1-96d5-64cf743c4619","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"altText":"Local E2E basmati pack","width":800,"height":800,"contentType":"image/png","url":"https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png"}]}
+
+==================== Bucket CORS: preflight from the CMS origin allowed, from another origin refused ====================
+$ curl -sS -o /dev/null -D - -X OPTIONS http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -H Origin: http://localhost:3000 -H Access-Control-Request-Method: PUT -H Access-Control-Request-Headers: content-type,if-none-match
+  HTTP/1.1 200 OK
+  Server: VERSITYGW
+  Date: Thu, 08 Oct 2026 17:40:21 GMT
+  Content-Length: 0
+  X-Amz-Request-Id: 720PRXJCQ12P7P0M
+  X-Amz-Id-2: /21VSKOyCZ7l+oEG5x9q5hUQqxi56zjJvk9mGLL+PM3d4MlpAY33F44zmKoU444viaRsIIP1CTzVH/YZjmMhlPk=
+  Access-Control-Allow-Credentials: true
+  Access-Control-Allow-Headers: content-type, if-none-match
+  Access-Control-Max-Age: 600
+  Vary: Origin, Access-Control-Request-Headers, Access-Control-Request-Method
+  Access-Control-Allow-Origin: http://localhost:3000
+  Access-Control-Allow-Methods: PUT
+  Access-Control-Expose-Headers: ETag
+  x-amz-request-id: 720PRXJCQ12P7P0M
+  x-amz-id-2: /21VSKOyCZ7l+oEG5x9q5hUQqxi56zjJvk9mGLL+PM3d4MlpAY33F44zmKoU444viaRsIIP1CTzVH/YZjmMhlPk=
+  Connection: close
+$ curl -sS -o /dev/null -D - -X OPTIONS http://127.0.0.1:7070/tazzzo-media-local/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -H Origin: http://evil.localhost:4000 -H Access-Control-Request-Method: PUT -H Access-Control-Request-Headers: content-type,if-none-match
+  HTTP/1.1 403 Forbidden
+  Server: VERSITYGW
+  Date: Thu, 08 Oct 2026 17:40:21 GMT
+  Content-Type: application/xml
+  Content-Length: 534
+  X-Amz-Request-Id: 78COS1O4WVLHFLH5
+  X-Amz-Id-2: YgVfnuwMdsJjK/Zd4Vmxx1K/nAKHgEhUlcExTgW0MXV7yt/Ju1e8P9wV5L7Tp6dKto6G7XctqXdmVof6IIixFT4=
+  Connection: close
+
+==================== TEST 7: storefront PDP ====================
+  website PDP: new gallery observed after 20 s (storefront PDP cache 60 s + one stale serve)
+  website PDP /p/TZP-90000101: gallery main img src=https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png naturalWidth=800 (loaded through the CDN stand-in)
+  screenshot: screens/t07-website-pdp.png
+
+==================== TEST 5: app contract checkpoint (NOT on-device rendering) ====================
+$ scripts/app-jvm.sh t05-pdp
+  $ scripts/app-jvm.sh t05-pdp   (gradle exit 0)
+  junit: tests=1 failures=0 errors=0 skipped=0
+  == app JVM checkpoint 't05-pdp' backend=http://localhost:8080 cdn=https://localhost:8443
+  GET /v1/content/home?channel=app -> 0 blocks (after the app's own mapping)
+  GET /v1/products/TZP-90000101 -> 'Local E2E Basmati Rice 5 kg' gallery=[PRIMARY:https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png]
+  image https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -> Ready bytes=3697 magic=89 50 4e 47
+  == checkpoint 't05-pdp' PASSED
+
+==================== Banner images: content upload targets + browser PUT from the CMS origin ====================
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1966}
+  -> 201 {"assetKey":"c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1966","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:45.673503Z","maxBytes":5242880}
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1966
+  -> 200
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1966}
+  -> 201 {"assetKey":"c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1966","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:45.717165Z","maxBytes":5242880}
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1966
+  -> 200
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1966}
+  -> 201 {"assetKey":"c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1966","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:45.741467Z","maxBytes":5242880}
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1966
+  -> 200
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1955}
+  -> 201 {"assetKey":"c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1955","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:45:45.763925Z","maxBytes":5242880}
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1955
+  -> 200
+
+==================== Blocks (CMS content.home.create equivalent) then publish (content status equivalent) ====================
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"App-only banner 174021","sort":10,"audience":"APP_ONLY","payload":{"imageAssetKey":"c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101","altText":"App-only banner 174021 image"}}
+  -> 201 {"blockId":"CB_dk89WVgj3ItnDHxtDNnh","placement":"HOME","type":"BANNER","title":"App-only banner 174021","sort":10,"status":"DRAFT","effectiveStatus":"DRAFT","payload":{"imageAssetKey":"c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101","altText":"App-only banner 174021 image"},"audience":"APP_ONLY","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","version":1,"createdAt":"2026-10-08T17:40:45.793Z","updatedAt":"2026-10-08T17:40:45.793Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks/CB_dk89WVgj3ItnDHxtDNnh/status  [cms-writer]  {"to":"PUBLISHED","expectedVersion":1}
+  -> 200 {"blockId":"CB_dk89WVgj3ItnDHxtDNnh","placement":"HOME","type":"BANNER","title":"App-only banner 174021","sort":10,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"imageAssetKey":"c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101","altText":"App-only banner 174021 image"},"audience":"APP_ONLY","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","version":2,"createdAt":"2026-10-08T17:40:45.793Z","updatedAt":"2026-10-08T17:40:45.807Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Web-only banner 174021","sort":20,"audience":"WEB_ONLY","payload":{"imageAssetKey":"c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","altText":"Web-only banner 174021 image"}}
+  -> 201 {"blockId":"CB_75pbrdH2919Zw_PC9u7Q","placement":"HOME","type":"BANNER","title":"Web-only banner 174021","sort":20,"status":"DRAFT","effectiveStatus":"DRAFT","payload":{"imageAssetKey":"c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","altText":"Web-only banner 174021 image"},"audience":"WEB_ONLY","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","version":1,"createdAt":"2026-10-08T17:40:45.821Z","updatedAt":"2026-10-08T17:40:45.821Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks/CB_75pbrdH2919Zw_PC9u7Q/status  [cms-writer]  {"to":"PUBLISHED","expectedVersion":1}
+  -> 200 {"blockId":"CB_75pbrdH2919Zw_PC9u7Q","placement":"HOME","type":"BANNER","title":"Web-only banner 174021","sort":20,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"imageAssetKey":"c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","altText":"Web-only banner 174021 image"},"audience":"WEB_ONLY","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","version":2,"createdAt":"2026-10-08T17:40:45.821Z","updatedAt":"2026-10-08T17:40:45.829Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Both banner 174021","sort":30,"audience":"BOTH","payload":{"imageAssetKey":"c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","altText":"Both banner 174021 image"}}
+  -> 201 {"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","placement":"HOME","type":"BANNER","title":"Both banner 174021","sort":30,"status":"DRAFT","effectiveStatus":"DRAFT","payload":{"imageAssetKey":"c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","altText":"Both banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","version":1,"createdAt":"2026-10-08T17:40:45.840Z","updatedAt":"2026-10-08T17:40:45.840Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks/CB_rSgyeD5KFQfT3FIQKmqR/status  [cms-writer]  {"to":"PUBLISHED","expectedVersion":1}
+  -> 200 {"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","placement":"HOME","type":"BANNER","title":"Both banner 174021","sort":30,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"imageAssetKey":"c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","altText":"Both banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","version":2,"createdAt":"2026-10-08T17:40:45.840Z","updatedAt":"2026-10-08T17:40:45.846Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"PRODUCT_RAIL","title":"Weekly picks 174021","sort":40,"audience":"BOTH","payload":{"ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}}
+  -> 201 {"blockId":"CB_4dIwFnnozSbFkpUB155g","placement":"HOME","type":"PRODUCT_RAIL","title":"Weekly picks 174021","sort":40,"status":"DRAFT","effectiveStatus":"DRAFT","payload":{"ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},"audience":"BOTH","version":1,"createdAt":"2026-10-08T17:40:45.852Z","updatedAt":"2026-10-08T17:40:45.852Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks/CB_4dIwFnnozSbFkpUB155g/status  [cms-writer]  {"to":"PUBLISHED","expectedVersion":1}
+  -> 200 {"blockId":"CB_4dIwFnnozSbFkpUB155g","placement":"HOME","type":"PRODUCT_RAIL","title":"Weekly picks 174021","sort":40,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},"audience":"BOTH","version":2,"createdAt":"2026-10-08T17:40:45.852Z","updatedAt":"2026-10-08T17:40:45.861Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+
+==================== TEST 16 setup: a DRAFT banner (never published) ====================
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Draft banner 174021","sort":25,"audience":"BOTH","payload":{"imageAssetKey":"c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","link":"search:rice","altText":"Draft banner 174021 image"}}
+  -> 201 {"blockId":"CB_4mv-4QwU9Lo3VaFISWFu","placement":"HOME","type":"BANNER","title":"Draft banner 174021","sort":25,"status":"DRAFT","effectiveStatus":"DRAFT","payload":{"imageAssetKey":"c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","link":"search:rice","altText":"Draft banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","version":1,"createdAt":"2026-10-08T17:40:45.876Z","updatedAt":"2026-10-08T17:40:45.876Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+
+==================== TEST 8/9/10: public endpoint per channel (anonymous) ====================
+$ GET /v1/content/home?channel=app  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}],"requestId":"req_4d962e645f914bb38d56"}
+$ GET /v1/content/home?channel=web  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}],"requestId":"req_4ebf48db000543d19a99"}
+$ GET /v1/content/home  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}],"requestId":"req_fcedb68c57ff4e2380aa"}
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "b399dc31a18ada966acb385722b75a58"
+  content-length: 1966
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:45 GMT
+  Date: Thu, 08 Oct 2026 17:40:45 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "0b03241f3255b2193d25cc125b9cf8f5"
+  content-length: 1966
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:45 GMT
+  Date: Thu, 08 Oct 2026 17:40:45 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "93702bb4c9dfd11c886a4cdbea228c39"
+  content-length: 1966
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:45 GMT
+  Date: Thu, 08 Oct 2026 17:40:45 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "0b03241f3255b2193d25cc125b9cf8f5"
+  content-length: 1966
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:45 GMT
+  Date: Thu, 08 Oct 2026 17:40:45 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+
+==================== TEST 16: draft absent from both public channels, present in admin preview with drafts=true only ====================
+$ GET /api/v1/admin/content/preview/home?channel=web&drafts=true  [cms-writer]
+  -> 200 {"channel":"web","at":"2026-10-08T17:40:45.944535Z","includeDrafts":true,"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"WEB_ONLY"},{"blockId":"CB_4mv-4QwU9Lo3VaFISWFu","type":"BANNER","title":"Draft banner 174021","altText":"Draft banner 174021 image","imageUrl":"https://localhost:8443/c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","link":"search:rice","status":"DRAFT","effectiveStatus":"DRAFT","audience":"BOTH"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:ba
+$ GET /api/v1/admin/content/preview/home?channel=web&drafts=false  [cms-writer]
+  -> 200 {"channel":"web","at":"2026-10-08T17:40:45.951695Z","includeDrafts":false,"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"WEB_ONLY"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"BOTH"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"],"status":"PUBLISHED","effectiveStatus":"LIVE","audience":"BOTH"}]}
+$ GET /api/v1/admin/content/preview/home?channel=app&drafts=true  [cms-writer]
+  -> 200 {"channel":"app","at":"2026-10-08T17:40:45.954336Z","includeDrafts":true,"blocks":[{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"APP_ONLY"},{"blockId":"CB_4mv-4QwU9Lo3VaFISWFu","type":"BANNER","title":"Draft banner 174021","altText":"Draft banner 174021 image","imageUrl":"https://localhost:8443/c/home/5cd9ec45-e9b2-4ab8-9a8b-060aacf21698.png","link":"search:rice","status":"DRAFT","effectiveStatus":"DRAFT","audience":"BOTH"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:b
+
+==================== TEST 8/9/10 website: WEB-only + BOTH + rail shown, APP-only and DRAFT absent ====================
+  website: "web-only + both banners and the rail" observed after 61 s (storefront home cache is 60 s + one stale serve); DOM block order = ["CB_75pbrdH2919Zw_PC9u7Q","CB_rSgyeD5KFQfT3FIQKmqR","CB_4dIwFnnozSbFkpUB155g"]
+  website: APP-only (CB_dk89WVgj3ItnDHxtDNnh) absent: true; DRAFT (CB_4mv-4QwU9Lo3VaFISWFu) absent: true
+  screenshot: screens/t08-10-website-home.png
+
+==================== TEST 8/9/10 app: APP-only + BOTH + rail, WEB-only and DRAFT absent, banner images load ====================
+$ scripts/app-jvm.sh t08-10-audience
+  $ scripts/app-jvm.sh t08-10-audience   (gradle exit 0)
+  junit: tests=1 failures=0 errors=0 skipped=0
+  == app JVM checkpoint 't08-10-audience' backend=http://localhost:8080 cdn=https://localhost:8443
+  GET /v1/content/home?channel=app -> 3 blocks (after the app's own mapping)
+    [0] BANNER 'App-only banner 174021' image=https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png link=Product(productId=TZP-90000101)
+    [1] BANNER 'Both banner 174021' image=https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png link=Search(query=basmati)
+    [2] PRODUCT_RAIL 'Weekly picks 174021' ids=[TZP-90000101, TZP-90000102, TZP-90000103]
+  ASSERT order of [App-only banner 174021, Both banner 174021, Weekly picks 174021]: OK
+  ASSERT absent 'Web-only banner 174021': OK
+  ASSERT absent 'Draft banner 174021': OK
+  image https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png -> Ready bytes=1966 magic=89 50 4e 47
+  image https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png -> Ready bytes=1966 magic=89 50 4e 47
+  == checkpoint 't08-10-audience' PASSED
+
+==================== TEST 11a: BOTH banner with startsAt = now + 150 s, published ====================
+$ POST /api/v1/admin/content/uploads  [cms-writer]  {"contentType":"image/png","sizeBytes":1966}
+  -> 201 {"assetKey":"c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","method":"PUT","url":"http://127.0.0.1:7070/tazzzo-media-local/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png?X-Amz-…(presigned query redacted)","headers":{"Content-Length":"1966","Content-Type":"image/png","If-None-Match":"*"},"expiresAt":"2026-10-08T17:46:49.128882Z","maxBytes":5242880}
+$ [browser @ http://localhost:3000] XHR PUT http://127.0.0.1:7070/tazzzo-media-local/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png?X-Amz-…(presigned query redacted)  headers={"Content-Type":"image/png","If-None-Match":"*"} bytes=1966
+  -> 200
+$ POST /api/v1/admin/content/blocks  [cms-writer]  {"placement":"HOME","type":"BANNER","title":"Scheduled banner 174021","sort":35,"audience":"BOTH","payload":{"imageAssetKey":"c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati","altText":"Scheduled banner 174021 image"},"startsAt":"2026-10-08T17:44:19Z"}
+  -> 201 {"blockId":"CB_q7TLjrxtaobN5B-u8g0I","placement":"HOME","type":"BANNER","title":"Scheduled banner 174021","sort":35,"status":"DRAFT","effectiveStatus":"DRAFT","startsAt":"2026-10-08T17:44:19Z","payload":{"imageAssetKey":"c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati","altText":"Scheduled banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","version":1,"createdAt":"2026-10-08T17:41:49.170Z","updatedAt":"2026-10-08T17:41:49.170Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ POST /api/v1/admin/content/blocks/CB_q7TLjrxtaobN5B-u8g0I/status  [cms-writer]  {"to":"PUBLISHED","expectedVersion":1}
+  -> 200 {"blockId":"CB_q7TLjrxtaobN5B-u8g0I","placement":"HOME","type":"BANNER","title":"Scheduled banner 174021","sort":35,"status":"PUBLISHED","effectiveStatus":"SCHEDULED","startsAt":"2026-10-08T17:44:19Z","payload":{"imageAssetKey":"c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati","altText":"Scheduled banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","version":2,"createdAt":"2026-10-08T17:41:49.170Z","updatedAt":"2026-10-08T17:41:49.180Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ GET /v1/content/home?channel=app  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}],"requestId":"req_1dfbe1802e4a47b78377"}
+$ GET /v1/content/home?channel=web  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]}],"requestId":"req_0ee66d3244df48318cf1"}
+$ GET /api/v1/admin/content/preview/home?channel=web&drafts=false&at=2026-10-08T17%3A44%3A20.000Z  [cms-writer]
+  -> 200 {"channel":"web","at":"2026-10-08T17:44:20Z","includeDrafts":false,"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"WEB_ONLY"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"BOTH"},{"blockId":"CB_q7TLjrxtaobN5B-u8g0I","type":"BANNER","title":"Scheduled banner 174021","altText":"Scheduled banner 174021 image","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"s
+$ GET /api/v1/admin/content/preview/home?channel=web&drafts=false  [cms-writer]
+  -> 200 {"channel":"web","at":"2026-10-08T17:41:49.194659Z","includeDrafts":false,"blocks":[{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"WEB_ONLY"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati","status":"PUBLISHED","effectiveStatus":"LIVE","audience":"BOTH"},{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"],"status":"PUBLISHED","effectiveStatus":"LIVE","audience":"BOTH"}]}
+
+==================== TEST 13: reorder (every non-archived block, each with its version) — rail first ====================
+$ POST /api/v1/admin/content/blocks/reorder  [cms-writer]  {"placement":"HOME","order":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","expectedVersion":2},{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","expectedVersion":2},{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","expectedVersion":2},{"blockId":"CB_4mv-4QwU9Lo3VaFISWFu","expectedVersion":1},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","expectedVersion":2},{"blockId":"CB_q7TLjrxtaobN5B-u8g0I","expectedVersion":2}]}
+  -> 200 {"items":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","placement":"HOME","type":"PRODUCT_RAIL","title":"Weekly picks 174021","sort":10,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},"audience":"BOTH","version":3,"createdAt":"2026-10-08T17:40:45.852Z","updatedAt":"2026-10-08T17:41:49.255Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"},{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","placement":"HOME","type":"BANNER","title":"App-only banner 174021","sort":20,"status":"PUBLISHED","effectiveStatus":"LIVE","payload":{"imageAssetKey":"c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101","altText":"App-only banner 174021 image"},"audience":"APP_ONLY","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","version":3,"createdAt":"2026-10-08T17:40:45.793Z","updatedAt":"2026-1
+$ GET /v1/content/home?channel=web  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"}],"requestId":"req_fe878752000b4f069cef"}
+$ GET /v1/content/home?channel=app  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"}],"requestId":"req_b44625ae0e0c422883c3"}
+  website: "rail before the banners" observed after 61 s (storefront home cache is 60 s + one stale serve); DOM block order = ["CB_4dIwFnnozSbFkpUB155g","CB_75pbrdH2919Zw_PC9u7Q","CB_rSgyeD5KFQfT3FIQKmqR"]
+  screenshot: screens/t13-website-reordered.png
+$ scripts/app-jvm.sh t13-reorder
+  $ scripts/app-jvm.sh t13-reorder   (gradle exit 0)
+  junit: tests=1 failures=0 errors=0 skipped=0
+  == app JVM checkpoint 't13-reorder' backend=http://localhost:8080 cdn=https://localhost:8443
+  GET /v1/content/home?channel=app -> 3 blocks (after the app's own mapping)
+    [0] PRODUCT_RAIL 'Weekly picks 174021' ids=[TZP-90000101, TZP-90000102, TZP-90000103]
+    [1] BANNER 'App-only banner 174021' image=https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png link=Product(productId=TZP-90000101)
+    [2] BANNER 'Both banner 174021' image=https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png link=Search(query=basmati)
+  ASSERT order of [Weekly picks 174021, App-only banner 174021, Both banner 174021]: OK
+  image https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png -> Ready bytes=1966 magic=89 50 4e 47
+  image https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png -> Ready bytes=1966 magic=89 50 4e 47
+  == checkpoint 't13-reorder' PASSED
+
+==================== TEST 15: reader token on every mutation route ====================
+$ GET /api/v1/admin/media/product/TZP-90000101  [reader]
+  -> 200 {"ownerType":"product","ownerId":"TZP-90000101","version":1,"active":true,"assets":[{"assetId":"img-1f445b0e-9d79-48d1-96d5-64cf743c4619","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"altText":"Local E2E basmati pack","width":800,"height":800,"contentType":"image/png","url":"https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png"}]}
+$ POST /api/v1/admin/content/blocks  [reader]  {"placement":"HOME","type":"BANNER","title":"Reader 174021","sort":1,"audience":"BOTH","payload":{"imageAssetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","link":"search:x"}}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_355599746f8a4f17ab3f","message":"role may not perform writes here"}}
+$ POST /api/v1/admin/content/blocks/CB_rSgyeD5KFQfT3FIQKmqR/status  [reader]  {"to":"ARCHIVED","expectedVersion":2}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_e9eb617dab5c41f0a01b","message":"role may not perform writes here"}}
+$ POST /api/v1/admin/content/blocks/reorder  [reader]  {"placement":"HOME","order":[{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","expectedVersion":1}]}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_057fb9636b03423b96a9","message":"role may not perform writes here"}}
+$ POST /api/v1/admin/content/uploads  [reader]  {"contentType":"image/png","sizeBytes":100}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_818fb77966f84db28371","message":"role may not perform writes here"}}
+$ POST /api/v1/admin/media/uploads  [reader]  {"ownerType":"product","ownerId":"TZP-90000101","contentType":"image/png","sizeBytes":100}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_b1aaaba7bf20442c92cd","message":"role may not perform writes here"}}
+$ PUT /api/v1/admin/media/product/TZP-90000101  [reader]  {"assets":[],"expectedVersion":1}
+  -> 403 {"error":{"code":"FORBIDDEN","request_id":"req_00dade4345c74aae9616","message":"role may not perform writes here"}}
+$ GET /api/v1/admin/media/product/TZP-90000101  [reader]
+  -> 200 {"ownerType":"product","ownerId":"TZP-90000101","version":1,"active":true,"assets":[{"assetId":"img-1f445b0e-9d79-48d1-96d5-64cf743c4619","assetKey":"p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png","role":"PRIMARY","sortOrder":0,"altText":"Local E2E basmati pack","width":800,"height":800,"contentType":"image/png","url":"https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png"}]}
+  blocks (id, version, status, sort) identical before/after: true; media set version 1 -> 1
+$ POST /api/v1/admin/content/blocks  [anonymous]  {}
+  -> 401 {"error":{"code":"UNAUTHENTICATED","request_id":"req_e932e48efa544d1b9729","message":"missing or unknown bearer token"}}
+
+==================== TEST 14: stop the CDN stand-in ====================
+$ scripts/cdn.sh stop
+  cdn stopped (pid 53209)
+$ scripts/cdn.sh status
+  cdn DOWN (https://localhost:8443)
+  website home: HTTP 200, rail rendered, banner CB_75pbrdH2919Zw_PC9u7Q shows data-testid=image-fallback (aria-label="Web-only banner 174021 image")
+  screenshot: screens/t14-website-home-cdn-down.png
+  website PDP: HTTP 200, title rendered, gallery shows data-testid=image-fallback
+  screenshot: screens/t14-website-pdp-cdn-down.png
+$ scripts/app-jvm.sh t14-cdn-down
+  $ scripts/app-jvm.sh t14-cdn-down   (gradle exit 0)
+  junit: tests=1 failures=0 errors=0 skipped=0
+  == app JVM checkpoint 't14-cdn-down' backend=http://localhost:8080 cdn=https://localhost:8443
+  GET /v1/content/home?channel=app -> 3 blocks (after the app's own mapping)
+    [0] PRODUCT_RAIL 'Weekly picks 174021' ids=[TZP-90000101, TZP-90000102, TZP-90000103]
+    [1] BANNER 'App-only banner 174021' image=https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png link=Product(productId=TZP-90000101)
+    [2] BANNER 'Both banner 174021' image=https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png link=Search(query=basmati)
+  ASSERT order of [Weekly picks 174021, App-only banner 174021, Both banner 174021]: OK
+  GET /v1/products/TZP-90000101 -> 'Local E2E Basmati Rice 5 kg' gallery=[PRIMARY:https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png]
+  image https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png -> Unavailable (placeholder)
+  image https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png -> Unavailable (placeholder)
+  image https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png -> Unavailable (placeholder)
+  == checkpoint 't14-cdn-down' PASSED
+
+==================== TEST 14: restart the CDN stand-in ====================
+$ scripts/cdn.sh start
+  cdn started (pid 53713, log run/logs/cdn.log)
+$ scripts/cdn.sh status
+  cdn UP (https://localhost:8443)
+$ curl -sS -I --max-time 5 --cacert run/certs/cdn.crt https://localhost:8443/p/product/TZP-90000101/391b8b63-2258-4357-b3a4-f548224186df.png
+  HTTP/1.1 200 OK
+  content-type: image/png
+  cache-control: public, max-age=31536000, immutable
+  etag: "2e4cc0da11213ffb443cc7bb7f513292"
+  content-length: 3697
+  x-content-type-options: nosniff
+  last-modified: Thu, 08 Oct 2026 17:40:22 GMT
+  Date: Thu, 08 Oct 2026 17:42:55 GMT
+  Connection: keep-alive
+  Keep-Alive: timeout=5
+
+==================== TEST 11b: wait for startsAt ====================
+  startsAt=2026-10-08T17:44:19Z; waiting 85 s
+$ GET /v1/content/home?channel=web  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_q7TLjrxtaobN5B-u8g0I","type":"BANNER","title":"Scheduled banner 174021","altText":"Scheduled banner 174021 image","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati"}],"requestId":"req_5b5851ee181940f880a9"
+$ GET /v1/content/home?channel=app  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"},{"blockId":"CB_q7TLjrxtaobN5B-u8g0I","type":"BANNER","title":"Scheduled banner 174021","altText":"Scheduled banner 174021 image","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati"}],"requestId":"req_aca96bd7bd1741d4b6ab
+  website: "scheduled banner live" observed after 5 s (storefront home cache is 60 s + one stale serve); DOM block order = ["CB_4dIwFnnozSbFkpUB155g","CB_75pbrdH2919Zw_PC9u7Q","CB_rSgyeD5KFQfT3FIQKmqR","CB_q7TLjrxtaobN5B-u8g0I"]
+  screenshot: screens/t11-website-scheduled-live.png
+
+==================== TEST 12: scheduled (now live) banner -> DRAFT ====================
+$ POST /api/v1/admin/content/blocks/CB_q7TLjrxtaobN5B-u8g0I/status  [cms-writer]  {"to":"DRAFT","expectedVersion":3}
+  -> 200 {"blockId":"CB_q7TLjrxtaobN5B-u8g0I","placement":"HOME","type":"BANNER","title":"Scheduled banner 174021","sort":60,"status":"DRAFT","effectiveStatus":"DRAFT","startsAt":"2026-10-08T17:44:19Z","payload":{"imageAssetKey":"c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","link":"search:basmati","altText":"Scheduled banner 174021 image"},"audience":"BOTH","imageUrl":"https://localhost:8443/c/home/25ff917a-975e-44c9-b3a9-e1a4edd8ff4e.png","version":4,"createdAt":"2026-10-08T17:41:49.170Z","updatedAt":"2026-10-08T17:44:25.914Z","createdBy":"service:cms-writer","updatedBy":"service:cms-writer"}
+$ GET /v1/content/home?channel=web  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_75pbrdH2919Zw_PC9u7Q","type":"BANNER","title":"Web-only banner 174021","altText":"Web-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/e3387c53-da3f-4279-b04d-12a4938333e6.png","link":"category:TZV-000001"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"}],"requestId":"req_e365730acabf4fc7aa5b"}
+$ GET /v1/content/home?channel=app  [anonymous]
+  -> 200 {"blocks":[{"blockId":"CB_4dIwFnnozSbFkpUB155g","type":"PRODUCT_RAIL","title":"Weekly picks 174021","ids":["TZP-90000101","TZP-90000102","TZP-90000103"]},{"blockId":"CB_dk89WVgj3ItnDHxtDNnh","type":"BANNER","title":"App-only banner 174021","altText":"App-only banner 174021 image","imageUrl":"https://localhost:8443/c/home/8d93f2fe-acc7-44e9-aed7-ac006067d676.png","link":"product:TZP-90000101"},{"blockId":"CB_rSgyeD5KFQfT3FIQKmqR","type":"BANNER","title":"Both banner 174021","altText":"Both banner 174021 image","imageUrl":"https://localhost:8443/c/home/e4a23248-3a5e-45f4-919e-6cd8fdb5fc75.png","link":"search:basmati"}],"requestId":"req_b2823e02f8bf47008343"}
+  website: "unpublished banner gone" observed after 61 s (storefront home cache is 60 s + one stale serve); DOM block order = ["CB_4dIwFnnozSbFkpUB155g","CB_75pbrdH2919Zw_PC9u7Q","CB_rSgyeD5KFQfT3FIQKmqR"]
+  screenshot: screens/t12-website-unpublished.png

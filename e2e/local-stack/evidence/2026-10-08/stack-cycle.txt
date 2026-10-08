@@ -1,0 +1,48 @@
+### down.sh
+backend stopped (pid 51525)
+cdn stopped (pid 51991)
+web stopped (pid 51617)
+removed containers: 3
+remaining harness containers: 0
+### harness containers after down: 0
+### up.sh
+== containers (label tazzzo-e2e-local)
+tazzzo-e2e-mongo started
+tazzzo-e2e-redis started
+tazzzo-e2e-s3 started
+== mongo replica set
+rs0 initiated
+== bucket + CORS (S3 API: CreateBucket, PutBucketCors)
+bucket tazzzo-media-local created
+cors set on tazzzo-media-local: PUT from http://localhost:3000, http://127.0.0.1:3000 with content-type, if-none-match
+== CDN stand-in certificate (self-signed, localhost + 127.0.0.1, 2 days)
+cdn started (pid 53209, log run/logs/cdn.log)
+== backend (java -jar, provider=s3 against versitygw, public-base-url=https://localhost:8443)
+backend started (pid 53233, log run/logs/backend.log)
+backend ready: {"status":"UP","components":{"datastore":"OPEN","mongo":"UP","rate_limiter":"UP"}}
+2026-10-08T23:10:14.667+05:30  INFO 53233 --- [tazzzo-catalog-service] [           main] com.tazzzo.media.MediaStorageConfig      : media_storage provider=s3 bucket=tazzzo-media-local region=us-east-1 endpoint=127.0.0.1 path_style=true credentials=static
+### listeners
+java 127.0.0.1:8080
+### seed.sh
+== taxonomy release R1
+create R1 -> 201
+publish R1 -> 200
+== products (direct insert, as AbstractConsumerIT.product)
+
+TZP-90000101 upserted=1 modified=0
+TZP-90000102 upserted=1 modified=0
+TZP-90000103 upserted=1 modified=0
+
+== prices (admin API)
+TZP-90000101 price -> 201
+TZP-90000102 price -> 201
+TZP-90000103 price -> 201
+== wait for the card projection (grid/rail cards)
+TZV-000001 list: 3 products
+GET /v1/products/TZP-90000101 -> 200
+GET /v1/products/TZP-90000102 -> 200
+GET /v1/products/TZP-90000103 -> 200
+### web.sh
+web started (pid 53321, log run/logs/web.log)
+storefront (prod) up at http://localhost:3100
+### journeys.sh
