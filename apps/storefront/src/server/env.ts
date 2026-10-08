@@ -1,6 +1,6 @@
 import 'server-only'
 import { z } from 'zod'
-import { parseMediaBase, type MediaBase } from '@/lib/media-base'
+import { isLoopbackHost, parseMediaBase, type MediaBase } from '@/lib/media-base'
 
 /**
  * Server environment, validated at first use and cached. The storefront holds no secrets: the public `/v1` API needs
@@ -18,7 +18,10 @@ const absoluteHttpUrl = z
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']),
-    /** Base of the public Tazzzo API (`/v1/**` is appended), e.g. https://api.tazzzo.com. */
+    /**
+     * Base of the public Tazzzo API (`/v1/**` is appended), e.g. https://api.tazzzo.com. https in production; plain
+     * http only for a loopback host (a sidecar, or a local production-mode run) or outside production.
+     */
     TAZZZO_API_BASE_URL: absoluteHttpUrl,
     /** Public origin of this website, for canonical and Open Graph URLs. */
     TAZZZO_SITE_URL: absoluteHttpUrl.refine(
@@ -38,6 +41,18 @@ const serverEnvSchema = z
         code: 'custom',
         path: ['TAZZZO_MEDIA_BASE_URL'],
         message: 'must be an https base URL (http only for loopback outside production)',
+      })
+    }
+    const api = new URL(env.TAZZZO_API_BASE_URL)
+    if (
+      env.NODE_ENV === 'production' &&
+      api.protocol !== 'https:' &&
+      !isLoopbackHost(api.hostname)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TAZZZO_API_BASE_URL'],
+        message: 'must be https in production (http only for a loopback host)',
       })
     }
     if (env.NODE_ENV === 'production' && new URL(env.TAZZZO_SITE_URL).protocol !== 'https:') {

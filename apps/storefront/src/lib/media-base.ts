@@ -14,6 +14,11 @@ export interface MediaBase {
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
 
+/** True for a URL hostname that can only mean this machine. */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK.has(hostname)
+}
+
 export function parseMediaBase(
   value: string | undefined,
   nodeEnv: string | undefined,
