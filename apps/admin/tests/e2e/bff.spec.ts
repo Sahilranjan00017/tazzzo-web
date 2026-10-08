@@ -1035,6 +1035,11 @@ test('home content (mock backend): create banner -> upload -> publish -> reorder
   await page.getByRole('button', { name: 'Show preview' }).click()
   await expect(items).toHaveCount(2)
   await expect(page.locator('[data-view="web-desktop"]')).toBeVisible()
+  // Neither banner has a desktop image, so the storefront keeps the carousel at 16:9 on desktop too.
+  await expect(page.locator('[data-view="web-desktop"] [data-crop]').first()).toHaveAttribute(
+    'data-crop',
+    'web-16x9',
+  )
   // Preview at a future time (IST): the scheduled grid appears for the website.
   await page.getByLabel('Preview at (IST, UTC+05:30)').fill('2099-01-02T10:00')
   await page.getByRole('button', { name: 'Show preview' }).click()
@@ -1087,4 +1092,35 @@ test('home content (mock backend): a concurrent edit gives a conflict that keeps
   await page.getByRole('button', { name: 'Reload latest version' }).click()
   await expect(page.getByLabel(/^Title/)).toHaveValue('Mango season')
   await expect(page.getByText(/version 3/)).toBeVisible()
+})
+
+test('home content (mock backend): reorder stays complete when 200+ archived blocks fill the capped list; duplicates refuse FAQs', async ({
+  page,
+  request,
+}) => {
+  await control(request, 'seed-archived', { count: 200 })
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/home')
+  await expect(page.getByText(/Showing the first 200 archived blocks/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('row', { name: /Mango season/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Reorder' }).click()
+  await page.getByRole('button', { name: 'Move Bestsellers up' }).click()
+  await page.getByRole('button', { name: 'Save order' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save order' }).click()
+  await expect(page.getByText('Order saved.')).toBeVisible({ timeout: 30_000 })
+  const reorder = (await backendRequests(request)).find((r) => r.path.endsWith('/reorder'))!
+  const order = JSON.parse((reorder as unknown as { body: string }).body).order as {
+    blockId: string
+  }[]
+  expect(order.map((o) => o.blockId)).toEqual([
+    'CB_homerail00000001',
+    'CB_homebanner000001',
+    'CB_homegrid00000001',
+  ])
+
+  await page.goto('/content/home/new?from=CB_faqseed000000001')
+  await expect(page.getByRole('heading', { name: 'Cannot duplicate here' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review new draft' })).toHaveCount(0)
 })

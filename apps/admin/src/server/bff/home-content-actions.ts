@@ -11,7 +11,12 @@ import {
 } from '@/lib/home-content'
 import type { UploadTarget } from '@/lib/upload'
 import type { BffMutationSpec } from './mutation'
-import { toUploadTarget, uploadOriginPrecondition, uploadTargetOut } from './upload-target'
+import {
+  sizeLimitDetail,
+  toUploadTarget,
+  uploadOriginPrecondition,
+  uploadTargetOut,
+} from './upload-target'
 
 const blockOut = z.object({ blockId: z.string(), status: z.string(), version: z.number().int() })
 type BlockOut = z.infer<typeof blockOut>
@@ -27,6 +32,7 @@ export const createHomeBlockMutation: BffMutationSpec<HomeWrite, BlockOut, Block
   backend: (v) => ({ path: '/api/v1/admin/content/blocks', body: { placement: 'HOME', ...v } }),
   output: blockOut,
   toClient: (o) => o,
+  errorDetail: sizeLimitDetail,
 }
 
 /**
@@ -44,6 +50,7 @@ export const updateHomeBlockMutation: BffMutationSpec<HomeUpdate, BlockOut, Bloc
   }),
   output: blockOut,
   toClient: (o) => o,
+  errorDetail: sizeLimitDetail,
 }
 
 const reorderOut = z.object({ items: z.array(z.object({ blockId: z.string() })) })
@@ -84,4 +91,5 @@ export const requestContentUploadMutation: BffMutationSpec<
   output: uploadTargetOut,
   toClient: toUploadTarget,
   precondition: uploadOriginPrecondition,
+  errorDetail: sizeLimitDetail,
 }

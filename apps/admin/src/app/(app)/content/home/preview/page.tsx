@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { HomePreviewView } from '@/components/home/HomePreviewView'
 import { parsePreviewQuery } from '@/lib/home-content'
-import { readHomeBlocks, readHomePreview } from '@/server/backend/home-content'
+import { readHomeBlocksComplete, readHomePreview } from '@/server/backend/home-content'
 import { requireAdmin } from '@/server/session/require-session'
 
 export const metadata: Metadata = { title: 'Home preview · Tazzzo Admin' }
@@ -14,7 +14,7 @@ export default async function HomePreviewPage({
 }) {
   await requireAdmin()
   const q = parsePreviewQuery(await searchParams)
-  const [result, list] = await Promise.all([readHomePreview(q), readHomeBlocks()])
+  const [result, list] = await Promise.all([readHomePreview(q), readHomeBlocksComplete()])
   return (
     <HomePreviewView
       q={q}

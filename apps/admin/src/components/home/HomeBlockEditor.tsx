@@ -26,9 +26,11 @@ import {
   linkIssue,
   linkOf,
   parseLink,
+  scheduleInstant,
   splitIds,
   titleIssue,
   type Audience,
+  type BannerCrop,
   type HomeBlock,
   type HomeType,
   type LinkKind,
@@ -134,15 +136,29 @@ export function HomeBlockEditor({
 
   const requestTarget = (contentType: string, sizeBytes: number) =>
     callBff('/api/bff/content/home/uploads', 'POST', { contentType, sizeBytes })
+  /** A local preview that nothing shows any more is released at once (not only on unmount). */
+  function release(url: string | undefined) {
+    const at = url ? previews.current.indexOf(url) : -1
+    if (!url || at < 0) return
+    previews.current.splice(at, 1)
+    if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+  }
   function onMobileUploaded(img: UploadedImage) {
     if (img.previewUrl) previews.current.push(img.previewUrl)
+    release(image?.url)
     setDirty(true)
     setImage({ key: img.assetKey, url: img.previewUrl })
   }
   function onDesktopUploaded(img: UploadedImage) {
     if (img.previewUrl) previews.current.push(img.previewUrl)
+    release(desktop?.url)
     setDirty(true)
     setDesktop({ key: img.assetKey, url: img.previewUrl })
+  }
+  function removeDesktop() {
+    release(desktop?.url)
+    setDirty(true)
+    setDesktop(undefined)
   }
 
   function review(e: FormEvent) {
@@ -153,8 +169,8 @@ export function HomeBlockEditor({
     if (ti) msgs.push(TEXT_COPY[ti]('Title', MAX_TITLE))
     const sortN = /^\d{1,5}$/.test(sort.trim()) ? Number(sort.trim()) : Number.NaN
     if (!(sortN >= 0 && sortN <= 10_000)) msgs.push('Order must be a whole number from 0 to 10000.')
-    const from = starts ? windowToUtc(starts) : undefined
-    const to = ends ? windowToUtc(ends) : undefined
+    const from = scheduleInstant(starts, src?.startsAt, windowToUtc, utcToIstLocal)
+    const to = scheduleInstant(ends, src?.endsAt, windowToUtc, utcToIstLocal)
     if (starts && !from) msgs.push('The start time is not valid.')
     if (ends && !to) msgs.push('The end time is not valid.')
     if (from && to && Date.parse(from) >= Date.parse(to))
@@ -256,11 +272,18 @@ export function HomeBlockEditor({
               <div className="banner-images">
                 <div className="stack">
                   <h3>Mobile image (app and mobile website)</h3>
-                  <BannerFrame image={image} ratio="app" label="Mobile image" />
+                  <p className="muted">App, 528:178 (about 3:1)</p>
+                  <BannerFrame image={image} crop="app" label="Mobile image in the app" />
+                  <p className="muted">Website below 768 px wide, 16:9</p>
+                  <BannerFrame
+                    image={image}
+                    crop="web-16x9"
+                    label="Mobile image on the mobile website"
+                  />
                   {!disabled ? (
                     <ImageUploadField
                       label={image ? 'Replace mobile image' : 'Mobile image'}
-                      hint="Required. JPEG, PNG or WebP. Shown cropped to about 3:1 in the app."
+                      hint="Required. JPEG, PNG or WebP. Cropped to 528:178 (about 3:1) in the app and to 16:9 on the mobile website; keep the subject centred."
                       requestTarget={requestTarget}
                       describe={homeErrorMessage}
                       onUploaded={onMobileUploaded}
@@ -270,26 +293,25 @@ export function HomeBlockEditor({
                 </div>
                 <div className="stack">
                   <h3>Desktop image (optional, website on desktop)</h3>
-                  <BannerFrame image={desktop ?? image} ratio="desktop" label="Desktop image" />
-                  {!desktop ? (
-                    <p className="muted">Without one, desktop shows the mobile image.</p>
-                  ) : null}
+                  <p className="muted">Website from 768 px wide, 3:1</p>
+                  <BannerFrame image={desktop ?? image} crop="web-3x1" label="Desktop image" />
+                  <p className="muted">
+                    {desktop
+                      ? 'Shown at 3:1 only when every banner in the same carousel (consecutive banners) has a desktop image; otherwise the carousel stays 16:9. Check the preview.'
+                      : 'Without one, the website shows the mobile image on desktop, and this banner’s carousel stays 16:9.'}
+                  </p>
                   {!disabled ? (
                     <>
                       <ImageUploadField
                         label={desktop ? 'Replace desktop image' : 'Desktop image'}
-                        hint="Optional wide image, shown cropped to about 4:1 on desktop."
+                        hint="Optional. Website from 768 px wide: 3:1, but only when every banner in the same carousel has a desktop image (otherwise 16:9)."
                         requestTarget={requestTarget}
                         describe={homeErrorMessage}
                         onUploaded={onDesktopUploaded}
                         createXhr={createXhr}
                       />
                       {desktop ? (
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => touch(setDesktop)(undefined)}
-                        >
+                        <button type="button" className="btn" onClick={removeDesktop}>
                           Remove desktop image
                         </button>
                       ) : null}
@@ -479,15 +501,15 @@ export function HomeBlockEditor({
 /** The banner image cropped to its channel's frame, or a neutral placeholder. */
 export function BannerFrame({
   image,
-  ratio,
+  crop,
   label,
 }: {
   image?: { url?: string }
-  ratio: 'app' | 'desktop'
+  crop: BannerCrop
   label: string
 }) {
   return (
-    <div className={`banner-frame banner-${ratio}`}>
+    <div className={`banner-frame banner-${crop}`} data-crop={crop}>
       {image?.url ? (
         // Plain <img>: next/image adds an inline style (blocked by the CSP) and needs remote-host config.
         // eslint-disable-next-line @next/next/no-img-element

@@ -191,6 +191,35 @@ describe('reorder', () => {
     await user.click(screen.getByRole('button', { name: 'Reload latest version' }))
     expect(refresh).toHaveBeenCalled()
   })
+  it('refuses to save an order when the list was refreshed mid-session, and can start again', async () => {
+    const user = userEvent.setup()
+    const f = vi.spyOn(globalThis, 'fetch')
+    const { rerender } = wrap(
+      <HomeBlockTable blocks={BLOCKS} canWrite nowMs={NOW} filtered={false} />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Reorder' }))
+    await user.click(screen.getByRole('button', { name: 'Move Bestsellers up' }))
+    const refreshed = BLOCKS.map((b) =>
+      b.blockId === 'CB_aaaaaaaaaaaaaaaa' ? { ...b, version: 3 } : b,
+    )
+    rerender(
+      <ToastProvider>
+        <HomeBlockTable blocks={refreshed} canWrite nowMs={NOW} filtered={false} />
+      </ToastProvider>,
+    )
+    expect(screen.getByText(/The list was refreshed while you were reordering/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save order' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Start again' }))
+    expect(screen.queryByText(/The list was refreshed/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Move Bestsellers up' }))
+    f.mockResolvedValue(ok({ count: 3 }))
+    await user.click(screen.getByRole('button', { name: 'Save order' }))
+    await user.click(confirmIn('Save order'))
+    expect(bodies(f, '/api/bff/content/home/reorder')[0].order[1]).toEqual({
+      blockId: 'CB_aaaaaaaaaaaaaaaa',
+      expectedVersion: 3,
+    })
+  })
   it('is not offered on a filtered (partial) list', () => {
     wrap(<HomeBlockTable blocks={BLOCKS} canWrite nowMs={NOW} filtered />)
     expect(screen.getByRole('button', { name: 'Reorder' })).toBeDisabled()
@@ -290,6 +319,23 @@ describe('banner editor', () => {
     expect(await screen.findByText(/This block changed since you loaded it/)).toBeInTheDocument()
     expect(screen.getByLabelText(/^Title/)).toHaveValue('Mango festival')
     expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('an untouched schedule keeps its exact instant (seconds are not truncated)', async () => {
+    const user = userEvent.setup()
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok({ version: 3 }))
+    const timed = block({
+      startsAt: '2026-10-09T03:30:42.123Z',
+      endsAt: '2026-10-10T03:30:15Z',
+    })
+    wrap(<HomeBlockEditor type="BANNER" block={timed} />)
+    await user.type(screen.getByLabelText(/^Subtitle/), 'Fresh')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await user.click(confirmIn('Save'))
+    expect(bodies(f, '/api/bff/content/home/blocks/CB_aaaaaaaaaaaaaaaa')[0]).toMatchObject({
+      startsAt: '2026-10-09T03:30:42.123Z',
+      endsAt: '2026-10-10T03:30:15Z',
+    })
   })
 
   it('a duplicate starts as a new draft with the same content', async () => {
@@ -437,16 +483,39 @@ describe('preview rendering per channel', () => {
     expect(frame).not.toHaveClass('browser-mobile')
     const img = within(frame).getByRole('img', { name: 'Mangoes' })
     expect(img).toHaveAttribute('src', 'https://cdn/d.png')
-    expect(img.parentElement).toHaveClass('banner-desktop')
+    expect(img.parentElement).toHaveClass('banner-web-3x1')
+  })
+  it('website desktop: a carousel where one banner lacks a desktop image stays 16:9 for every banner', () => {
+    const p = preview('web')
+    const second = {
+      ...p.blocks[0]!,
+      blockId: 'CB_eeeeeeeeeeeeeeee',
+      title: 'Monsoon',
+      altText: 'Rain',
+      desktopImageUrl: null,
+    }
+    render(
+      <PreviewFrame
+        view="web-desktop"
+        preview={{ ...p, blocks: [p.blocks[0]!, second] }}
+        windows={windows}
+      />,
+    )
+    const first = screen.getByRole('img', { name: 'Mangoes' })
+    expect(first).toHaveAttribute('src', 'https://cdn/d.png')
+    expect(first.parentElement).toHaveAttribute('data-crop', 'web-16x9')
+    const other = screen.getByRole('img', { name: 'Rain' })
+    expect(other).toHaveAttribute('src', 'https://cdn/m.png')
+    expect(other.parentElement).toHaveAttribute('data-crop', 'web-16x9')
+    expect(screen.getAllByText(/16:9 because not every banner in this carousel/)).toHaveLength(2)
   })
   it('website mobile: narrow browser frame and the mobile image', () => {
     render(<PreviewFrame view="web-mobile" preview={preview('web')} windows={windows} />)
     const frame = document.querySelector('[data-view="web-mobile"]') as HTMLElement
     expect(frame).toHaveClass('browser-mobile')
-    expect(within(frame).getByRole('img', { name: 'Mangoes' })).toHaveAttribute(
-      'src',
-      'https://cdn/m.png',
-    )
+    const img = within(frame).getByRole('img', { name: 'Mangoes' })
+    expect(img).toHaveAttribute('src', 'https://cdn/m.png')
+    expect(img.parentElement).toHaveAttribute('data-crop', 'web-16x9')
   })
   it('an empty Home says so', () => {
     render(

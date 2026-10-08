@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { HomeListView } from '@/components/home/HomeViews'
 import { AUDIENCES } from '@/lib/home-content'
 import { canWrite } from '@/lib/roles'
-import { readHomeBlocks } from '@/server/backend/home-content'
+import { readHomeBlocksComplete } from '@/server/backend/home-content'
 import { serverNow } from '@/server/clock'
 import { requireAdmin } from '@/server/session/require-session'
 
@@ -28,7 +28,7 @@ export default async function HomeContentPage({
   }
   return (
     <HomeListView
-      result={await readHomeBlocks(filter)}
+      result={await readHomeBlocksComplete(filter)}
       filter={filter}
       canWrite={canWrite(roles)}
       nowMs={serverNow()}

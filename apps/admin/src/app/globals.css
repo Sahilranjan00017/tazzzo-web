@@ -1017,13 +1017,16 @@ input[type='file'] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-/* App and mobile web: the app's CMS banner ratio (528:178), centre crop. */
+/* App: the app's CMS banner ratio (tazzzo-app RemoteHomeScreen, 528:178), centre crop. */
 .banner-app {
   aspect-ratio: 528 / 178;
 }
-/* Desktop web: provisional 4:1 until the website fixes its banner layout. */
-.banner-desktop {
-  aspect-ratio: 4 / 1;
+/* Website (storefront .banner__media): 16:9, and 3:1 on desktop only when every banner of a carousel has a desktop image. */
+.banner-web-16x9 {
+  aspect-ratio: 16 / 9;
+}
+.banner-web-3x1 {
+  aspect-ratio: 3 / 1;
 }
 .banner-frame img {
   position: absolute;

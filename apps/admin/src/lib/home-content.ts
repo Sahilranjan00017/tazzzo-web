@@ -6,6 +6,7 @@ import { bffErrorMessage } from './bff-client'
 import { BLOCK_ID } from './content'
 import { formatShortIst } from './format'
 import { UPLOAD_CODE_COPY } from './media'
+import { rememberMaxBytes, sizeLimitCopy, sizeLimitOf } from './upload'
 
 /**
  * HOME content blocks (backend #102, branch feature/content-banner-model head db3623c: `ContentAdminController`,
@@ -364,20 +365,53 @@ export const PREVIEW_VIEW_LABEL: Record<PreviewView, string> = {
 export const channelOf = (view: PreviewView): 'app' | 'web' => (view === 'app' ? 'app' : 'web')
 
 /**
- * Banner frames. App: the ratio the app renders CMS banners at (tazzzo-app `RemoteHomeScreen.HomeCmsBanner`, 528:178,
- * centre crop). Website: PROVISIONAL until the website's home layout fixes its banner sizes (separate workstream).
+ * Banner crops, matching what each client really renders:
+ * - App: tazzzo-app `RemoteHomeScreen.HomeCmsBanner`, the mobile image at 528:178, centre crop.
+ * - Website (storefront `BannerCarousel` + globals.css `.banner__media`, web/01-storefront @ 7ff5e3b): consecutive
+ *   banners form one carousel and share one ratio. Below 768 px: the mobile image at 16:9. From 768 px: 3:1 only when
+ *   EVERY banner of that carousel has a desktop image, otherwise the whole carousel stays 16:9; each banner still loads
+ *   its desktop image when it has one (`<source media="(min-width: 768px)">`), else its mobile image.
  */
-export const BANNER_ASPECT: Record<PreviewView, string> = {
+export type BannerCrop = 'app' | 'web-16x9' | 'web-3x1'
+export const BANNER_ASPECT: Record<BannerCrop, string> = {
   app: '528 / 178',
-  'web-mobile': '528 / 178',
-  'web-desktop': '4 / 1',
+  'web-16x9': '16 / 9',
+  'web-3x1': '3 / 1',
 }
-/** Which image a channel/device loads: the wide desktop image on desktop web when present, else the mobile image. */
-export const bannerImageFor = (
+export interface BannerLayout {
+  crop: BannerCrop
+  src?: string
+}
+
+/** Crop and image for every banner of a preview, per view (all-or-nothing desktop rule per carousel). */
+export function bannerLayouts(
   view: PreviewView,
-  b: Pick<PreviewBlock, 'imageUrl' | 'desktopImageUrl'>,
-): string | undefined =>
-  (view === 'web-desktop' ? (b.desktopImageUrl ?? b.imageUrl) : b.imageUrl) ?? undefined
+  blocks: Pick<PreviewBlock, 'blockId' | 'type' | 'imageUrl' | 'desktopImageUrl'>[],
+): Map<string, BannerLayout> {
+  const out = new Map<string, BannerLayout>()
+  let carousel: typeof blocks = []
+  const flush = () => {
+    const wide = carousel.every((b) => !!b.desktopImageUrl)
+    for (const b of carousel)
+      out.set(b.blockId, {
+        crop: wide ? 'web-3x1' : 'web-16x9',
+        src: (b.desktopImageUrl || b.imageUrl) ?? undefined,
+      })
+    carousel = []
+  }
+  for (const b of blocks) {
+    if (b.type !== 'BANNER') {
+      if (view === 'web-desktop') flush()
+      continue
+    }
+    if (view === 'app') out.set(b.blockId, { crop: 'app', src: b.imageUrl ?? undefined })
+    else if (view === 'web-mobile')
+      out.set(b.blockId, { crop: 'web-16x9', src: b.imageUrl ?? undefined })
+    else carousel.push(b)
+  }
+  if (view === 'web-desktop') flush()
+  return out
+}
 
 export interface PreviewQuery {
   view: PreviewView
@@ -417,9 +451,32 @@ const CODE_COPY: Record<string, string> = {
 }
 
 export function homeErrorMessage(result: Extract<BffResult<unknown>, { ok: false }>): string {
+  const limit = sizeLimitOf(result)
+  if (limit !== undefined) {
+    rememberMaxBytes(limit)
+    return sizeLimitCopy(limit)
+  }
   if (result.code && CODE_COPY[result.code]) return CODE_COPY[result.code]!
   if (result.status === 404) return 'This block no longer exists.'
   return bffErrorMessage(result, 'content change')
+}
+
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/
+
+/**
+ * The instant to send for a schedule field. A `datetime-local` box holds minutes only, so re-deriving an untouched field
+ * from it would silently drop the original seconds/milliseconds: when the IST wall time still equals the loaded value,
+ * the loaded instant is kept exactly; otherwise the typed IST time is converted.
+ */
+export function scheduleInstant(
+  local: string,
+  original: string | null | undefined,
+  toUtc: (local: string) => string | undefined,
+  toLocal: (iso: string | null | undefined) => string,
+): string | undefined {
+  if (!local) return undefined
+  if (original && INSTANT.test(original) && toLocal(original) === local) return original
+  return toUtc(local)
 }
 
 /** A block's schedule window in IST, e.g. `8 Oct 2026, 9:00 am → no end IST`. */

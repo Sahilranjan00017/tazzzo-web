@@ -51,6 +51,20 @@ export default async function NewHomeBlockPage({
         </p>
       </>
     )
+  if (
+    source?.kind === 'ok' &&
+    (source.data.placement !== 'HOME' ||
+      !(HOME_TYPES as readonly string[]).includes(source.data.type))
+  )
+    return (
+      <>
+        <PageHeader title="Cannot duplicate here" />
+        <p className="notice" role="alert">
+          {source.data.blockId} is a {source.data.type} on {source.data.placement}, not a Home
+          block, so it cannot be duplicated as Home content.
+        </p>
+      </>
+    )
   if (source && source.kind !== 'ok')
     return (
       <BackendFailure

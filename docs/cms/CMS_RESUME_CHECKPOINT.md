@@ -155,3 +155,14 @@ mobile) with preview-at (IST) and drafts toggle. 4 new BFF routes (`content/home
 status reuses `content/blocks/[id]/status`. ConfirmDialog now uses unique label ids (two dialogs on one page).
 Website banner ratios (desktop 4:1) are provisional until the website layout fixes them; the app ratio (528:178) comes from
 tazzzo-app `RemoteHomeScreen`.
+
+## Update 2026-10-08: review follow-ups on #21 / #22
+
+- #21: client size limit learned from the backend (`maxBytes` on targets, `{reason:'size', maxBytes}` detail on size
+  422s); cancel for in-flight uploads; replace disabled after a conflict; superseded previews revoked; proxy and env use
+  the same production test.
+- #22: preview crops now match the storefront (web/01-storefront @ 7ff5e3b): website 16:9, desktop 3:1 only when every
+  banner of a carousel (consecutive banners) has a desktop image; app stays 528:178. HOME blocks are read per stored
+  status (the backend list cap of 200 includes archived), reorder uses the versions its session started from and refuses
+  after a mid-session refresh, untouched schedule instants are kept exactly, duplicates refuse non-Home sources, and the
+  fake backend mirrors `ContentBlock.validate` and the 200 list cap.

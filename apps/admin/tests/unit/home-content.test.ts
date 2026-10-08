@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   LINK,
-  bannerImageFor,
+  BANNER_ASPECT,
+  bannerLayouts,
+  scheduleInstant,
   buildReorder,
   displayTextIssue,
   effectiveOf,
@@ -268,15 +270,52 @@ describe('status, schedule and preview helpers', () => {
       invalidAt: true,
     })
   })
-  it('loads the desktop image only on desktop web, falling back to the mobile image', () => {
-    const b = { imageUrl: 'https://cdn/m.webp', desktopImageUrl: 'https://cdn/d.webp' }
-    expect(bannerImageFor('app', b)).toBe('https://cdn/m.webp')
-    expect(bannerImageFor('web-mobile', b)).toBe('https://cdn/m.webp')
-    expect(bannerImageFor('web-desktop', b)).toBe('https://cdn/d.webp')
-    expect(bannerImageFor('web-desktop', { imageUrl: 'https://cdn/m.webp' })).toBe(
-      'https://cdn/m.webp',
+  it('banner crops match the clients: app 528:178, website 16:9, desktop 3:1 only when a whole carousel has desktop images', () => {
+    expect(BANNER_ASPECT).toEqual({ app: '528 / 178', 'web-16x9': '16 / 9', 'web-3x1': '3 / 1' })
+    const banner = (id: string, desktop?: boolean) => ({
+      blockId: id,
+      type: 'BANNER',
+      imageUrl: `https://cdn/${id}-m.webp`,
+      desktopImageUrl: desktop ? `https://cdn/${id}-d.webp` : undefined,
+    })
+    const rail = { blockId: 'R', type: 'PRODUCT_RAIL' }
+    // Carousel 1 = A, B (both wide); a rail breaks it; carousel 2 = C (wide), D (no desktop image).
+    const blocks = [banner('A', true), banner('B', true), rail, banner('C', true), banner('D')]
+    const app = bannerLayouts('app', blocks)
+    expect(app.get('A')).toEqual({ crop: 'app', src: 'https://cdn/A-m.webp' })
+    expect(app.has('R')).toBe(false)
+    const mobile = bannerLayouts('web-mobile', blocks)
+    expect(mobile.get('A')).toEqual({ crop: 'web-16x9', src: 'https://cdn/A-m.webp' })
+    const desktop = bannerLayouts('web-desktop', blocks)
+    expect(desktop.get('A')).toEqual({ crop: 'web-3x1', src: 'https://cdn/A-d.webp' })
+    expect(desktop.get('B')).toEqual({ crop: 'web-3x1', src: 'https://cdn/B-d.webp' })
+    // All-or-nothing per carousel: one banner without a desktop image keeps the whole carousel at 16:9 (each banner
+    // still loads its own desktop image when it has one, as the storefront's <picture> does).
+    expect(desktop.get('C')).toEqual({ crop: 'web-16x9', src: 'https://cdn/C-d.webp' })
+    expect(desktop.get('D')).toEqual({ crop: 'web-16x9', src: 'https://cdn/D-m.webp' })
+    expect(bannerLayouts('web-desktop', [banner('X')]).get('X')?.src).toBe('https://cdn/X-m.webp')
+  })
+  it('the CSS frames carry exactly these ratios', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync(`${__dirname}/../../src/app/globals.css`, 'utf8')
+    for (const [crop, ratio] of Object.entries(BANNER_ASPECT))
+      expect(css).toMatch(
+        new RegExp(`\\.banner-${crop} \\{\\s*aspect-ratio: ${ratio.replace(/ /g, ' ')};`),
+      )
+  })
+  it('keeps an untouched schedule instant exactly (seconds and milliseconds), converts an edited one', () => {
+    const toUtc = (l: string) => `${l}:00.000Z`
+    const toLocal = (iso: string | null | undefined) => (iso ? iso.slice(0, 16) : '')
+    expect(scheduleInstant('2026-10-09T09:00', '2026-10-09T09:00:42.123Z', toUtc, toLocal)).toBe(
+      '2026-10-09T09:00:42.123Z',
     )
-    expect(bannerImageFor('app', {})).toBeUndefined()
+    expect(scheduleInstant('2026-10-09T09:05', '2026-10-09T09:00:42.123Z', toUtc, toLocal)).toBe(
+      '2026-10-09T09:05:00.000Z',
+    )
+    expect(scheduleInstant('', '2026-10-09T09:00:42Z', toUtc, toLocal)).toBeUndefined()
+    expect(scheduleInstant('2026-10-09T09:00', undefined, toUtc, toLocal)).toBe(
+      '2026-10-09T09:00:00.000Z',
+    )
   })
   it('names each backend code without echoing backend text', () => {
     const f = (status: number, code?: string) => ({ ok: false as const, status, error: 'x', code })

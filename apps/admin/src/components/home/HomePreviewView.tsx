@@ -12,8 +12,9 @@ import {
   PREVIEW_VIEW_LABEL,
   TYPE_LABEL,
   audienceOf,
-  bannerImageFor,
+  bannerLayouts,
   scheduleText,
+  type BannerLayout,
   type Effective,
   type HomeBlock,
   type HomePreview,
@@ -125,6 +126,7 @@ export function PreviewFrame({
       : view === 'web-mobile'
         ? 'browser-frame browser-mobile'
         : 'browser-frame'
+  const layouts = bannerLayouts(view, preview.blocks)
   return (
     <section className="panel" aria-labelledby="pv-h">
       <h2 id="pv-h">
@@ -135,7 +137,12 @@ export function PreviewFrame({
         {preview.includeDrafts ? 'drafts shown as if published' : 'published blocks only'} ·{' '}
         {preview.blocks.length} block{preview.blocks.length === 1 ? '' : 's'}. Banners appear only
         when the backend has a public image address configured (the public Home drops them
-        otherwise).
+        otherwise).{' '}
+        {view === 'app'
+          ? 'App banners: mobile image, 528:178.'
+          : view === 'web-mobile'
+            ? 'Website below 768 px: mobile image, 16:9.'
+            : 'Website from 768 px: 3:1 only when every banner of a carousel (consecutive banners) has a desktop image, otherwise 16:9.'}
       </p>
       <div className={frame} data-view={view}>
         {view !== 'app' ? (
@@ -155,6 +162,7 @@ export function PreviewFrame({
                 block={b}
                 index={i}
                 view={view}
+                layout={layouts.get(b.blockId)}
                 win={windows.get(b.blockId)}
               />
             ))
@@ -169,18 +177,20 @@ function PreviewItem({
   block: b,
   index,
   view,
+  layout,
   win,
 }: {
   block: PreviewBlock
   index: number
   view: PreviewView
+  layout?: BannerLayout
   win?: Pick<HomeBlock, 'startsAt' | 'endsAt'>
 }) {
   const eff = (Object.keys(EFFECTIVE_LABEL) as Effective[]).includes(b.effectiveStatus as Effective)
     ? (b.effectiveStatus as Effective)
     : 'DRAFT'
   const draft = b.status === 'DRAFT'
-  const src = bannerImageFor(view, b)
+  const src = layout?.src
   return (
     <li className={`preview-block${draft ? ' preview-draft' : ''}`} data-block-id={b.blockId}>
       <div className="preview-meta">
@@ -193,7 +203,7 @@ function PreviewItem({
         <span>{win ? scheduleText(win) : 'schedule unknown'}</span>
       </div>
       {b.type === 'BANNER' ? (
-        <div className={`banner-frame ${view === 'web-desktop' ? 'banner-desktop' : 'banner-app'}`}>
+        <div className={`banner-frame banner-${layout?.crop ?? 'app'}`} data-crop={layout?.crop}>
           {src ? (
             // Plain <img>: next/image adds an inline style (blocked by the CSP) and needs remote-host config.
             // eslint-disable-next-line @next/next/no-img-element
@@ -219,7 +229,12 @@ function PreviewItem({
       {b.type === 'BANNER' && b.link ? (
         <p className="muted">
           Opens <code>{b.link}</code>
-          {view === 'web-desktop' && !b.desktopImageUrl ? ' · desktop uses the mobile image' : ''}
+          {view === 'web-desktop' && !b.desktopImageUrl
+            ? ' · no desktop image: the mobile image is used'
+            : ''}
+          {view === 'web-desktop' && layout?.crop === 'web-16x9'
+            ? ' · 16:9 because not every banner in this carousel has a desktop image'
+            : ''}
         </p>
       ) : null}
     </li>

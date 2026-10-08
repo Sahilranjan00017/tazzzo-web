@@ -51,11 +51,29 @@ export function HomeBlockTable({
   const [conflict, setConflict] = useState(false)
   const [announce, setAnnounce] = useState('')
   const [dragging, setDragging] = useState<string>()
+  const [problem, setProblem] = useState<string>()
+  /** The active blocks (ids and versions) the reorder session started from; the save uses exactly these versions. */
+  const [session, setSession] = useState<HomeBlock[]>([])
   const buttons = useRef(new Map<string, HTMLButtonElement | null>())
-  const byId = new Map(blocks.map((b) => [b.blockId, b]))
-  const changed = order.join() !== loadedOrder.join()
+  const byId = new Map((ordering ? session : blocks).map((b) => [b.blockId, b]))
+  const sessionOrder = session.map((b) => b.blockId)
+  const changed = order.join() !== sessionOrder.join()
   const rows = ordering ? order.map((id) => byId.get(id)!).filter(Boolean) : blocks
   const canReorder = canWrite && !filtered && active.length > 1
+  const versions = (bs: HomeBlock[]) =>
+    bs
+      .map((b) => `${b.blockId}:${b.version}`)
+      .sort()
+      .join()
+  // The page data was refreshed mid-session (another action saved): the session's versions no longer match.
+  const stale = ordering && versions(session) !== versions(active)
+  const start = () => {
+    setSession(active)
+    setOrder(loadedOrder)
+    setConflict(false)
+    setProblem(undefined)
+    setOrdering(true)
+  }
 
   function shift(id: string, delta: -1 | 1) {
     const from = order.indexOf(id)
@@ -95,6 +113,22 @@ export function HomeBlockTable({
           </button>
         </div>
       ) : null}
+      {stale && !conflict ? (
+        <div className="notice" role="alert">
+          <p>
+            The list was refreshed while you were reordering (a block was saved meanwhile), so this
+            order cannot be saved against it. Start again from the latest list.
+          </p>
+          <button type="button" className="btn" onClick={start}>
+            Start again
+          </button>
+        </div>
+      ) : null}
+      {problem ? (
+        <p className="field-error" role="alert">
+          {problem}
+        </p>
+      ) : null}
       {canWrite ? (
         <div className="row">
           {ordering ? (
@@ -102,7 +136,7 @@ export function HomeBlockTable({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busy || !changed || conflict}
+                disabled={busy || !changed || conflict || stale}
                 onClick={() => setConfirm(true)}
               >
                 Save order
@@ -115,6 +149,7 @@ export function HomeBlockTable({
                   setOrdering(false)
                   setOrder(loadedOrder)
                   setConflict(false)
+                  setProblem(undefined)
                 }}
               >
                 Cancel reorder
@@ -125,15 +160,7 @@ export function HomeBlockTable({
               </span>
             </>
           ) : (
-            <button
-              type="button"
-              className="btn"
-              disabled={!canReorder || busy}
-              onClick={() => {
-                setOrder(loadedOrder)
-                setOrdering(true)
-              }}
-            >
+            <button type="button" className="btn" disabled={!canReorder || busy} onClick={start}>
               Reorder
             </button>
           )}
@@ -246,8 +273,14 @@ export function HomeBlockTable({
         busy={busy}
         onCancel={() => setConfirm(false)}
         onConfirm={() => {
-          const body = buildReorder(blocks, order)
-          if (!body) return setConfirm(false)
+          const body = buildReorder(session, order)
+          if (!body) {
+            setConfirm(false)
+            setProblem(
+              'The new order does not cover every active block exactly once, so it was not sent. Reload the page and reorder again.',
+            )
+            return
+          }
           void run('/api/bff/content/home/reorder', 'POST', body, 'Order saved.').then((r) => {
             setConfirm(false)
             if (r.ok) setOrdering(false)

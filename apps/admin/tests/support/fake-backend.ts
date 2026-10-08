@@ -774,9 +774,11 @@ export class FakeBackend {
       const placement = url.searchParams.get('placement') ?? 'HOME'
       const st = url.searchParams.get('status')
       const au = url.searchParams.get('audience')
+      // `ContentService.list`: filtered, in display order, at most 200 (archived blocks count towards the cap).
       return json(200, {
         items: this.sortedBlocks(placement)
           .filter((x) => (!st || x.status === st) && (!au || (x.audience ?? 'BOTH') === au))
+          .slice(0, 200)
           .map((x) => this.blockView(x)),
       })
     }
@@ -865,6 +867,8 @@ export class FakeBackend {
     if (url.pathname === '/api/v1/admin/content/blocks' && req.method === 'POST') {
       if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
       const b = JSON.parse(body) as Record<string, unknown> & { payload?: Record<string, unknown> }
+      const invalid = validateContent(b, String(b.placement ?? 'HOME'), String(b.type), true)
+      if (invalid) return json(422, { error: { code: 'INVALID_CONTENT', message: invalid } })
       const bad = this.verifyContentImages(b.payload, undefined)
       if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
       const id = `CB_new${String(this.blocks.size).padStart(13, '0')}`
@@ -913,6 +917,8 @@ export class FakeBackend {
       if (req.method === 'PUT') {
         if ('type' in b || 'placement' in b)
           return json(422, { error: { code: 'INVALID_CONTENT', message: 'fixed' } })
+        const invalid = validateContent(b, String(cur.placement), String(cur.type), false)
+        if (invalid) return json(422, { error: { code: 'INVALID_CONTENT', message: invalid } })
         const bad = this.verifyContentImages(
           b.payload,
           cur.payload as Record<string, unknown> | undefined,
@@ -1445,6 +1451,24 @@ export class FakeBackend {
       }
       return json(200, { ok: true })
     }
+    if (url.pathname === '/__control/seed-archived' && method === 'POST') {
+      const { count } = JSON.parse(body) as { count: number }
+      for (let i = 0; i < count; i++) {
+        const id = `CB_archived${String(i).padStart(8, '0')}`
+        this.blocks.set(id, {
+          blockId: id,
+          placement: 'HOME',
+          type: 'PRODUCT_RAIL',
+          title: `Archived ${i}`,
+          sort: 0,
+          status: 'ARCHIVED',
+          audience: 'BOTH',
+          payload: { ids: ['TZP-REF-1'] },
+          version: 1,
+        })
+      }
+      return json(200, { ok: true })
+    }
     if (url.pathname === '/__control/bump-block' && method === 'POST') {
       const { id } = JSON.parse(body) as { id: string }
       const x = this.blocks.get(id)
@@ -1524,3 +1548,99 @@ export const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   'base64',
 )
+
+const SAFE_KEY = (k: unknown) =>
+  typeof k === 'string' &&
+  k.length <= 512 &&
+  /^[A-Za-z0-9][A-Za-z0-9/_.-]*$/.test(k) &&
+  !k.includes('..') &&
+  !k.includes('//') &&
+  !k.endsWith('/') &&
+  k.split('/').every((seg) => seg.length > 0 && !/^\.+$/.test(seg))
+const LINK =
+  /^(product:TZP-[A-Za-z0-9-]{1,40}|category:TZ[SCGV]-[0-9]{6}|search:[\p{L}\p{M}\p{N} ]{2,64})$/u
+const plainText = (v: unknown, max: number, newlines: boolean) =>
+  typeof v === 'string' &&
+  v.trim().length > 0 &&
+  v.length <= max &&
+  v === v.trim() &&
+  ![...v].some((c) => {
+    const n = c.codePointAt(0)!
+    return (n < 0x20 && !(newlines && n === 10)) || n === 0x7f || c === '<' || c === '>'
+  })
+const displayText = (v: unknown, max: number) =>
+  plainText(v, max, false) && !/[\u0080-\u009f]|\p{Cf}/u.test(String(v))
+
+/**
+ * The backend's `ContentBlock.validate` (plus placement/type/audience checks on create), so the E2E suite fails if the
+ * CMS ever sends something the real backend would refuse. Returns the first violated rule, or undefined.
+ */
+export function validateContent(
+  b: Record<string, unknown>,
+  placement: string,
+  type: string,
+  create: boolean,
+): string | undefined {
+  const homeTypes = ['BANNER', 'PRODUCT_RAIL', 'CATEGORY_GRID']
+  if (create) {
+    if (!(placement === 'HOME' ? homeTypes : ['FAQ']).includes(type)) return 'type/placement'
+    if (b.audience !== undefined && !['APP_ONLY', 'WEB_ONLY', 'BOTH'].includes(String(b.audience)))
+      return 'audience'
+    if (placement === 'HELP' && b.audience !== undefined && b.audience !== 'BOTH')
+      return 'help audience'
+  } else if (
+    b.audience !== undefined &&
+    b.audience !== null &&
+    !['APP_ONLY', 'WEB_ONLY', 'BOTH'].includes(String(b.audience))
+  )
+    return 'audience'
+  const title = b.title
+  if (
+    typeof title !== 'string' ||
+    !title.trim() ||
+    title.length > 80 ||
+    title !== title.trim() ||
+    [...title].some((c) => c.codePointAt(0)! < 0x20 || c.codePointAt(0) === 0x7f)
+  )
+    return 'title'
+  const sort = b.sort
+  if (typeof sort !== 'number' || !Number.isInteger(sort) || sort < 0 || sort > 10_000)
+    return 'sort'
+  const start = b.startsAt === undefined ? undefined : Date.parse(String(b.startsAt))
+  const end = b.endsAt === undefined ? undefined : Date.parse(String(b.endsAt))
+  if (Number.isNaN(start) || Number.isNaN(end)) return 'times'
+  if (start !== undefined && end !== undefined && !(start < end)) return 'window'
+  const p = (b.payload ?? {}) as Record<string, unknown>
+  const ids = (p.ids ?? []) as unknown[]
+  const has = (k: string) => p[k] !== undefined && p[k] !== null
+  if (type !== 'FAQ' && (has('faqCategory') || has('question') || has('answer')))
+    return 'faq fields'
+  if (type !== 'BANNER' && (has('subtitle') || has('altText') || has('desktopImageAssetKey')))
+    return 'banner-only fields'
+  if (type === 'BANNER') {
+    if (!SAFE_KEY(p.imageAssetKey)) return 'imageAssetKey'
+    if (typeof p.link !== 'string' || !LINK.test(p.link)) return 'link'
+    if (ids.length) return 'banner ids'
+    if (has('desktopImageAssetKey') && !SAFE_KEY(p.desktopImageAssetKey)) return 'desktop key'
+    if (has('subtitle') && !displayText(p.subtitle, 120)) return 'subtitle'
+    if (has('altText') && !displayText(p.altText, 300)) return 'altText'
+  } else if (type === 'PRODUCT_RAIL' || type === 'CATEGORY_GRID') {
+    const rail = type === 'PRODUCT_RAIL'
+    if (has('imageAssetKey') || has('link')) return 'only ids'
+    if (ids.length === 0 || ids.length > (rail ? 20 : 12)) return 'ids bounds'
+    if (new Set(ids).size !== ids.length) return 'duplicate ids'
+    const shape = rail ? /^TZP-[A-Za-z0-9-]{1,40}$/ : /^TZ[SCGV]-[0-9]{6}$/
+    if (ids.some((id) => typeof id !== 'string' || !shape.test(id))) return 'id shape'
+  } else if (type === 'FAQ') {
+    if (has('imageAssetKey') || has('link') || ids.length) return 'faq only'
+    if (
+      !['DELIVERY', 'PRODUCT', 'CLUB', 'PAYMENT', 'REFUND', 'ACCOUNT'].includes(
+        String(p.faqCategory),
+      )
+    )
+      return 'faqCategory'
+    if (!plainText(p.question, 200, false)) return 'question'
+    if (!plainText(p.answer, 2000, true)) return 'answer'
+  }
+  return undefined
+}

@@ -31,7 +31,7 @@ export function HomeListView({
   canWrite,
   nowMs,
 }: {
-  result: Ok<{ items: HomeBlock[] }>
+  result: Ok<{ items: HomeBlock[]; archivedCapped?: boolean }>
   filter: { status?: string; audience?: string }
   canWrite: boolean
   nowMs: number
@@ -106,6 +106,12 @@ export function HomeListView({
       {!canWrite ? (
         <p className="notice" role="note">
           Read-only: changing Home content needs the cms-writer role.
+        </p>
+      ) : null}
+      {result.data.archivedCapped ? (
+        <p className="muted">
+          Showing the first 200 archived blocks (the backend lists at most 200 per request). Draft
+          and published blocks are always complete.
         </p>
       ) : null}
       {items.length === 0 ? (
@@ -212,11 +218,11 @@ function ReadOnlyBlock({ block: b }: { block: HomeBlock }) {
       <h2 id="hr-h">Content</h2>
       {b.type === 'BANNER' ? (
         <div className="banner-images">
-          <BannerFrame image={{ url: b.imageUrl ?? undefined }} ratio="app" label="Mobile image" />
+          <BannerFrame image={{ url: b.imageUrl ?? undefined }} crop="app" label="App banner" />
           <BannerFrame
             image={{ url: b.desktopImageUrl ?? b.imageUrl ?? undefined }}
-            ratio="desktop"
-            label="Desktop image"
+            crop={b.desktopImageUrl ? 'web-3x1' : 'web-16x9'}
+            label="Website desktop banner"
           />
         </div>
       ) : null}
