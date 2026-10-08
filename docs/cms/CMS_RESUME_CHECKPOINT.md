@@ -81,3 +81,9 @@ Stack: main <- #5 <- #6 <- #8 <- #9 <- this. Next: CMS-06 imports (needs contrac
 BFF mutation layer gained per-spec `maxBodyBytes`, `timeoutMs`, `errorDetail` (defaults unchanged, tested). Import lib/wizard,
 `/api/bff/imports/[kind]`. Gates: eslint, tsc, 213+ unit/component, 22 Playwright (mock) pass. XLSX deliberately not supported.
 Next: serviceability, delivery slots, orders, support, audit, home content/FAQ/app-config (channel work gated), media, system status.
+
+## Update: CMS-08 orders (branch `cms/08-orders`, stacked on `cms/06-imports`)
+
+Orders list/detail/transition, `ConfirmDialog` gained `children` + `confirmDisabled`, role helpers `canOperateOrders`/`canWorkSupport`,
+dashboard metric links are now role-aware (`moduleHref(id, roles)`), fake backend models the staff-role access matrix.
+Gates: eslint, tsc, 235 unit/component, 25 Playwright (mock). Next: CMS-11 support (same staff namespace), then serviceability, slots, audit, content, media, status.

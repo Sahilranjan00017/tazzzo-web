@@ -91,7 +91,7 @@ export const NAV: readonly NavSection[] = [
         label: 'Orders',
         href: '/orders',
         roles: ['order-ops', 'support-agent'],
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'service-areas',
@@ -153,10 +153,10 @@ export const NAV: readonly NavSection[] = [
   },
 ]
 
-/** Href of a module only once it is built; metrics link here so they never point at a page that does not exist. */
-export function moduleHref(id: string): string | undefined {
+/** Href of a module only once it is built AND the viewer's roles can use it, so links never lead to a refusal page. */
+export function moduleHref(id: string, roles: readonly string[]): string | undefined {
   const item = NAV.flatMap((s) => s.items).find((i) => i.id === id)
-  return item?.state === 'available' ? item.href : undefined
+  return item?.state === 'available' && canSee(item, roles) ? item.href : undefined
 }
 
 export function canSee(item: NavItem, roles: readonly string[]): boolean {

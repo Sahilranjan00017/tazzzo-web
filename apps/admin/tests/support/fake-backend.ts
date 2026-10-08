@@ -21,6 +21,8 @@ export interface RecordedRequest {
 
 export const WRITER_SUB = '110000000000000000001'
 export const READER_SUB = '110000000000000000002'
+export const OPS_SUB = '110000000000000000003'
+export const SUPPORT_SUB = '110000000000000000004'
 
 export class FakeBackend {
   url = ''
@@ -70,6 +72,16 @@ export class FakeBackend {
       active: boolean
     }
   >()
+  readonly orders = new Map<
+    string,
+    {
+      orderId: string
+      status: string
+      version: number
+      cancelReason?: string
+      cancelledBy?: string
+    }
+  >()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -102,6 +114,9 @@ export class FakeBackend {
     this.releases.clear()
     this.nodes.clear()
     this.prices.clear()
+    this.orders.clear()
+    this.orders.set('O-100', { orderId: 'O-100', status: 'CONFIRMED', version: 2 })
+    this.orders.set('O-101', { orderId: 'O-101', status: 'OUT_FOR_DELIVERY', version: 3 })
     this.stock.clear()
     this.prices.set('TZP-REF-1', { sellingPricePaise: 12900, mrpPaise: 14900, version: 2 })
     this.stock.set('TZP-REF-1|LOC-1', {
@@ -174,7 +189,19 @@ export class FakeBackend {
       sub: claims?.sub,
     })
     if (this.verify && !claims) return json(401, { error: { code: 'UNAUTHENTICATED' } })
-    const roles = claims?.sub === READER_SUB ? ['reader'] : ['cms-writer', 'reader']
+    const roles =
+      claims?.sub === READER_SUB
+        ? ['reader']
+        : claims?.sub === OPS_SUB
+          ? ['order-ops']
+          : claims?.sub === SUPPORT_SUB
+            ? ['support-agent']
+            : ['cms-writer', 'reader']
+    const staffRole = roles.some((r) => r === 'order-ops' || r === 'support-agent')
+    // Mirrors the backend access matrix: staff roles reach only /me and the staff namespaces; general roles never reach them.
+    const staffPath = /^\/api\/v1\/admin\/(orders|support)\b/.test(url.pathname)
+    if (this.verify && url.pathname !== '/api/v1/admin/me' && staffRole !== staffPath)
+      return json(403, { error: { code: 'FORBIDDEN' } })
 
     if (url.pathname === '/api/v1/admin/me') {
       if (this.status !== 200) return json(this.status, { error: { code: 'X' } })
@@ -267,6 +294,74 @@ export class FakeBackend {
         }
       }
       return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
+    }
+    const orderView = (o: {
+      orderId: string
+      status: string
+      version: number
+      cancelReason?: string
+      cancelledBy?: string
+    }) => ({
+      ...o,
+      customerId: 'C-1',
+      paymentMethod: 'COD',
+      lines: [
+        {
+          skuId: 'TZP-REF-1',
+          title: 'Basmati 5 kg',
+          quantity: 2,
+          unitPricePaise: 12900,
+          lineTotalPaise: 25800,
+        },
+      ],
+      itemCount: 2,
+      subtotalPaise: 25800,
+      payablePaise: 25800,
+      deliveryAddress: {
+        recipientName: 'A Customer',
+        recipientPhone: '+919900000000',
+        addressLine1: '12 Main Rd',
+        city: 'Bengaluru',
+        state: 'KA',
+        postalCode: '560047',
+        latitude: 12.9,
+        longitude: 77.6,
+      },
+      deliverySlot: { label: 'Today 6-8 pm' },
+      createdAt: '2026-10-06T03:30:00Z',
+    })
+    if (url.pathname === '/api/v1/admin/orders' && req.method === 'GET') {
+      const st = url.searchParams.get('status')
+      return json(200, {
+        items: [...this.orders.values()].filter((o) => !st || o.status === st).map(orderView),
+      })
+    }
+    const ord = url.pathname.match(/^\/api\/v1\/admin\/orders\/([^/]+)(\/transition)?$/)
+    if (ord) {
+      const o = this.orders.get(decodeURIComponent(ord[1]!))
+      if (!o) return json(404, { error: { code: 'ORDER_NOT_FOUND' } })
+      if (req.method === 'GET' && !ord[2]) return json(200, orderView(o))
+      if (req.method === 'POST' && ord[2]) {
+        if (!roles.includes('order-ops')) return json(403, { error: { code: 'FORBIDDEN' } })
+        const b = JSON.parse(body) as { to: string; expectedVersion: number; reason?: string }
+        if (b.expectedVersion !== o.version) return json(409, { error: { code: 'STALE_VERSION' } })
+        const legal: Record<string, string[]> = {
+          CONFIRMED: ['OUT_FOR_DELIVERY', 'CANCELLED'],
+          OUT_FOR_DELIVERY: ['DELIVERED', 'CANCELLED'],
+        }
+        if (!legal[o.status]?.includes(b.to))
+          return json(409, { error: { code: 'INVALID_TRANSITION' } })
+        if ((b.to === 'CANCELLED') !== (b.reason !== undefined))
+          return json(400, { error: { code: 'INVALID_REQUEST' } })
+        const next = {
+          ...o,
+          status: b.to,
+          version: b.expectedVersion + 1,
+          ...(b.reason ? { cancelReason: b.reason, cancelledBy: 'STAFF' } : {}),
+        }
+        this.orders.set(o.orderId, next)
+        return json(200, orderView(next))
+      }
     }
     const imp = url.pathname.match(/^\/api\/v1\/admin\/imports\/(prices|inventory|products)$/)
     if (imp && req.method === 'POST') {

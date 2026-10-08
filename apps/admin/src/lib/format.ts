@@ -26,3 +26,18 @@ export function formatDateTimeIst(iso: string): string {
     timeStyle: 'medium',
   }).format(date)} IST`
 }
+
+/** Short IST date-time for tables, e.g. `6 Oct 2026, 3:04 pm`. */
+export function formatShortIst(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}

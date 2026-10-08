@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 /**
  * Modal confirmation on the native <dialog> (focus trap, Esc to cancel, inert background). Destructive actions
@@ -13,8 +13,10 @@ export function ConfirmDialog({
   confirmLabel = 'Confirm',
   destructive = false,
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
+  children,
 }: {
   open: boolean
   title: string
@@ -22,8 +24,12 @@ export function ConfirmDialog({
   confirmLabel?: string
   destructive?: boolean
   busy?: boolean
+  /** Keeps Confirm disabled until a required input inside the dialog is filled. */
+  confirmDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
+  /** Optional extra controls (e.g. a required reason) shown between the description and the buttons. */
+  children?: ReactNode
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -46,6 +52,7 @@ export function ConfirmDialog({
     >
       <h2 id="confirm-title">{title}</h2>
       <p id="confirm-desc">{description}</p>
+      {children}
       <div className="dialog-actions">
         <button
           type="button"
@@ -61,7 +68,7 @@ export function ConfirmDialog({
           className={destructive ? 'btn btn-danger' : 'btn btn-primary'}
           autoFocus={!destructive}
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
         >
           {busy ? 'Working…' : confirmLabel}
         </button>
