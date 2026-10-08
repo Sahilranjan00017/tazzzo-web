@@ -357,7 +357,7 @@ a.nav-link:hover {
     visibility: visible;
     transition: transform 0.15s ease;
   }
-  .menu-toggle {
+  .btn.menu-toggle {
     display: inline-block;
   }
   .topbar,
@@ -868,4 +868,49 @@ details summary {
 }
 .you-col {
   background: var(--accent-soft);
+}
+
+/* Form controls never exceed their container (file inputs and long selects were the 360px overflow offenders). */
+.filters > label,
+.stack > label {
+  min-width: 0;
+  max-width: 100%;
+}
+input[type='file'],
+select {
+  max-width: 100%;
+}
+
+/* Grid/flex children must be allowed to shrink below their content width, or one wide control stretches the whole page. */
+.stack > *,
+.detail-grid > *,
+.kpi-grid > *,
+.dist-grid > *,
+.panel {
+  min-width: 0;
+}
+
+label:not(.inline) {
+  grid-template-columns: minmax(0, 1fr);
+}
+input[type='file'] {
+  width: 100%;
+}
+
+/* .btn sets display later in the file and was overriding the desktop-hidden state of the drawer toggle. */
+.btn.menu-toggle {
+  display: none;
+}
+@media (max-width: 900px) {
+  .btn.menu-toggle {
+    display: inline-block;
+  }
+}
+.kpi-grid {
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+@media (min-width: 640px) {
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  }
 }
