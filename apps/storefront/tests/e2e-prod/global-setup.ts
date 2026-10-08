@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { FakeBackend } from '../support/fake-backend'
 import { PROD_E2E_PORT } from '../../playwright.prod.config'
 
+export const E2E_CALLER_NAME = 'storefront_test'
+export const E2E_CALLER_SECRET = 'e2e-throwaway-caller-secret-not-a-real-value-0001'
+
 /** A throwaway self-signed certificate for 127.0.0.1 (test only; the key never leaves a temp dir). */
 function throwawayCertificate(): { key: Buffer; cert: Buffer } {
   const dir = mkdtempSync(join(tmpdir(), 'storefront-e2e-tls-'))
@@ -54,6 +57,11 @@ export default async function globalSetup(): Promise<void> {
       TAZZZO_API_BASE_URL: backend.url, // plain http is accepted in production only for loopback
       TAZZZO_SITE_URL: 'https://www.tazzzo.test',
       TAZZZO_MEDIA_BASE_URL: `${backend.mediaUrl}/media`,
+      // Throwaway test credential (the fake backend only records it). Never a real value.
+      TAZZZO_CALLER_NAME: E2E_CALLER_NAME,
+      TAZZZO_CALLER_SECRET: E2E_CALLER_SECRET,
+      // As behind the ALB: X-Forwarded-For's rightmost entry is trusted. The rate limits are the DEFAULTS.
+      STOREFRONT_TRUST_PROXY: 'true',
       NEXT_TELEMETRY_DISABLED: '1',
     },
     detached: true,

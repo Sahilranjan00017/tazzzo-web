@@ -49,6 +49,48 @@ The backend admits every public read through a token bucket keyed by **client IP
   sent (it would add a second shared bucket).
 - 5 s timeout, no redirects followed, no retries. 404 -> page 404; 429/5xx/timeout -> a "can't load right now" notice
   (or the last cached copy, which Next keeps serving when a revalidation fails).
+- **Trusted caller (optional):** with `TAZZZO_CALLER_NAME` and `TAZZZO_CALLER_SECRET` set, every backend read carries
+  `X-Tazzzo-Caller` / `X-Tazzzo-Caller-Secret` so the backend can admit this site through its own bucket (backend
+  feature in progress; header names to be confirmed against it). Server-only: never sent to the browser, never
+  logged, only to `TAZZZO_API_BASE_URL` (no redirects followed). CI fails if either name appears in the client bundle.
+
+### Per-visitor rate limit (`src/proxy.ts`, `src/lib/security/rate-limit.ts`)
+
+> **Production MUST set `STOREFRONT_TRUST_PROXY=true`, behind the ALB, with the app unreachable except through it**
+> (security group: ALB only). Without the setting the per-visitor limit is off; with it but a reachable app, anyone
+> can choose their own `X-Forwarded-For` and so their own bucket. **Fail closed:** in production, setting
+> `TAZZZO_CALLER_*` without `STOREFRONT_TRUST_PROXY=true` is a configuration error (every page 500s, the log names only
+> `STOREFRONT_TRUST_PROXY`), so unlimited visitor traffic can never be relayed into the backend's caller bucket.
+
+A token bucket per visitor on every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets
+never reach it): **60/min, burst 20** by default, plus a stricter **12/min, burst 6** for the uncached paths that always
+cost a backend call (`/search`, `/c/<node>?cursor=...`). A refused request gets `429` with `Retry-After`, a one-line
+`text/plain` body and the usual security headers; it is not rendered and never reaches the backend. Settings:
+`STOREFRONT_RATE_LIMIT_*` (see `.env.example`; `0` per minute switches a bucket off; an invalid value fails every
+request with a 500 and logs only the variable name). Logs are counts only, at most once a minute:
+`storefront_rate_limited page=.. expensive=.. unresolved_client=..`.
+
+- **Per instance, in memory.** No shared store: N instances admit up to N times the rate per visitor, and a restart
+  forgets every bucket. At most `STOREFRONT_RATE_LIMIT_MAX_CLIENTS` (10 000) visitors are remembered; the least
+  recently seen go first, and a visitor idle long enough to have a full bucket again is dropped.
+- **The visitor address.** Next.js does not give `proxy.ts` the socket address: before the proxy runs it sets
+  `x-forwarded-for` to the socket address only when the client sent none, so a client-sent value replaces it. Hence:
+  - `STOREFRONT_TRUST_PROXY` unset/`false` (default): `X-Forwarded-For` is never read and the per-visitor limit is
+    **inactive** (one `storefront_rate_limit_inactive` warning per process).
+  - `STOREFRONT_TRUST_PROXY=true` (production, behind the ALB): the entry `STOREFRONT_TRUSTED_PROXY_HOPS` (default 1)
+    from the right of `X-Forwarded-For` is the visitor, as the ALB appends what it saw; anything the client wrote to
+    the left is ignored. A chain too short or an entry that is not a literal IP falls into one shared, limited bucket.
+    IPv6 visitors are keyed by their /64. Only safe if the app is reachable through those proxies alone.
+- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch:
+  `rsc: 1` **and** `next-router-prefetch: 1`, the Next server's own rule. Next answers those with a small prefetch
+  payload without rendering the page body (measured: replayed `/search` and `/c/<node>?cursor=` prefetches with fresh
+  queries made no backend call), and charging them would spend a visitor's tokens on `<Link>`s merely scrolled past
+  (a home view sends ~10). They cannot be given their own bucket: Next strips these headers before the proxy runs,
+  so inside it a prefetch looks like a navigation. Anything else carrying a prefetch-like header (`next-router-prefetch`
+  alone, `purpose: prefetch`, `sec-purpose`) is rendered in full by Next and is limited and given the CSP like any
+  page; previously all of those skipped the proxy. The exemption is safe only while no route has a `loading.*`
+  boundary and neither PPR nor `cacheComponents` is enabled (Next then renders no components for a prefetch);
+  `tests/unit/prefetch-exemption-policy.test.ts` fails if that changes.
 
 **Propagation of a CMS change to the website:** the backend reads HOME content live; the storefront caches it for
 60 s and then serves the stale copy once more while it revalidates in the background. Expect **up to ~60 s plus the
@@ -69,15 +111,17 @@ media metadata or the product name; thumbnails are buttons (Tab, Enter/Space, ar
 
 Nonce-based CSP per request (`src/proxy.ts`; no `'unsafe-inline'`/`'unsafe-eval'` in production), static headers in
 `next.config.ts` (`nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, COOP, Permissions-Policy). Backend text
-is always rendered as React text (`react/no-danger` is an error). No secrets: the public API takes no credential.
-`src/server/*` is server-only (ESLint import ban + `server-only`).
+is always rendered as React text (`react/no-danger` is an error). The public API takes no credential; the optional
+trusted-caller secret (`TAZZZO_CALLER_SECRET`) lives only in the server environment. `src/server/*` is server-only
+(ESLint import ban + `server-only`).
 
 ## Configuration
 
 See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL` (https in production; plain http only for a loopback host),
 `TAZZZO_SITE_URL` (canonical/OG origin; https in production), `TAZZZO_MEDIA_BASE_URL` (the backend's media public base
-URL; unset = every image is the placeholder). Invalid configuration fails the first
-render (500) and logs only the field name.
+URL; unset = every image is the placeholder), optionally `TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, and the rate
+limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. Invalid
+configuration fails the first render (500) and logs only the field name.
 
 ## Commands (from the repository root)
 
@@ -98,9 +142,9 @@ pnpm --filter storefront build          # standalone output
    named for super-categories and their immediate children; deeper nodes are skipped / titled "Category".
 3. **No category imagery** in the public `Node` (`id`, `name` only): grid tiles are text.
 4. **One rate-limit identity for the whole website (backend/infra decision, open).** The storefront server's egress IP
-   shares one bucket. The storefront deliberately does no more than cache (60 s), remember 404s and back off after a
-   429; the remedy belongs to the backend/infra: a dedicated storefront identity/bucket, a per-visitor limit at the
-   edge, and a batch product read. `GET /v1/categories` costs `1 + sum(scope sizes)` units per call.
+   shares one bucket. The storefront caches (60 s), remembers 404s, backs off after a 429 and limits each visitor
+   (above, per instance); it can send a trusted-caller credential once the backend accepts one. Still open: the
+   backend side of that identity and a batch product read. `GET /v1/categories` costs `1 + sum(scope sizes)` units per call.
 5. **Product id shape mismatch:** OpenAPI `ProductId` is `^TZP-[0-9]+$`, content rails/links accept
    `TZP-[A-Za-z0-9-]{1,40}`, the cart accepts `^TZP-[0-9]{1,18}$`. The site accepts the content grammar.
 6. **Banner search grammar vs search:** `search:[\p{L}\p{M}\p{N} ]{2,64}` (combining marks since backend db3623c, so
