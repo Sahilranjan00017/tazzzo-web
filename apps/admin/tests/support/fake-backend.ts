@@ -23,6 +23,7 @@ export const WRITER_SUB = '110000000000000000001'
 export const READER_SUB = '110000000000000000002'
 export const OPS_SUB = '110000000000000000003'
 export const SUPPORT_SUB = '110000000000000000004'
+export const AUDIT_SUB = '110000000000000000005'
 
 export class FakeBackend {
   url = ''
@@ -41,6 +42,8 @@ export class FakeBackend {
     body?: unknown
     delayMs?: number
   }
+  /** Health mock: readiness status and component state (set via /__control/ready). */
+  readyDown = false
   /** Forces a status (and optional body) for the dashboard summary, e.g. 503 to mimic a Mongo outage. */
   dashboardOverride?: { status: number; body?: unknown }
   /** Taxonomy mock: id of the open release (writes need one), release statuses and nodes. */
@@ -143,6 +146,7 @@ export class FakeBackend {
   reset(): void {
     this.status = 200
     this.mutationOverride = undefined
+    this.readyDown = false
     this.dashboardOverride = undefined
     this.requests.length = 0
     this.openRelease = undefined
@@ -251,6 +255,20 @@ export class FakeBackend {
     if (url.pathname.startsWith('/__control/'))
       return this.control(url, req.method ?? '', body, json)
 
+    if (url.pathname === '/health/live' || url.pathname === '/health/ready') {
+      this.requests.push({
+        method: req.method ?? '',
+        path: req.url ?? '',
+        authorization: req.headers.authorization,
+        headers: { ...req.headers },
+        body,
+      })
+      if (url.pathname === '/health/live')
+        return json(200, { status: 'UP', components: { datastore: 'OPEN', mongo: 'SKIPPED' } })
+      return this.readyDown
+        ? json(503, { status: 'DOWN', components: { mongo: 'DOWN', rate_limiter: 'UP' } })
+        : json(200, { status: 'UP', components: { mongo: 'UP', rate_limiter: 'UP' } })
+    }
     const claims = await this.identify(req.headers.authorization)
     this.requests.push({
       method: req.method ?? '',
@@ -268,12 +286,59 @@ export class FakeBackend {
           ? ['order-ops']
           : claims?.sub === SUPPORT_SUB
             ? ['support-agent']
-            : ['cms-writer', 'reader']
+            : claims?.sub === AUDIT_SUB
+              ? ['audit-reader']
+              : ['cms-writer', 'reader']
     const staffRole = roles.some((r) => r === 'order-ops' || r === 'support-agent')
     // Mirrors the backend access matrix: staff roles reach only /me and the staff namespaces; general roles never reach them.
     const staffPath = /^\/api\/v1\/admin\/(orders|support)\b/.test(url.pathname)
-    if (this.verify && url.pathname !== '/api/v1/admin/me' && staffRole !== staffPath)
-      return json(403, { error: { code: 'FORBIDDEN' } })
+    const auditPath = url.pathname === '/api/v1/admin/audit-events'
+    const auditRole = roles.includes('audit-reader')
+    if (this.verify && url.pathname !== '/api/v1/admin/me') {
+      // audit-reader reaches only /me and the audit trail; other roles never read the audit trail.
+      if (auditPath ? !auditRole : auditRole) return json(403, { error: { code: 'FORBIDDEN' } })
+      if (!auditPath && staffRole !== staffPath) return json(403, { error: { code: 'FORBIDDEN' } })
+    }
+    if (auditPath && req.method === 'GET') {
+      const all = [
+        {
+          id: 'AE-3',
+          occurredAt: '2026-10-06T03:30:00Z',
+          action: 'PRICE_SET',
+          targetType: 'sku',
+          targetId: 'TZP-REF-1',
+          actorType: 'HUMAN_ADMIN',
+          actorId: 'google:110000000000000000001',
+          credentialId: null,
+          requestId: 'req_0123456789abcdef0123',
+        },
+        {
+          id: 'AE-2',
+          occurredAt: '2026-10-06T03:00:00Z',
+          action: 'CONTENT_BLOCK_CREATED',
+          targetType: 'content_block',
+          targetId: 'CB_x',
+          actorType: 'HUMAN_ADMIN',
+          actorId: 'google:110000000000000000001',
+          credentialId: null,
+          requestId: null,
+        },
+        {
+          id: 'AE-1',
+          occurredAt: '2026-10-06T02:00:00Z',
+          action: 'PRICE_SET',
+          targetType: 'sku',
+          targetId: 'TZP-REF-2',
+          actorType: 'SERVICE_ACCOUNT',
+          actorId: 'service:cms-writer',
+          credentialId: 'cred-1',
+          requestId: null,
+        },
+      ]
+      const act = url.searchParams.get('action')
+      const items = all.filter((e) => !act || e.action === act)
+      return json(200, { items, nextCursor: null })
+    }
 
     if (url.pathname === '/api/v1/admin/me') {
       if (this.status !== 200) return json(this.status, { error: { code: 'X' } })

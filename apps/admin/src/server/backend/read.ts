@@ -12,7 +12,14 @@ export const BACKEND_READ_TIMEOUT_MS = 5_000
 const BACKEND_REQUEST_ID = /^req_[0-9a-f]{20}$/
 
 export async function backendRead<T>(
-  deps: { backendUrl: string; idToken: string; fetchImpl?: typeof fetch },
+  deps: {
+    backendUrl: string
+    /** Omit for the backend's unauthenticated endpoints (health): no Authorization header is sent at all. */
+    idToken?: string
+    fetchImpl?: typeof fetch
+    /** Non-2xx statuses whose JSON body is still a valid payload (e.g. readiness reports 503 with its components). */
+    parseAlso?: readonly number[]
+  },
   path: string,
   schema: z.ZodType<T>,
 ): Promise<BackendReadResult<T>> {
@@ -21,7 +28,10 @@ export async function backendRead<T>(
   try {
     response = await fetchImpl(new URL(path, deps.backendUrl), {
       method: 'GET',
-      headers: { Authorization: `Bearer ${deps.idToken}`, Accept: 'application/json' },
+      headers: {
+        ...(deps.idToken ? { Authorization: `Bearer ${deps.idToken}` } : {}),
+        Accept: 'application/json',
+      },
       cache: 'no-store',
       redirect: 'error',
       signal: AbortSignal.timeout(BACKEND_READ_TIMEOUT_MS),
@@ -40,9 +50,10 @@ export async function backendRead<T>(
     const retryAfterSeconds = /^[1-9][0-9]{0,3}$/.test(header) ? Number(header) : undefined
     return { kind: 'rate_limited', ...(retryAfterSeconds ? { retryAfterSeconds } : {}), ...trace }
   }
-  if (!response.ok) return { kind: 'unavailable', reason: 'status', ...trace }
+  if (!response.ok && !deps.parseAlso?.includes(response.status))
+    return { kind: 'unavailable', reason: 'status', ...trace }
   const parsed = schema.safeParse(await response.json().catch(() => undefined))
   return parsed.success
-    ? { kind: 'ok', data: parsed.data, ...trace }
+    ? { kind: 'ok', data: parsed.data, httpStatus: response.status, ...trace }
     : { kind: 'unavailable', reason: 'shape', ...trace }
 }

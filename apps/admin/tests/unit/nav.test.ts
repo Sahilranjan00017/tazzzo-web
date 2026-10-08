@@ -30,9 +30,9 @@ describe('role-aware navigation (UX only)', () => {
     expect(ids(['audit-reader'])).not.toContain('products')
   })
 
-  it('always offers Home and Profile, even with no or unknown roles, and drops empty sections', () => {
-    expect(ids([])).toEqual(['home', 'account'])
-    expect(ids(['made-up-role'])).toEqual(['home', 'account'])
+  it('always offers Home, System status and Profile, even with no or unknown roles, and drops empty sections', () => {
+    expect(ids([])).toEqual(['home', 'status', 'account'])
+    expect(ids(['made-up-role'])).toEqual(['home', 'status', 'account'])
     expect(navFor([]).every((s) => s.items.length > 0)).toBe(true)
   })
 

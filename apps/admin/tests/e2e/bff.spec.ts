@@ -5,7 +5,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test'
-import { OPS_SUB, READER_SUB, SUPPORT_SUB, WRITER_SUB } from '../support/fake-backend'
+import { AUDIT_SUB, OPS_SUB, READER_SUB, SUPPORT_SUB, WRITER_SUB } from '../support/fake-backend'
 
 const BASE = `http://localhost:3988`
 const OIDC = () => process.env.E2E_OIDC_URL!
@@ -628,4 +628,57 @@ test('delivery (mock backend): a reader browses areas and slots read-only', asyn
   await expect(
     page.getByText('Read-only: changing delivery windows needs the cms-writer role'),
   ).toBeVisible()
+})
+
+test('audit (mock backend): audit-reader filters the trail; a general role is refused', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, AUDIT_SUB)
+  await page.goto('/system/audit')
+  await expect(page.getByText('CONTENT_BLOCK_CREATED')).toBeVisible()
+  await page.getByLabel('Action').fill('PRICE_SET')
+  await page.getByRole('button', { name: 'Apply' }).click()
+  await expect(page.getByText('CONTENT_BLOCK_CREATED')).toHaveCount(0)
+  await expect(page.getByText('PRICE_SET').first()).toBeVisible()
+  await page.getByText('Open').first().click()
+  await expect(page.getByText('req_0123456789abcdef0123')).toBeVisible()
+  const calls = (await backendRequests(request)).filter((r) =>
+    r.path.startsWith('/api/v1/admin/audit-events'),
+  )
+  expect(calls.at(-1)!.path).toContain('action=PRICE_SET')
+  expect(calls.at(-1)!.sub).toBe(AUDIT_SUB)
+})
+
+test('audit (mock backend): a reader gets a permission state and stays signed in', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/system/audit')
+  await expect(page.locator('.panel-error')).toContainText('audit-reader')
+  await expect(page.getByRole('table')).toHaveCount(0)
+})
+
+test('system status (mock backend): probes the health endpoints without sending any credential', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/system/status')
+  await expect(page.getByRole('heading', { name: 'Liveness' })).toBeVisible()
+  await expect(page.getByText('UP').first()).toBeVisible()
+  const health = (await backendRequests(request)).filter((r) => r.path.startsWith('/health/'))
+  expect(health.length).toBeGreaterThanOrEqual(2)
+  expect(health.every((h) => h.authorization === undefined)).toBe(true)
+  expect(await page.content()).not.toContain('127.0.0.1')
+})
+
+test('notifications (mock backend): only the two counters; per-message detail is shown as unavailable', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/system/notifications')
+  await expect(page.getByText('Pending', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Not available from the backend/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /retry|resend/i })).toHaveCount(0)
 })
