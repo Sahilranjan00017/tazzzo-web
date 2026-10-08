@@ -142,3 +142,16 @@ reload, non-409 failures keep the dialog open, alt text rejects control characte
 `CMS_MEDIA_UPLOAD_ORIGIN` (CSP connect-src only) and `CMS_MEDIA_PUBLIC_ORIGIN` (CSP img-src only); BFF refuses targets off
 that origin and answers 503 UPLOAD_ORIGIN_NOT_CONFIGURED without it. Mutation layer gained `precondition`; `useBffAction`
 gained `refreshOnConflict`. Fake backend models storage (CORS, signed headers, 403/412, verification, outage).
+
+## Update 2026-10-08: CMS-21 Home content (branch `cms/21-home-content`, stacked on `cms/20-media-upload`)
+
+`/content/home` against backend #102 (branch feature/content-banner-model, head db3623c): list with type, channel
+(App/Website/Both), backend effectiveStatus chips, IST schedule, createdBy/updatedBy; create/edit/duplicate for BANNER
+(mobile + optional desktop image via the content upload target, link builder for product/category/search mirroring the
+backend grammar incl. combining marks, subtitle/alt text rejecting C1 and Cf characters), PRODUCT_RAIL (1..20) and
+CATEGORY_GRID (1..12); publish/unpublish/archive with confirmation; reorder (drag handle + keyboard buttons, one call with
+every non-archived block's version, 409 keeps the order); read-only preview page (app phone frame, website desktop and
+mobile) with preview-at (IST) and drafts toggle. 4 new BFF routes (`content/home/{blocks,blocks/[id],reorder,uploads}`);
+status reuses `content/blocks/[id]/status`. ConfirmDialog now uses unique label ids (two dialogs on one page).
+Website banner ratios (desktop 4:1) are provisional until the website layout fixes them; the app ratio (528:178) comes from
+tazzzo-app `RemoteHomeScreen`.
