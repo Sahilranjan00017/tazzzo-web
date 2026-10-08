@@ -25,11 +25,15 @@ no hardcoded banners. `channel=web` is the only query parameter sent (anything e
   per-slide buttons, Left/Right keys, autoplay off under `prefers-reduced-motion` and while hovered/focused). Only the
   first banner on the page loads eagerly. The `link` uses the backend's closed grammar and maps to
   `product:<id> -> /p/<id>`, `category:<node> -> /c/<node>`, `search:<text> -> /search?q=<encoded>`; anything else is
-  not clickable. A banner whose image is not under the media base is dropped (the backend does the same).
+  not clickable. A banner whose image is not under the media base (or with no media base configured) is kept with
+  the branded placeholder, like every other image that cannot be shown.
 - `PRODUCT_RAIL`: each id is read with `GET /v1/products/{id}`; missing/hidden/failing products are skipped silently.
 - `CATEGORY_GRID`: tiles link to `/c/<node>`; names come from `GET /v1/categories` and, only if needed, those
   super-categories' `children`. A node not found there is skipped (see backend gaps).
 - Unknown block types and malformed blocks are skipped; the rest of the page still renders.
+- Anything skipped or degraded is logged server-side as one counts-only line (no ids, titles or URLs), at most once a
+  minute unless the counts change: `storefront_home_blocks_degraded unknown_type=.. malformed=.. invalid_ids=..
+invalid_links=.. images_not_allowed=.. media_base=configured|unset`.
 
 ## Caching, rate limits and propagation
 
@@ -70,8 +74,9 @@ is always rendered as React text (`react/no-danger` is an error). No secrets: th
 
 ## Configuration
 
-See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL`, `TAZZZO_SITE_URL` (canonical/OG origin; https in
-production), `TAZZZO_MEDIA_BASE_URL` (the backend's media public base URL). Invalid configuration fails the first
+See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL` (https in production; plain http only for a loopback host),
+`TAZZZO_SITE_URL` (canonical/OG origin; https in production), `TAZZZO_MEDIA_BASE_URL` (the backend's media public base
+URL; unset = every image is the placeholder). Invalid configuration fails the first
 render (500) and logs only the field name.
 
 ## Commands (from the repository root)
@@ -81,7 +86,8 @@ pnpm dev:storefront                     # http://localhost:3000 (set the env var
 pnpm --filter storefront lint
 pnpm --filter storefront typecheck
 pnpm --filter storefront test           # Vitest unit + component
-pnpm test:e2e:storefront                # Playwright vs a fake public API + fake media host
+pnpm test:e2e:storefront                # Playwright on `next dev` vs a fake public API + fake media host
+pnpm test:e2e:storefront:prod           # `next build` + `next start`: the PRODUCTION CSP in a real browser
 pnpm --filter storefront build          # standalone output
 ```
 
@@ -91,14 +97,15 @@ pnpm --filter storefront build          # standalone output
 2. **No category node read by id** (`GET /v1/categories/{id}`). Grid tiles and the `/c/[node]` title can only be
    named for super-categories and their immediate children; deeper nodes are skipped / titled "Category".
 3. **No category imagery** in the public `Node` (`id`, `name` only): grid tiles are text.
-4. **One rate-limit identity for the whole website.** The storefront server's egress IP shares one bucket; capacity must
-   be sized for it, or the backend needs a trusted server-to-server arrangement. `GET /v1/categories` costs
-   `1 + sum(scope sizes)` units per call.
+4. **One rate-limit identity for the whole website (backend/infra decision, open).** The storefront server's egress IP
+   shares one bucket. The storefront deliberately does no more than cache (60 s), remember 404s and back off after a
+   429; the remedy belongs to the backend/infra: a dedicated storefront identity/bucket, a per-visitor limit at the
+   edge, and a batch product read. `GET /v1/categories` costs `1 + sum(scope sizes)` units per call.
 5. **Product id shape mismatch:** OpenAPI `ProductId` is `^TZP-[0-9]+$`, content rails/links accept
    `TZP-[A-Za-z0-9-]{1,40}`, the cart accepts `^TZP-[0-9]{1,18}$`. The site accepts the content grammar.
-6. **Banner search grammar vs search:** `search:[\p{L}\p{N} ]{2,64}` excludes combining marks (Devanagari matras), so
-   Hindi search banners cannot be authored, and it allows texts `/v1/search` rejects (more than 5 words, 1-letter
-   words only). The site shows a hint on a 400.
+6. **Banner search grammar vs search:** `search:[\p{L}\p{M}\p{N} ]{2,64}` (combining marks since backend db3623c, so
+   Devanagari search banners work) still allows texts `/v1/search` rejects (more than 5 words, 1-letter words only).
+   The site shows a hint on a 400.
 7. **No banner dimension contract.** The site assumes 16:9 (and 3:1 on desktop when every banner in a carousel has a
    desktop image), `object-fit: cover`.
 8. **PDP / category products are `private, no-store`.** The site caches them 60 s server-side because it never sends a

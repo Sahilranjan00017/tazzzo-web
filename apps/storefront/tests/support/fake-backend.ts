@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { deflateSync } from 'node:zlib'
 
 /**
@@ -29,7 +30,7 @@ export class FakeBackend {
   mediaDown = false
   readonly requests: RecordedRequest[] = []
   private api?: Server
-  private media?: Server
+  private media?: Server | HttpsServer
 
   /** @param publicMediaBase media base used in API responses; default: this fake's own media host + `/media`. */
   private readonly publicMediaBase: string | undefined
@@ -43,11 +44,17 @@ export class FakeBackend {
     return `${this.publicMediaBase ?? `${this.mediaUrl}/media`}/${name}`
   }
 
-  async start(): Promise<void> {
+  /**
+   * @param options.mediaTls serve the media host over https (production runs: media must be https there) with this
+   *   throwaway certificate; the browser is told to accept it. Default: plain http on loopback.
+   */
+  async start(options: { mediaTls?: { key: Buffer; cert: Buffer } } = {}): Promise<void> {
     this.api = createServer((req, res) => void this.handleApi(req, res))
-    this.media = createServer((req, res) => this.handleMedia(req, res))
-    this.url = await listen(this.api)
-    this.mediaUrl = await listen(this.media)
+    this.media = options.mediaTls
+      ? createHttpsServer(options.mediaTls, (req, res) => this.handleMedia(req, res))
+      : createServer((req, res) => this.handleMedia(req, res))
+    this.url = await listen(this.api, 'http')
+    this.mediaUrl = await listen(this.media, options.mediaTls ? 'https' : 'http')
   }
 
   async stop(): Promise<void> {
@@ -124,6 +131,16 @@ export class FakeBackend {
         altText: 'Rice bowls',
         imageUrl: this.m('banner-search.png'),
         link: 'search:basmati rice',
+      },
+      {
+        audience: 'WEB_ONLY',
+        blockId: 'CB_offhost',
+        type: 'BANNER',
+        title: 'Off-host image',
+        altText: 'Spices',
+        // Not under the media base: the site must keep the banner with a placeholder and never request this URL.
+        imageUrl: 'https://images.evil.example/spices.png',
+        link: 'search:चावल',
       },
     ]
   }
@@ -268,14 +285,14 @@ export class FakeBackend {
       const q = url.searchParams.get('q') ?? ''
       const tokens = q
         .toLowerCase()
-        .split(/[^\p{L}\p{N}]+/u)
+        .split(/[^\p{L}\p{M}\p{N}]+/u)
         .filter((t) => t.length >= 2)
       if (q.length > 64 || tokens.length === 0 || tokens.length > 5)
         return error(400, 'INVALID_REQUEST')
       const items = Object.values(this.products()).filter((p) => {
         const words = String(p.name)
           .toLowerCase()
-          .split(/[^\p{L}\p{N}]+/u)
+          .split(/[^\p{L}\p{M}\p{N}]+/u)
         return tokens.every((t) => words.some((w) => w.startsWith(t)))
       })
       return send(200, { resolvedReleaseId: 'R1', items, hasMore: false, requestId: 'req_search' })
@@ -296,14 +313,14 @@ export class FakeBackend {
   }
 }
 
-async function listen(server: Server): Promise<string> {
+async function listen(server: Server | HttpsServer, scheme: 'http' | 'https'): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('no address')
-  return `http://127.0.0.1:${address.port}`
+  return `${scheme}://127.0.0.1:${address.port}`
 }
 
-async function close(server: Server | undefined): Promise<void> {
+async function close(server: Server | HttpsServer | undefined): Promise<void> {
   if (!server) return
   server.closeAllConnections()
   await new Promise<void>((resolve) => server.close(() => resolve()))

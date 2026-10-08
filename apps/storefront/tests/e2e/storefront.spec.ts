@@ -38,6 +38,7 @@ test.describe('home', () => {
       'CB_broken',
       'CB_grid1',
       'CB_search',
+      'CB_offhost',
     ])
     await expect(page.getByText('App only deal')).toHaveCount(0)
     await expect(page.getByText('App only rail')).toHaveCount(0)
@@ -111,6 +112,28 @@ test.describe('home', () => {
     await expect(page.locator('a[href*="evil.example"]')).toHaveCount(0)
   })
 
+  test('a banner whose image is off the media host is kept with the placeholder, never requested', async ({
+    page,
+  }) => {
+    const offHost: string[] = []
+    page.on('request', (r) => {
+      if (r.url().includes('evil.example')) offHost.push(r.url())
+    })
+    await page.goto('/')
+    // Slide 2 of the second carousel, so it is `hidden` until shown: query it including hidden content.
+    const banner = page.locator('.banner[data-block-id="CB_offhost"]')
+    await expect(banner.getByRole('img', { name: 'Spices', includeHidden: true })).toHaveAttribute(
+      'data-testid',
+      'image-fallback',
+    )
+    // Its Devanagari search link (combining marks, backend db3623c) is a valid deep link.
+    await expect(banner.getByRole('link', { includeHidden: true })).toHaveAttribute(
+      'href',
+      `/search?q=${encodeURIComponent('चावल')}`,
+    )
+    expect(offHost).toEqual([])
+  })
+
   test('CDN down: the page still renders, every image is the placeholder', async ({ page }) => {
     await setMediaDown(true)
     try {
@@ -137,7 +160,7 @@ test.describe('home', () => {
     page,
   }) => {
     await page.goto('/')
-    const carousel = page.getByTestId('banner-carousel')
+    const carousel = page.getByTestId('banner-carousel').first()
     const visibleSlide = () =>
       carousel.locator('.banner:not([hidden])').evaluate((e) => (e as HTMLElement).dataset.blockId)
     await carousel.getByRole('button', { name: 'Pause slideshow' }).click()
@@ -153,9 +176,9 @@ test.describe('home', () => {
 
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.reload()
-    await expect(
-      page.getByTestId('banner-carousel').getByRole('button', { name: 'Play slideshow' }),
-    ).toBeDisabled()
+    const reduced = page.getByTestId('banner-carousel').first()
+    await expect(reduced.getByRole('button', { name: 'Next slide' })).toBeVisible()
+    await expect(reduced.getByRole('button', { name: /slideshow/ })).toHaveCount(0)
   })
 
   test('sets a strict CSP that admits only the media origin for images, and nothing violates it', async ({
