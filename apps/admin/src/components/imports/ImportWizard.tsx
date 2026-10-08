@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge, type Tone } from '@/components/ui/primitives'
 import { useToast } from '@/components/ui/Toast'
@@ -68,6 +68,7 @@ export function ImportWizard() {
   }>()
   const [confirm, setConfirm] = useState(false)
   const [progress, setProgress] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const built: BuiltRow[] = useMemo(
     () => (table ? buildRows(kind, table.rows, map) : []),
@@ -95,6 +96,13 @@ export function ImportWizard() {
     setSummary(undefined)
     setPhase('map')
   }
+
+  // A file chosen before hydration finished is still on the input but unknown to React state: pick it up once.
+  useEffect(() => {
+    const f = fileInput.current?.files?.[0]
+    if (f) void onFile(f)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function reset() {
     setTable(undefined)
@@ -242,6 +250,7 @@ export function ImportWizard() {
           <label>
             CSV file (UTF-8, up to 2 MiB)
             <input
+              ref={fileInput}
               type="file"
               accept=".csv,text/csv"
               disabled={phase === 'validating' || phase === 'applying'}

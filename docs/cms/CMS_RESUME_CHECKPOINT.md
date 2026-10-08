@@ -105,3 +105,10 @@ Next: audit viewer + system status (CMS-14), media (CMS-07), home content/FAQ/ap
 `backendRead` gained anonymous mode and `parseAlso` (health 503 body); `lib/{audit,health}.ts`; 3 pages; nav entries Notifications + System status.
 Gates: eslint, tsc, 300 unit/component, 35 Playwright (mock). Stack: ... <- #14 <- this.
 Remaining: media (CMS-07, BLOCKED_BY_EXTERNAL_PROVIDER for real upload), home content + FAQ + app config (CMS-12/13, channel work needs backend change first), global search, security review doc, visual QA, release readiness doc, final report.
+
+## Update: CMS-07 media (branch `cms/07-media`, stacked on `cms/14-audit-status`)
+
+`lib/media.ts`, media BFF (set PUT, upload-readiness POST), `/catalogue/media`. BFF now passes the machine code of a 503 (e.g.
+MEDIA_STORAGE_NOT_CONFIGURED). File inputs in the media + import components pick up pre-hydration selections (flake fix).
+Gates: eslint, tsc, 328 unit/component, 37 integration, 38 Playwright (mock). CI was green (7/7) on PRs #5-#14 at last check.
+Remaining: home content + FAQ + app config (CMS-12/13), global search + polish (CMS-15), security review doc + release readiness (CMS-16), visual QA (browser), final report.

@@ -253,8 +253,13 @@ export async function runBffMutation<In, Out, Client>(
       return respond(429, 'rate_limited', { error: 'rate_limited', ...trace }, extra)
     }
     default:
-      // 3xx (redirects are never followed), other 4xx and 5xx: nothing from the backend body is passed through.
-      return respond(502, 'upstream_error', { error: 'upstream_error', ...trace })
+      // 3xx (redirects are never followed), other 4xx and 5xx: nothing from the backend body is passed through, except
+      // the stable machine code of a 503 (e.g. MEDIA_STORAGE_NOT_CONFIGURED) so the UI can name a known outage.
+      return respond(502, 'upstream_error', {
+        error: 'upstream_error',
+        ...(upstream.status === 503 && code ? { code } : {}),
+        ...trace,
+      })
   }
 }
 

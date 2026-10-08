@@ -1,0 +1,112 @@
+import { beforeAll, describe, expect, it } from 'vitest'
+import { checkFile, mediaErrorMessage, setInput } from '@/lib/media'
+
+const asset = (over: Record<string, unknown> = {}) => ({
+  assetId: 'A1',
+  assetKey: 'p/product/tzp-1/abc.jpg',
+  role: 'PRIMARY',
+  sortOrder: 0,
+  ...over,
+})
+const set = (assets: unknown[], extra: Record<string, unknown> = {}) => ({
+  ownerType: 'product',
+  ownerId: 'TZP-1',
+  assets,
+  expectedVersion: 2,
+  ...extra,
+})
+
+describe('media set schema', () => {
+  it('accepts a valid set, an empty set (clear) and optional metadata', () => {
+    expect(
+      setInput.safeParse(
+        set([
+          asset(),
+          asset({
+            assetId: 'A2',
+            assetKey: 'p/product/tzp-1/def.png',
+            role: 'GALLERY',
+            sortOrder: 1,
+            altText: 'Front',
+            width: 800,
+            height: 800,
+            contentType: 'image/png',
+          }),
+        ]),
+      ).success,
+    ).toBe(true)
+    expect(setInput.safeParse(set([])).success).toBe(true)
+  })
+  it.each([
+    ['two primaries', [asset(), asset({ assetId: 'A2', assetKey: 'k2', sortOrder: 1 })]],
+    ['primary not at order 0', [asset({ sortOrder: 3 })]],
+    ['duplicate order', [asset(), asset({ assetId: 'A2', assetKey: 'k2', role: 'GALLERY' })]],
+    ['duplicate key', [asset(), asset({ assetId: 'A2', role: 'GALLERY', sortOrder: 1 })]],
+    ['duplicate id', [asset(), asset({ assetKey: 'k2', role: 'GALLERY', sortOrder: 1 })]],
+    ['alt text with <', [asset({ altText: '<b>x</b>' })]],
+    ['alt text too long', [asset({ altText: 'x'.repeat(301) })]],
+    ['width without height', [asset({ width: 10 })]],
+    ['unsupported content type', [asset({ contentType: 'image/gif' })]],
+    ['key traversal', [asset({ assetKey: 'p/../x' })]],
+    ['key double slash', [asset({ assetKey: 'p//x' })]],
+    ['key leading slash', [asset({ assetKey: '/p/x' })]],
+    ['unknown role', [asset({ role: 'primary' })]],
+    [
+      'too many assets',
+      Array.from({ length: 51 }, (_, i) =>
+        asset({ assetId: `A${i}`, assetKey: `k${i}`, role: 'GALLERY', sortOrder: i + 1 }),
+      ),
+    ],
+  ])('rejects %s', (_n, assets) =>
+    expect(setInput.safeParse(set(assets as unknown[])).success).toBe(false),
+  )
+  it('rejects unknown keys, a bad owner and a bad id', () => {
+    expect(setInput.safeParse(set([], { url: 'https://evil' })).success).toBe(false)
+    expect(setInput.safeParse(set([], { ownerType: 'banner' })).success).toBe(false)
+    expect(setInput.safeParse(set([], { ownerId: 'x/../y' })).success).toBe(false)
+  })
+})
+
+describe('file checks and copy', () => {
+  it('accepts jpeg/png/webp up to 5 MiB only', () => {
+    expect(checkFile({ type: 'image/webp', size: 1000 })).toBeUndefined()
+    expect(checkFile({ type: 'image/gif', size: 1000 })).toMatch(/JPEG, PNG or WebP/)
+    expect(checkFile({ type: 'image/png', size: 0 })).toMatch(/empty/)
+    expect(checkFile({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })).toMatch(/5 MiB/)
+    expect(checkFile({ type: 'image/svg+xml', size: 10 })).toBeDefined()
+  })
+  it('names the storage blocker and never claims success', () => {
+    const f = (status: number, code?: string) => ({ ok: false as const, status, error: 'x', code })
+    expect(mediaErrorMessage(f(502, 'MEDIA_STORAGE_NOT_CONFIGURED'))).toMatch(
+      /no media storage provider/,
+    )
+    expect(mediaErrorMessage(f(409, 'STALE_VERSION'))).toMatch(/changed since you loaded/)
+    expect(mediaErrorMessage(f(502))).toMatch(/Nothing was changed/)
+  })
+})
+
+describe('media BFF specs', () => {
+  let a: typeof import('@/server/bff/media-actions')
+  beforeAll(async () => {
+    a = await import('@/server/bff/media-actions')
+  })
+  it('set: fixed path, whole-set body, version only when given', () => {
+    const input = a.putMediaSetMutation.input.parse(set([asset()]))
+    expect(a.putMediaSetMutation.backend(input)).toMatchObject({
+      path: '/api/v1/admin/media/product/TZP-1',
+      body: { expectedVersion: 2 },
+    })
+  })
+  it('upload request: strict, bounded, and the signed target never reaches the browser', () => {
+    const ok = { ownerType: 'product', ownerId: 'TZP-1', contentType: 'image/png', sizeBytes: 1000 }
+    expect(a.requestUploadMutation.input.safeParse(ok).success).toBe(true)
+    expect(a.requestUploadMutation.input.safeParse({ ...ok, sizeBytes: 52_428_801 }).success).toBe(
+      false,
+    )
+    expect(
+      a.requestUploadMutation.input.safeParse({ ...ok, contentType: 'text/html' }).success,
+    ).toBe(false)
+    const out = a.requestUploadMutation.toClient({ assetKey: 'p/x', expiresAt: 'soon' })
+    expect(out).toEqual({ ready: true })
+  })
+})
