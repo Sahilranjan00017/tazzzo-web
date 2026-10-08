@@ -223,6 +223,23 @@ describe('upload target route', () => {
   })
 })
 
+describe('size refusals pass on only the limit', () => {
+  it('a target-time 422 carries { reason: size, maxBytes } and nothing else', async () => {
+    const r = await upload(422, {
+      error: { code: 'INVALID_MEDIA', message: 'sizeBytes must be between 1 and 2097152' },
+    })
+    expect(r).toMatchObject({
+      status: 422,
+      body: { code: 'INVALID_MEDIA', detail: { reason: 'size', maxBytes: 2097152 } },
+    })
+    expect(JSON.stringify(r.body)).not.toContain('sizeBytes must')
+    const other = await upload(422, {
+      error: { code: 'INVALID_MEDIA', message: 'unsupported contentType' },
+    })
+    expect(other.body.detail).toBeUndefined()
+  })
+})
+
 describe('media set route', () => {
   const body = {
     assets: [
@@ -262,6 +279,11 @@ describe('media set route', () => {
       status: 422,
       body: { code: 'INVALID_MEDIA' },
     })
+    expect(
+      await put(422, {
+        error: { code: 'INVALID_MEDIA', message: 'stored object size is outside 1..5242880' },
+      }),
+    ).toMatchObject({ status: 422, body: { detail: { reason: 'size', maxBytes: 5242880 } } })
     expect(await put(503, env('MEDIA_STORAGE_UNAVAILABLE'))).toMatchObject({
       status: 502,
       body: { code: 'MEDIA_STORAGE_UNAVAILABLE' },

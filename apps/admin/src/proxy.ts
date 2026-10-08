@@ -30,12 +30,14 @@ export function proxy(request: NextRequest): NextResponse {
 
   const cspNonce = generateCspNonce()
   const isDev = process.env.NODE_ENV === 'development'
+  // Same production test as the server env schema (`NODE_ENV === 'production'`), so both accept the same origins.
+  const production = process.env.NODE_ENV === 'production'
   // Optional, explicit media origins. An invalid value is never added (fail closed); the server env schema rejects it.
   const csp = buildContentSecurityPolicy({
     cspNonce,
     isDev,
-    uploadOrigin: parseCspOrigin(process.env.CMS_MEDIA_UPLOAD_ORIGIN, !isDev),
-    imageOrigin: parseCspOrigin(process.env.CMS_MEDIA_PUBLIC_ORIGIN, !isDev),
+    uploadOrigin: parseCspOrigin(process.env.CMS_MEDIA_UPLOAD_ORIGIN, production),
+    imageOrigin: parseCspOrigin(process.env.CMS_MEDIA_PUBLIC_ORIGIN, production),
   })
 
   const requestHeaders = new Headers(request.headers)

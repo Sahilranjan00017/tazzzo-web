@@ -3,11 +3,11 @@
 import { useEffect, useId, useReducer, useRef, useState, type DragEvent } from 'react'
 import type { BffResult } from '@/lib/bff-client'
 import {
-  DEFAULT_MAX_UPLOAD_BYTES,
   IMAGE_ACCEPT,
   checkImageFile,
   percent,
   uploadImage,
+  uploadLimit,
   uploadReducer,
   type Failed,
   type ImageType,
@@ -67,7 +67,7 @@ export function ImageUploadField({
   describe,
   onUploaded,
   disabled = false,
-  maxBytes = DEFAULT_MAX_UPLOAD_BYTES,
+  maxBytes,
   createXhr,
 }: {
   label: string
@@ -76,6 +76,7 @@ export function ImageUploadField({
   describe: (failure: Failed) => string
   onUploaded: (image: UploadedImage) => void
   disabled?: boolean
+  /** Override of the local size limit (default: the backend's limit once known, else the 50 MiB contract ceiling). */
   maxBytes?: number
   /** Test seam for the storage PUT. */
   createXhr?: () => XMLHttpRequest
@@ -163,7 +164,7 @@ export function ImageUploadField({
     if (chosen.current) revoke(chosen.current.preview)
     chosen.current = undefined
     dispatch({ type: 'select', fileName: file.name })
-    const check = await checkImageFile(file, maxBytes)
+    const check = await checkImageFile(file, maxBytes ?? uploadLimit().bytes)
     if (!check.ok) {
       dispatch({ type: 'invalid', message: check.message })
       setAnnounce('')
@@ -215,6 +216,11 @@ export function ImageUploadField({
       />
       {state.phase === 'requesting' ? (
         <p className="muted">Requesting an upload link for {state.fileName}…</p>
+      ) : null}
+      {state.phase === 'requesting' || state.phase === 'uploading' ? (
+        <button type="button" className="btn" onClick={() => abort.current?.abort()}>
+          Cancel upload
+        </button>
       ) : null}
       {state.phase === 'uploading' ? (
         <div className="upload-progress">

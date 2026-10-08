@@ -151,6 +151,8 @@ export class FakeBackend {
     outage: boolean
     publicBase: boolean
     failNext?: { status: number; count: number }
+    /** The backend's configured upload ceiling (`tazzzo.media.max-upload-bytes`). */
+    maxBytes?: number
   } = { enabled: true, outage: false, publicBase: true }
   readonly objects = new Map<string, { bytes: Buffer; contentType: string }>()
   readonly issued = new Map<string, { contentType: string; size: number }>()
@@ -346,8 +348,12 @@ export class FakeBackend {
         'If-None-Match': '*',
       },
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
-      maxBytes: 5 * 1024 * 1024,
+      maxBytes: this.maxBytes(),
     }
+  }
+
+  maxBytes(): number {
+    return this.storage.maxBytes ?? 5 * 1024 * 1024
   }
 
   publicUrl(key: string): string | undefined {
@@ -355,11 +361,19 @@ export class FakeBackend {
   }
 
   /** Mirrors `MediaIngestVerifier`: exists, size, magic bytes match the declared type. Undefined = ok. */
-  verifyStored(key: string, declared?: string): { status: number; code: string } | undefined {
+  verifyStored(
+    key: string,
+    declared?: string,
+  ): { status: number; code: string; message?: string } | undefined {
     if (this.storage.outage) return { status: 503, code: 'MEDIA_STORAGE_UNAVAILABLE' }
     const o = this.objects.get(key)
-    if (!o || o.bytes.length < 1 || o.bytes.length > 5 * 1024 * 1024)
-      return { status: 422, code: 'INVALID_MEDIA' }
+    if (!o) return { status: 422, code: 'INVALID_MEDIA' }
+    if (o.bytes.length < 1 || o.bytes.length > this.maxBytes())
+      return {
+        status: 422,
+        code: 'INVALID_MEDIA',
+        message: `stored object size is outside 1..${this.maxBytes()}`,
+      }
     const sniffed = sniff(o.bytes)
     if (!sniffed || (declared && declared !== sniffed) || o.contentType !== sniffed)
       return { status: 422, code: 'INVALID_MEDIA' }
@@ -621,8 +635,14 @@ export class FakeBackend {
         sizeBytes: number
       }
       const ext = EXTENSIONS[b.contentType]
-      if (!ext || !(b.sizeBytes >= 1 && b.sizeBytes <= 5 * 1024 * 1024))
-        return json(422, { error: { code: 'INVALID_MEDIA', message: 'unsupported' } })
+      if (!ext) return json(422, { error: { code: 'INVALID_MEDIA', message: 'unsupported' } })
+      if (!(b.sizeBytes >= 1 && b.sizeBytes <= this.maxBytes()))
+        return json(422, {
+          error: {
+            code: 'INVALID_MEDIA',
+            message: `sizeBytes must be between 1 and ${this.maxBytes()}`,
+          },
+        })
       if (!this.products.has(b.ownerId)) return json(404, { error: { code: 'NOT_FOUND' } })
       if (!this.storage.enabled)
         return json(503, {
@@ -733,7 +753,10 @@ export class FakeBackend {
             if (!key.startsWith(prefix))
               return json(422, { error: { code: 'INVALID_MEDIA', message: 'other owner' } })
             const bad = this.verifyStored(key, a.contentType as string | undefined)
-            if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
+            if (bad)
+              return json(bad.status, {
+                error: { code: bad.code, message: bad.message ?? 'detail' },
+              })
           }
         }
         const next = { version: (m?.version ?? 0) + 1, assets: b.assets }

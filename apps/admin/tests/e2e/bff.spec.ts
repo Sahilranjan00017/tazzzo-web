@@ -812,6 +812,26 @@ test('media (mock backend): storage switched off or failing is named, nothing le
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
+test('media (mock backend): the backend upload limit is named from its own refusal, then enforced locally', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await control(request, 'storage', { maxBytes: 10 })
+  await page.goto(MEDIA_PAGE)
+  await chooseImage(page)
+  await expect(page.getByText(/this backend accepts images up to 1 KiB/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await chooseImage(page, 'Image file', 'again.png')
+  await expect(page.getByText(/the limit is 1 KiB/)).toBeVisible()
+  const targets = (await backendRequests(request)).filter(
+    (r) => r.method === 'POST' && r.path === '/api/v1/admin/media/uploads',
+  )
+  expect(targets).toHaveLength(1)
+  expect((await storageRequests(request)).filter((r) => r.method === 'PUT')).toHaveLength(0)
+})
+
 test('media (mock backend): a concurrent change gives a conflict that keeps the edits and offers a reload', async ({
   page,
   request,

@@ -3,7 +3,12 @@ import { z } from 'zod'
 import { setInput, uploadRequestInput } from '@/lib/media'
 import type { UploadTarget } from '@/lib/upload'
 import type { BffMutationSpec } from './mutation'
-import { toUploadTarget, uploadOriginPrecondition, uploadTargetOut } from './upload-target'
+import {
+  sizeLimitDetail,
+  toUploadTarget,
+  uploadOriginPrecondition,
+  uploadTargetOut,
+} from './upload-target'
 
 const setOut = z.object({ ownerType: z.string(), ownerId: z.string(), version: z.number().int() })
 
@@ -28,6 +33,7 @@ export const putMediaSetMutation: BffMutationSpec<
   }),
   output: setOut,
   toClient: (o) => o,
+  errorDetail: sizeLimitDetail,
 }
 
 /**
@@ -49,4 +55,5 @@ export const requestUploadMutation: BffMutationSpec<
   output: uploadTargetOut,
   toClient: toUploadTarget,
   precondition: uploadOriginPrecondition,
+  errorDetail: sizeLimitDetail,
 }
