@@ -48,6 +48,11 @@ const serverEnvSchema = z
       .regex(/^[\x21-\x7e]{32,256}$/)
       .optional()
       .or(z.literal('')),
+    /**
+     * Read here only for the fail-closed rule below; its values are validated with the rate limit settings
+     * (`src/lib/security/rate-limit.ts`).
+     */
+    STOREFRONT_TRUST_PROXY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     const hasName = Boolean(env.TAZZZO_CALLER_NAME)
@@ -57,6 +62,21 @@ const serverEnvSchema = z
         code: 'custom',
         path: [hasName ? 'TAZZZO_CALLER_SECRET' : 'TAZZZO_CALLER_NAME'],
         message: 'TAZZZO_CALLER_NAME and TAZZZO_CALLER_SECRET are set together or not at all',
+      })
+    }
+    // Fail closed: with the trusted-caller credential, every backend read is admitted on the storefront's own (large)
+    // bucket, so the per-visitor limit in proxy.ts is the only thing between visitors and the backend. Without a
+    // trusted proxy that limit is inactive, so production refuses this combination outright.
+    if (
+      env.NODE_ENV === 'production' &&
+      hasName &&
+      hasSecret &&
+      env.STOREFRONT_TRUST_PROXY?.trim() !== 'true'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STOREFRONT_TRUST_PROXY'],
+        message: 'must be true in production when TAZZZO_CALLER_* is set',
       })
     }
     if (

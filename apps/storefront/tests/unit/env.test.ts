@@ -20,18 +20,21 @@ describe('parseServerEnv', () => {
 
   const SECRET = 'a'.repeat(31) + '!~' // 33 visible ASCII characters
 
+  /** Production with the caller credential requires a trusted proxy (fail closed, see the tests below). */
+  const trusted = { ...valid, STOREFRONT_TRUST_PROXY: 'true' }
+
   it('reads the optional trusted-caller credential when both parts are set', () => {
     expect(
-      parseServerEnv({ ...valid, TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: SECRET })
+      parseServerEnv({ ...trusted, TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: SECRET })
         .caller,
     ).toEqual({ name: 'storefront', secret: SECRET })
     const longest = {
       TAZZZO_CALLER_NAME: 'web_store_'.repeat(2),
       TAZZZO_CALLER_SECRET: 'c'.repeat(256),
     }
-    expect(parseServerEnv({ ...valid, ...longest }).caller?.name).toBe('web_store_web_store_')
+    expect(parseServerEnv({ ...trusted, ...longest }).caller?.name).toBe('web_store_web_store_')
     expect(
-      parseServerEnv({ ...valid, TAZZZO_CALLER_NAME: '', TAZZZO_CALLER_SECRET: '' }).caller,
+      parseServerEnv({ ...trusted, TAZZZO_CALLER_NAME: '', TAZZZO_CALLER_SECRET: '' }).caller,
     ).toBeNull()
   })
 
@@ -57,7 +60,7 @@ describe('parseServerEnv', () => {
   ])('rejects caller config %#, naming only the field and never the value', (override, field) => {
     let message = ''
     try {
-      parseServerEnv({ ...valid, ...override })
+      parseServerEnv({ ...trusted, ...override })
     } catch (error) {
       message = (error as Error).message
     }
@@ -66,8 +69,44 @@ describe('parseServerEnv', () => {
   })
 
   it('treats an unset media base as "no images" rather than an error', () => {
-    expect(parseServerEnv({ ...valid, TAZZZO_MEDIA_BASE_URL: undefined }).media).toBeNull()
-    expect(parseServerEnv({ ...valid, TAZZZO_MEDIA_BASE_URL: '' }).media).toBeNull()
+    expect(parseServerEnv({ ...trusted, TAZZZO_MEDIA_BASE_URL: undefined }).media).toBeNull()
+    expect(parseServerEnv({ ...trusted, TAZZZO_MEDIA_BASE_URL: '' }).media).toBeNull()
+  })
+
+  describe('fail closed: production never relays unlimited visitor traffic into the caller bucket', () => {
+    const credential = { TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: SECRET }
+
+    it.each([undefined, '', 'false', 'TRUE', '1', 'yes'])(
+      'rejects the credential in production with STOREFRONT_TRUST_PROXY=%j, naming only that variable',
+      (trust) => {
+        let message = ''
+        try {
+          parseServerEnv({ ...valid, ...credential, STOREFRONT_TRUST_PROXY: trust })
+        } catch (error) {
+          message = (error as Error).message
+        }
+        expect(message).toBe('invalid server environment: STOREFRONT_TRUST_PROXY')
+        expect(message).not.toContain(SECRET)
+      },
+    )
+
+    it('accepts the credential in production behind a trusted proxy', () => {
+      for (const trust of ['true', ' true ']) {
+        expect(
+          parseServerEnv({ ...valid, ...credential, STOREFRONT_TRUST_PROXY: trust }).caller,
+        ).toEqual({ name: 'storefront', secret: SECRET })
+      }
+    })
+
+    it('does not require a trusted proxy without the credential, or outside production', () => {
+      expect(parseServerEnv(valid).caller).toBeNull() // the untrusted default stays valid
+      expect(parseServerEnv({ ...valid, STOREFRONT_TRUST_PROXY: 'false' }).caller).toBeNull()
+      for (const NODE_ENV of ['development', 'test']) {
+        expect(parseServerEnv({ ...valid, ...credential, NODE_ENV }).caller?.name).toBe(
+          'storefront',
+        )
+      }
+    })
   })
 
   it.each([

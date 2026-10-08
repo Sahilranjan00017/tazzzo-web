@@ -13,6 +13,7 @@ async function clientWith(env: Record<string, string>) {
   vi.stubEnv('NODE_ENV', 'production')
   vi.stubEnv('TAZZZO_API_BASE_URL', 'https://api.tazzzo.test')
   vi.stubEnv('TAZZZO_SITE_URL', 'https://www.tazzzo.test')
+  vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // production requires it with a caller credential
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
   return import('@/server/backend/client')
 }
@@ -73,6 +74,18 @@ describe('trusted backend caller', () => {
     const client = await clientWith({ TAZZZO_CALLER_NAME: 'storefront' })
     await expect(client.getJson('/v1/categories')).rejects.toThrow(
       'invalid server environment: TAZZZO_CALLER_SECRET',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('production without a trusted proxy refuses to send the credential at all (fail closed)', async () => {
+    const client = await clientWith({
+      TAZZZO_CALLER_NAME: 'storefront',
+      TAZZZO_CALLER_SECRET: SECRET,
+      STOREFRONT_TRUST_PROXY: 'false',
+    })
+    await expect(client.getJson('/v1/categories')).rejects.toThrow(
+      'invalid server environment: STOREFRONT_TRUST_PROXY',
     )
     expect(fetchMock).not.toHaveBeenCalled()
   })

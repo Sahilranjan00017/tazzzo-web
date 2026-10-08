@@ -52,7 +52,9 @@ export function proxy(request: NextRequest): NextResponse {
  * would spend the visitor's page and search tokens. Why skipping them is safe: Next answers such a request with a
  * prefetch payload that does not render the page body (measured: replayed /search and /c/?cursor prefetches with fresh
  * queries made no backend call). Any request with only ONE of the headers, or `purpose: prefetch`, is a full render
- * and goes through the proxy like any page (the old matcher let those skip the limit and the CSP).
+ * and goes through the proxy like any page (the old matcher let those skip the limit and the CSP). That holds only
+ * while no route has a `loading` boundary and PPR/`cacheComponents` is off; tests/unit/prefetch-exemption-policy.test.ts
+ * fails if either changes.
  *
  * `source` (both entries): every page path; only build assets and the favicon are never seen (no API routes). It is
  * written out twice because Next reads this object statically (no references).

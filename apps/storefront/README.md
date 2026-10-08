@@ -58,7 +58,9 @@ The backend admits every public read through a token bucket keyed by **client IP
 
 > **Production MUST set `STOREFRONT_TRUST_PROXY=true`, behind the ALB, with the app unreachable except through it**
 > (security group: ALB only). Without the setting the per-visitor limit is off; with it but a reachable app, anyone
-> can choose their own `X-Forwarded-For` and so their own bucket.
+> can choose their own `X-Forwarded-For` and so their own bucket. **Fail closed:** in production, setting
+> `TAZZZO_CALLER_*` without `STOREFRONT_TRUST_PROXY=true` is a configuration error (every page 500s, the log names only
+> `STOREFRONT_TRUST_PROXY`), so unlimited visitor traffic can never be relayed into the backend's caller bucket.
 
 A token bucket per visitor on every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets
 never reach it): **60/min, burst 20** by default, plus a stricter **12/min, burst 6** for the uncached paths that always
@@ -86,7 +88,9 @@ request with a 500 and logs only the variable name). Logs are counts only, at mo
   (a home view sends ~10). They cannot be given their own bucket: Next strips these headers before the proxy runs,
   so inside it a prefetch looks like a navigation. Anything else carrying a prefetch-like header (`next-router-prefetch`
   alone, `purpose: prefetch`, `sec-purpose`) is rendered in full by Next and is limited and given the CSP like any
-  page; previously all of those skipped the proxy.
+  page; previously all of those skipped the proxy. The exemption is safe only while no route has a `loading.*`
+  boundary and neither PPR nor `cacheComponents` is enabled (Next then renders no components for a prefetch);
+  `tests/unit/prefetch-exemption-policy.test.ts` fails if that changes.
 
 **Propagation of a CMS change to the website:** the backend reads HOME content live; the storefront caches it for
 60 s and then serves the stale copy once more while it revalidates in the background. Expect **up to ~60 s plus the
