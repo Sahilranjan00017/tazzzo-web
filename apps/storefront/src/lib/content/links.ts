@@ -2,7 +2,8 @@ import { isNodeId, isProductId } from '@/lib/ids'
 
 /**
  * Banner deep links use the backend's CLOSED grammar (`ContentBlock.LINK`):
- * `product:<id>` | `category:<node id>` | `search:<letters, digits and spaces, 2..64>`.
+ * `product:<id>` | `category:<node id>` | `search:<letters, combining marks, digits and spaces, 2..64>`
+ * (tazzzo-backend db3623c: combining marks so Indic search banners, e.g. Devanagari with matras, can be authored).
  * Anything else, including any URL, is not clickable. The website never renders a link it did not build itself.
  */
 export type BannerTarget =
@@ -10,8 +11,9 @@ export type BannerTarget =
   | { kind: 'category'; id: string }
   | { kind: 'search'; text: string }
 
-// `u`: \p{L}/\p{N} are Unicode letter/number classes and the quantifier counts code points, like java.util.regex.
-const SEARCH_TEXT = /^[\p{L}\p{N} ]{2,64}$/u
+// `u`: \p{L}/\p{M}/\p{N} are the Unicode letter/mark/number classes and the quantifier counts code points, like
+// java.util.regex.
+const SEARCH_TEXT = /^[\p{L}\p{M}\p{N} ]{2,64}$/u
 
 export function parseBannerLink(link: unknown): BannerTarget | null {
   if (typeof link !== 'string') return null

@@ -49,8 +49,13 @@ describe('banner link grammar (closed, mirrors backend ContentBlock.LINK)', () =
   it('counts search text in code points like java.util.regex, and keeps backend letter/digit classes', () => {
     expect(bannerHref(`search:${'😀'.repeat(2)}`)).toBeNull() // emoji is not a letter
     expect(bannerHref('search:日本')).toBe('/search?q=%E6%97%A5%E6%9C%AC')
-    // Combining marks (Devanagari matras) are outside [\p{L}\p{N} ], exactly as in the backend grammar.
-    expect(bannerHref('search:चावल')).toBeNull()
+    // Combining marks (Devanagari matras) are allowed, as in the backend grammar since db3623c.
+    expect(bannerHref('search:चावल')).toBe('/search?q=%E0%A4%9A%E0%A4%BE%E0%A4%B5%E0%A4%B2')
+    expect(bannerHref('search:बासमती चावल')).toBe(`/search?q=${encodeURIComponent('बासमती चावल')}`)
+    // Still closed: punctuation, symbols, controls and invisible formatting characters are refused.
+    for (const text of ['चावल!', 'चावल\u200d', 'चावल\u202e', 'a\u0000b', 'rice%20', 'rice/dal']) {
+      expect(bannerHref(`search:${text}`), JSON.stringify(text)).toBeNull()
+    }
   })
 
   it('encodes every target into a site-relative path', () => {
