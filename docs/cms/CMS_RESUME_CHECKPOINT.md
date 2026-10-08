@@ -93,3 +93,9 @@ Gates: eslint, tsc, 235 unit/component, 25 Playwright (mock). Next: CMS-11 suppo
 Support list/case/actions + 3 BFF routes. Shell test no longer hard-codes a planned module. Gates: eslint, tsc, 249 unit/component, 28 Playwright (mock).
 Stack: main <- #5 <- #6 <- #8 <- #9 <- #10 <- #11 <- #12 <- this.
 Next: serviceability (CMS-09), delivery slots (CMS-10), audit + system status (CMS-14), media (CMS-07, 503 until provider), home content/FAQ/app config (CMS-12/13; channel work gated by approval), RBAC/account refinements, security audit (CMS-16), visual QA.
+
+## Update: CMS-09/10 serviceability + delivery slots (branch `cms/09-delivery`, stacked on `cms/11-support`)
+
+`lib/delivery.ts`, backend readers, 4 BFF routes (area put/toggle, window put/toggle), service-area and slots pages.
+Gates: eslint, tsc, 283 unit/component, 31 Playwright (mock). Stack: ... <- #13 <- this.
+Next: audit viewer + system status (CMS-14), media (CMS-07), home content/FAQ/app config (CMS-12/13), account/RBAC page refinement, security review, visual QA.

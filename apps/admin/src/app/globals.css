@@ -795,3 +795,11 @@ fieldset {
 textarea {
   resize: vertical;
 }
+
+.route-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}

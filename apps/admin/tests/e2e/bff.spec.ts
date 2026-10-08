@@ -550,3 +550,82 @@ test('support (mock backend): a general role sees a permission state', async ({ 
   await page.goto('/support')
   await expect(page.locator('.panel-error')).toContainText('Not permitted')
 })
+
+test('service areas (mock backend): edit routes as a whole replace, deactivate, create a new area', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/delivery/service-areas')
+  await page.getByRole('link', { name: '560047' }).click()
+  await expect(page.getByRole('heading', { name: 'Pincode 560047' })).toBeVisible()
+  await page.getByRole('button', { name: 'Add route' }).click()
+  await page.getByLabel('Location id').nth(1).fill('LOC-2')
+  await page.getByLabel('Priority').nth(1).fill('2')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('dialog')).toContainText('replaces ALL routes')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Service area saved.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Deactivate' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Deactivate' }).click()
+  await expect(page.getByText('service area deactivated.')).toBeVisible()
+  await expect(page.getByText('Inactive').first()).toBeVisible()
+
+  await page.goto('/delivery/service-areas/new')
+  await page.getByLabel('Pincode').fill('560048')
+  await page.getByLabel('Service area id (grouping label)').fill('Indiranagar')
+  await page.getByRole('button', { name: 'Review new area' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/\/delivery\/service-areas\/560048$/)
+  const puts = (await backendRequests(request)).filter((r) => r.method === 'PUT')
+  expect(puts.map((p) => p.path)).toEqual([
+    '/api/v1/admin/service-areas/560047',
+    '/api/v1/admin/service-areas/560048',
+  ])
+  expect(puts.every((p) => p.sub === WRITER_SUB)).toBe(true)
+})
+
+test('delivery slots (mock backend): list windows, edit capacity, add a window, deactivate', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/delivery/slots?area=Ejipura')
+  await expect(page.getByText('18:00–20:00')).toBeVisible()
+  await page.getByRole('link', { name: 'Edit' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit “Evening”' })).toBeVisible()
+  await page.getByLabel('Capacity (orders per day)').fill('35')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save window' }).click()
+  await expect(page.getByText('Delivery window saved.')).toBeVisible()
+  await expect(page.getByRole('cell', { name: '35' })).toBeVisible()
+
+  await page.goto('/delivery/slots?area=Ejipura')
+  await page.getByLabel('Window id').fill('morning')
+  await page.getByLabel('Label shown to customers').fill('Morning')
+  await page.getByLabel('Starts').fill('07:00')
+  await page.getByLabel('Ends').fill('09:00')
+  await page.getByRole('button', { name: 'Review new window' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save window' }).click()
+  await expect(page.getByText('07:00–09:00')).toBeVisible()
+
+  await page
+    .getByRole('row', { name: /Morning/ })
+    .getByRole('button', { name: 'Deactivate' })
+    .click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Deactivate' }).click()
+  await expect(page.getByText('delivery window deactivated.')).toBeVisible()
+})
+
+test('delivery (mock backend): a reader browses areas and slots read-only', async ({ page }) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/delivery/service-areas/560047')
+  await expect(
+    page.getByText('Read-only: changing service areas needs the cms-writer role'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review changes' })).toHaveCount(0)
+  await page.goto('/delivery/slots?area=Ejipura')
+  await expect(
+    page.getByText('Read-only: changing delivery windows needs the cms-writer role'),
+  ).toBeVisible()
+})
