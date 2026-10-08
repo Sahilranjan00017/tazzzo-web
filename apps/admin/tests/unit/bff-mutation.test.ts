@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { NextRequest } from 'next/server'
+import { z } from 'zod'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStore } from '../support/memory-store'
 import { fakeIdToken } from '../support/fake-id-token'
@@ -280,6 +281,20 @@ describe('backend call', () => {
     }
   })
 
+  it('503 passes only a well-formed backend code, never the message', async () => {
+    const ok = await run(
+      request(),
+      backend(503, {
+        error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'secret internal detail' },
+      }),
+    )
+    expect(ok.res.status).toBe(502)
+    expect(ok.body).toMatchObject({ error: 'upstream_error', code: 'MEDIA_STORAGE_NOT_CONFIGURED' })
+    expect(JSON.stringify(ok.body)).not.toContain('secret')
+    const bad = await run(request(), backend(503, { error: { code: '<script>', message: 'x' } }))
+    expect(bad.body).not.toHaveProperty('code')
+  })
+
   it('409 passes only a well-formed backend code (e.g. STALE_VERSION)', async () => {
     const stale = await run(
       request(),
@@ -342,5 +357,90 @@ describe('observability', () => {
     for (const e of events) expect(e.routeId).toBe('catalog.product.title')
     const all = logs.join('\n')
     for (const secret of [TOKEN, sessionId, 'Bearer', 'New']) expect(all).not.toContain(secret)
+  })
+})
+
+describe('per-route overrides (bulk import support)', () => {
+  const importSpec = () => ({
+    routeId: 'test.import',
+    method: 'POST' as const,
+    input: z.object({ rows: z.array(z.string()) }).strict(),
+    backend: (i: { rows: string[] }) => ({ path: '/api/v1/admin/imports/x', body: i }),
+    output: z.object({ ok: z.boolean() }),
+    toClient: (o: { ok: boolean }) => o,
+  })
+  const post = (rows: string[]) =>
+    new NextRequest(`${BASE}/api/bff/imports/x`, {
+      method: 'POST',
+      headers: {
+        origin: BASE,
+        'x-tazzzo-csrf': '1',
+        'content-type': 'application/json',
+        cookie: `${COOKIE}=${sessionId}`,
+      },
+      body: JSON.stringify({ rows }),
+    })
+  const big = Array(2000).fill('x'.repeat(50)) // ~110 KB: over the 16 KiB default
+
+  it('keeps the 16 KiB default for specs that do not opt in', async () => {
+    const res = await bff.runBffMutation(
+      importSpec(),
+      post(big),
+      {},
+      { store, fetchImpl: backend(200, { ok: true }), now: Date.now },
+    )
+    expect(res.status).toBe(413)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('allows a larger body only where the spec declares it, and still bounds it', async () => {
+    const spec = { ...importSpec(), maxBodyBytes: 200_000 }
+    const ok = await bff.runBffMutation(
+      spec,
+      post(big),
+      {},
+      { store, fetchImpl: backend(200, { ok: true }), now: Date.now },
+    )
+    expect(ok.status).toBe(200)
+    const tooBig = await bff.runBffMutation(
+      { ...spec, maxBodyBytes: 50_000 },
+      post(big),
+      {},
+      { store, fetchImpl: backend(200, { ok: true }), now: Date.now },
+    )
+    expect(tooBig.status).toBe(413)
+  })
+
+  it('passes only the spec-sanitized error detail on 422, never the raw backend body', async () => {
+    const spec = {
+      ...importSpec(),
+      errorDetail: (b: unknown) => ((b as { rowErrors?: unknown[] }).rowErrors ?? []).length,
+    }
+    const upstream = backend(422, {
+      error: { code: 'INVALID_IMPORT', message: 'secret stack Foo.java:42' },
+      rowErrors: [{ row: 1 }, { row: 2 }],
+    })
+    const res = await bff.runBffMutation(
+      spec,
+      post(['a']),
+      {},
+      { store, fetchImpl: upstream, now: Date.now },
+    )
+    const body = (await res.json()) as Record<string, unknown>
+    expect(res.status).toBe(422)
+    expect(body).toMatchObject({ code: 'INVALID_IMPORT', detail: 2 })
+    expect(JSON.stringify(body)).not.toMatch(/secret|Foo\.java|rowErrors/)
+  })
+
+  it('applies a custom timeout to the backend call', async () => {
+    const spec = { ...importSpec(), timeoutMs: 123_000 }
+    let signal: AbortSignal | null | undefined
+    const f = (async (_u: URL | RequestInfo, init?: RequestInit) => {
+      signal = init?.signal
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }) as typeof fetch
+    await bff.runBffMutation(spec, post(['a']), {}, { store, fetchImpl: f, now: Date.now })
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal!.aborted).toBe(false)
   })
 })

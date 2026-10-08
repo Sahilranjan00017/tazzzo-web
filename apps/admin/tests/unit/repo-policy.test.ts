@@ -70,7 +70,7 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
-  it('uses only the ratified auth/session libraries and exposes only the W2 auth routes (no BFF proxy)', () => {
+  it('uses only the ratified auth/session libraries and exposes only the declared auth and narrow BFF routes (no proxy)', () => {
     const pkg = JSON.parse(read(APP, 'package.json')) as Record<string, Record<string, string>>
     const runtime = Object.keys(pkg.dependencies ?? {})
     expect(runtime).toContain('openid-client')
@@ -82,13 +82,61 @@ describe('no fake or browser-held identity', () => {
     const routes = SOURCE.map((f) => relative(join(APP, 'src', 'app'), f)).filter(
       (r) => r.startsWith('api') || r.endsWith('route.ts'),
     )
-    expect(routes.sort()).toEqual([
-      join('api', 'auth', 'expired', 'route.ts'),
-      join('api', 'auth', 'google', 'callback', 'route.ts'),
-      join('api', 'auth', 'google', 'start', 'route.ts'),
-      join('api', 'auth', 'logout', 'route.ts'),
-      join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
-    ])
+    expect(routes.sort()).toEqual(
+      [
+        join('api', 'auth', 'expired', 'route.ts'),
+        join('api', 'auth', 'google', 'callback', 'route.ts'),
+        join('api', 'auth', 'google', 'start', 'route.ts'),
+        join('api', 'auth', 'logout', 'route.ts'),
+        join('api', 'bff', 'content', 'app-config', 'route.ts'),
+        join('api', 'bff', 'content', 'blocks', '[blockId]', 'route.ts'),
+        join('api', 'bff', 'content', 'blocks', '[blockId]', 'status', 'route.ts'),
+        join('api', 'bff', 'content', 'faqs', 'route.ts'),
+        join('api', 'bff', 'content', 'home', 'blocks', 'route.ts'),
+        join('api', 'bff', 'content', 'home', 'blocks', '[blockId]', 'route.ts'),
+        join('api', 'bff', 'content', 'home', 'reorder', 'route.ts'),
+        join('api', 'bff', 'content', 'home', 'uploads', 'route.ts'),
+        join('api', 'bff', 'delivery', 'service-areas', '[pincode]', '[action]', 'route.ts'),
+        join('api', 'bff', 'delivery', 'service-areas', '[pincode]', 'route.ts'),
+        join(
+          'api',
+          'bff',
+          'delivery',
+          'slots',
+          '[serviceAreaId]',
+          '[windowId]',
+          '[action]',
+          'route.ts',
+        ),
+        join('api', 'bff', 'delivery', 'slots', '[serviceAreaId]', '[windowId]', 'route.ts'),
+        join('api', 'bff', 'imports', '[kind]', 'route.ts'),
+        join('api', 'bff', 'media', '[ownerType]', '[ownerId]', 'route.ts'),
+        join('api', 'bff', 'media', 'uploads', 'route.ts'),
+        join('api', 'bff', 'orders', '[orderId]', 'transition', 'route.ts'),
+        join('api', 'bff', 'support', '[caseId]', 'assign', 'route.ts'),
+        join('api', 'bff', 'support', '[caseId]', 'messages', 'route.ts'),
+        join('api', 'bff', 'support', '[caseId]', 'status', 'route.ts'),
+        join('api', 'bff', 'inventory', '[skuId]', '[locationId]', '[action]', 'route.ts'),
+        join('api', 'bff', 'inventory', '[skuId]', '[locationId]', 'route.ts'),
+        join('api', 'bff', 'pricing', '[skuId]', 'route.ts'),
+        join(
+          'api',
+          'bff',
+          'catalog',
+          'products',
+          '[productId]',
+          'lifecycle',
+          '[action]',
+          'route.ts',
+        ),
+        join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
+        join('api', 'bff', 'catalog', 'products', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'nodes', '[nodeId]', '[action]', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'nodes', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'releases', '[releaseId]', 'publish', 'route.ts'),
+        join('api', 'bff', 'catalog', 'taxonomy', 'releases', 'route.ts'),
+      ].sort(),
+    )
   })
 
   it('has no generic proxy: no catch-all routes, no request-chosen backend target', () => {
@@ -101,7 +149,7 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
-  it('reaches the backend only from the two declared server modules, built from TAZZZO_BACKEND_URL', () => {
+  it('reaches the backend only from the three declared server modules, built from TAZZZO_BACKEND_URL', () => {
     const serverFetchers = SOURCE.filter(
       (f) =>
         /\bfetch(Impl)?\(|fetchImpl\(/.test(read(f)) &&
@@ -109,8 +157,14 @@ describe('no fake or browser-held identity', () => {
     )
     expect(serverFetchers.map((f) => relative(APP, f)).sort()).toEqual([
       join('src', 'server', 'backend', 'admin-me.ts'),
+      join('src', 'server', 'backend', 'read.ts'),
       join('src', 'server', 'bff', 'mutation.ts'),
     ])
+    // The read helper takes its URL from the caller (session-read.ts passes TAZZZO_BACKEND_URL) and never follows redirects.
+    expect(read(join(APP, 'src', 'server', 'backend', 'read.ts'))).toMatch(/redirect: 'error'/)
+    expect(read(join(APP, 'src', 'server', 'backend', 'session-read.ts'))).toMatch(
+      /backendUrl: env\.TAZZZO_BACKEND_URL/,
+    )
     expect(read(join(APP, 'src', 'server', 'bff', 'mutation.ts'))).toMatch(
       /new URL\(call\.path, env\.TAZZZO_BACKEND_URL\)/,
     )
@@ -119,6 +173,18 @@ describe('no fake or browser-held identity', () => {
         expect(url, relative(APP, f)).toMatch(/fetch\(\s*[`'"]\/api\//)
       }
     }
+  })
+
+  it('sends bytes to object storage only from the upload module, never with credentials', () => {
+    const xhr = SOURCE.filter((f) => /XMLHttpRequest\(\)/.test(read(f))).map((f) =>
+      relative(APP, f),
+    )
+    expect(xhr).toEqual([join('src', 'lib', 'upload.ts')])
+    const upload = read(APP, 'src', 'lib', 'upload.ts')
+    expect(upload).toMatch(/xhr\.withCredentials = false/)
+    expect(upload).toMatch(
+      /CREDENTIAL = \/\^\(cookie\|cookie2\|authorization\|proxy-authorization\)\$\/i/,
+    )
   })
 
   it('never holds a shared service token for human requests', () => {

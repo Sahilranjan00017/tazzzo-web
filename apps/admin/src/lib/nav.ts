@@ -31,7 +31,13 @@ export const NAV: readonly NavSection[] = [
     label: 'Overview',
     items: [
       { id: 'home', label: 'Home', href: '/', state: 'available' },
-      { id: 'dashboard', label: 'Dashboard', href: '/dashboard', roles: GENERAL, state: 'planned' },
+      {
+        id: 'dashboard',
+        label: 'Dashboard',
+        href: '/dashboard',
+        roles: GENERAL,
+        state: 'available',
+      },
     ],
   },
   {
@@ -43,31 +49,37 @@ export const NAV: readonly NavSection[] = [
         label: 'Products',
         href: '/catalogue/products',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'taxonomy',
         label: 'Taxonomy',
         href: '/catalogue/taxonomy',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'imports',
         label: 'Imports',
         href: '/catalogue/imports',
-        roles: GENERAL,
-        state: 'planned',
+        roles: ['cms-writer'],
+        state: 'available',
       },
-      { id: 'media', label: 'Media', href: '/catalogue/media', roles: GENERAL, state: 'planned' },
+      { id: 'media', label: 'Media', href: '/catalogue/media', roles: GENERAL, state: 'available' },
     ],
   },
   {
     id: 'commerce',
     label: 'Commerce',
     items: [
-      { id: 'pricing', label: 'Pricing', href: '/pricing', roles: GENERAL, state: 'planned' },
-      { id: 'inventory', label: 'Inventory', href: '/inventory', roles: GENERAL, state: 'planned' },
+      { id: 'pricing', label: 'Pricing', href: '/pricing', roles: GENERAL, state: 'available' },
+      {
+        id: 'inventory',
+        label: 'Inventory',
+        href: '/inventory',
+        roles: GENERAL,
+        state: 'available',
+      },
     ],
   },
   {
@@ -79,28 +91,28 @@ export const NAV: readonly NavSection[] = [
         label: 'Orders',
         href: '/orders',
         roles: ['order-ops', 'support-agent'],
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'service-areas',
         label: 'Service areas',
         href: '/delivery/service-areas',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'slots',
         label: 'Delivery slots',
         href: '/delivery/slots',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       {
         id: 'support',
         label: 'Support',
         href: '/support',
         roles: ['support-agent', 'order-ops'],
-        state: 'planned',
+        state: 'available',
       },
     ],
   },
@@ -113,15 +125,15 @@ export const NAV: readonly NavSection[] = [
         label: 'Home content',
         href: '/content/home',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
-      { id: 'faqs', label: 'FAQs', href: '/content/faqs', roles: GENERAL, state: 'planned' },
+      { id: 'faqs', label: 'FAQs', href: '/content/faqs', roles: GENERAL, state: 'available' },
       {
         id: 'app-config',
         label: 'App config',
         href: '/content/app-config',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
     ],
   },
@@ -134,12 +146,26 @@ export const NAV: readonly NavSection[] = [
         label: 'Audit log',
         href: '/system/audit',
         roles: ['audit-reader'],
-        state: 'planned',
+        state: 'available',
       },
+      {
+        id: 'notifications',
+        label: 'Notifications',
+        href: '/system/notifications',
+        roles: GENERAL,
+        state: 'available',
+      },
+      { id: 'status', label: 'System status', href: '/system/status', state: 'available' },
       { id: 'account', label: 'Profile & access', href: '/account', state: 'available' },
     ],
   },
 ]
+
+/** Href of a module only once it is built AND the viewer's roles can use it, so links never lead to a refusal page. */
+export function moduleHref(id: string, roles: readonly string[]): string | undefined {
+  const item = NAV.flatMap((s) => s.items).find((i) => i.id === id)
+  return item?.state === 'available' && canSee(item, roles) ? item.href : undefined
+}
 
 export function canSee(item: NavItem, roles: readonly string[]): boolean {
   return !item.roles || item.roles.length === 0 || item.roles.some((r) => roles.includes(r))

@@ -76,3 +76,29 @@ describe('proxy: UX-only session-cookie gate', () => {
     }
   })
 })
+
+describe('proxy: media origins use the same production test as the env schema', () => {
+  const saved = { ...process.env }
+  afterEach(() => {
+    process.env = { ...saved }
+  })
+  const csp = () =>
+    proxy(new NextRequest('http://localhost:3000/login')).headers.get('content-security-policy') ??
+    ''
+  it('adds a loopback http upload origin outside production (NODE_ENV test or development)', () => {
+    Object.assign(process.env, {
+      NODE_ENV: 'test',
+      CMS_MEDIA_UPLOAD_ORIGIN: 'http://127.0.0.1:9090',
+    })
+    expect(csp()).toContain("connect-src 'self' http://127.0.0.1:9090")
+  })
+  it('never adds it in production, and never adds an invalid value', () => {
+    Object.assign(process.env, {
+      NODE_ENV: 'production',
+      CMS_MEDIA_UPLOAD_ORIGIN: 'http://127.0.0.1:9090',
+      CMS_MEDIA_PUBLIC_ORIGIN: 'https://*.cdn.example',
+    })
+    expect(csp()).toContain("connect-src 'self';")
+    expect(csp()).toContain("img-src 'self' blob: data:;")
+  })
+})

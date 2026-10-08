@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { AccessMatrix } from '@/components/AccessMatrix'
 import { PageHeader, StatusBadge } from '@/components/ui/primitives'
 import { describeRoles } from '@/lib/roles'
 import { requireAdmin } from '@/server/session/require-session'
@@ -45,6 +46,7 @@ export default async function AccountPage() {
           </ul>
         )}
       </section>
+      <AccessMatrix yourRoles={me.roles} />
       <section className="panel" aria-labelledby="prov-h">
         <h2 id="prov-h">Staff provisioning</h2>
         <p>
