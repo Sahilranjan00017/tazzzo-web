@@ -112,3 +112,11 @@ Remaining: media (CMS-07, BLOCKED_BY_EXTERNAL_PROVIDER for real upload), home co
 MEDIA_STORAGE_NOT_CONFIGURED). File inputs in the media + import components pick up pre-hydration selections (flake fix).
 Gates: eslint, tsc, 328 unit/component, 37 integration, 38 Playwright (mock). CI was green (7/7) on PRs #5-#14 at last check.
 Remaining: home content + FAQ + app config (CMS-12/13), global search + polish (CMS-15), security review doc + release readiness (CMS-16), visual QA (browser), final report.
+
+## Update: CMS-13 FAQ + app config (branch `cms/13-faq-config`, stacked on `cms/07-media`)
+
+`lib/{content,appconfig}.ts`, content BFF (faq create, block update/status, app-config put), FAQ + app-config pages, `server/clock.ts`.
+Gates: eslint, tsc, 366 unit/component, 37 integration, 41 Playwright (mock) all pass locally. CMS-12 home content is intentionally NOT built
+(waits for the backend channel contract; see docs/cms/CMS_MULTICHANNEL_SCOPE_PROPOSAL.md, PR #7).
+Lesson: kill stray `playwright`/`next dev` processes before re-running E2E (a leftover run polluted the shared fake backend).
+Remaining: global search + polish, security review doc, release-readiness doc, visual QA with a browser, final report.

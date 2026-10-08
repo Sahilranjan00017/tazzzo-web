@@ -88,6 +88,10 @@ describe('no fake or browser-held identity', () => {
         join('api', 'auth', 'google', 'callback', 'route.ts'),
         join('api', 'auth', 'google', 'start', 'route.ts'),
         join('api', 'auth', 'logout', 'route.ts'),
+        join('api', 'bff', 'content', 'app-config', 'route.ts'),
+        join('api', 'bff', 'content', 'blocks', '[blockId]', 'route.ts'),
+        join('api', 'bff', 'content', 'blocks', '[blockId]', 'status', 'route.ts'),
+        join('api', 'bff', 'content', 'faqs', 'route.ts'),
         join('api', 'bff', 'delivery', 'service-areas', '[pincode]', '[action]', 'route.ts'),
         join('api', 'bff', 'delivery', 'service-areas', '[pincode]', 'route.ts'),
         join(

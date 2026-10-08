@@ -821,3 +821,8 @@ details summary {
   opacity: 0.5;
   text-decoration: line-through;
 }
+
+.preview-q {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1rem;
+}
