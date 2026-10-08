@@ -10,6 +10,8 @@ export type BffResult<T> =
       error: string
       code?: string
       fields?: string[]
+      /** Sanitized, route-specific detail (e.g. import row errors) supplied by the BFF spec; never raw backend data. */
+      detail?: unknown
       correlationId?: string
       backendRequestId?: string
       retryAfterSeconds?: number
@@ -45,6 +47,7 @@ export async function callBff<T = unknown>(
     status: response.status,
     error: str(json.error) ?? 'error',
     code: str(json.code),
+    ...(json.detail !== undefined ? { detail: json.detail } : {}),
     fields: Array.isArray(json.fields)
       ? json.fields.filter((f) => typeof f === 'string')
       : undefined,

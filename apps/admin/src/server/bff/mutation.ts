@@ -38,6 +38,15 @@ export interface BffMutationSpec<In, Out, Client> {
   backend: (input: In) => BackendCall
   output: z.ZodType<Out>
   toClient: (output: Out) => Client
+  /** Per-route override of the request body bound (default 16 KiB). Set only where a documented backend limit is larger. */
+  maxBodyBytes?: number
+  /** Per-route override of the backend timeout (default 5 s) for operations that are slow by design (bulk import). */
+  timeoutMs?: number
+  /**
+   * For 400/422 only: extract a SAFE, bounded detail object from the backend's error body (e.g. import row errors).
+   * Whatever it returns is merged under `detail`; nothing else from the backend body is ever passed through.
+   */
+  errorDetail?: (body: unknown) => unknown
 }
 
 export interface BffDeps {
@@ -142,7 +151,7 @@ export async function runBffMutation<In, Out, Client>(
 
   let raw: string
   try {
-    raw = await readBoundedText(request, BFF_MAX_BODY_BYTES)
+    raw = await readBoundedText(request, spec.maxBodyBytes ?? BFF_MAX_BODY_BYTES)
   } catch (error) {
     if (error instanceof BodyTooLarge)
       return respond(413, 'invalid_request', { error: 'payload_too_large' })
@@ -200,7 +209,7 @@ export async function runBffMutation<In, Out, Client>(
       body: JSON.stringify(call.body),
       redirect: 'manual',
       cache: 'no-store',
-      signal: AbortSignal.timeout(BFF_BACKEND_TIMEOUT_MS),
+      signal: AbortSignal.timeout(spec.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
     })
   } catch {
     return respond(504, 'upstream_error', { error: 'upstream_unavailable' })
@@ -227,12 +236,17 @@ export async function runBffMutation<In, Out, Client>(
     case 409:
       return respond(409, 'conflict', { error: 'conflict', ...(code ? { code } : {}), ...trace })
     case 400:
-    case 422:
+    case 422: {
+      const detail = spec.errorDetail
+        ? spec.errorDetail(await upstream.json().catch(() => undefined))
+        : undefined
       return respond(upstream.status, 'invalid_request', {
         error: 'invalid_request',
         ...(code ? { code } : {}),
+        ...(detail !== undefined ? { detail } : {}),
         ...trace,
       })
+    }
     case 429: {
       const retryAfter = upstream.headers.get('retry-after') ?? ''
       const extra = /^[1-9][0-9]{0,3}$/.test(retryAfter) ? { 'Retry-After': retryAfter } : undefined

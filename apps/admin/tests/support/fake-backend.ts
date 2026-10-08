@@ -268,6 +268,54 @@ export class FakeBackend {
       }
       return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
     }
+    const imp = url.pathname.match(/^\/api\/v1\/admin\/imports\/(prices|inventory|products)$/)
+    if (imp && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const kind = imp[1]!
+      const b = JSON.parse(body) as { dryRun: boolean; rows: Record<string, unknown>[] }
+      const key = (r: Record<string, unknown>) => String(r.skuId ?? r.id)
+      const rowErrors = b.rows.flatMap((r, row) =>
+        this.products.has(key(r)) || kind === 'products'
+          ? []
+          : [{ row, code: 'UNKNOWN_PRODUCT', message: `no product ${key(r)}` }],
+      )
+      if (rowErrors.length)
+        return json(422, { error: { code: 'INVALID_IMPORT', message: 'rejected' }, rowErrors })
+      const results = b.rows.map((r, row) => {
+        if (b.dryRun)
+          return { row, key: key(r), outcome: 'VALID', version: null, code: null, message: null }
+        if (kind === 'prices') {
+          const existing = this.prices.get(key(r))
+          if (existing && r.expectedVersion !== existing.version)
+            return {
+              row,
+              key: key(r),
+              outcome: 'FAILED',
+              version: null,
+              code: 'STALE_VERSION',
+              message: 'version mismatch',
+            }
+          this.prices.set(key(r), {
+            sellingPricePaise: Number(r.sellingPricePaise),
+            mrpPaise: Number(r.mrpPaise),
+            version: (existing?.version ?? 0) + 1,
+          })
+        }
+        return { row, key: key(r), outcome: 'APPLIED', version: 1, code: null, message: null }
+      })
+      const count = (o: string) => results.filter((r) => r.outcome === o).length
+      return json(200, {
+        importId: 'IMP-abc123',
+        kind,
+        dryRun: b.dryRun,
+        rows: b.rows.length,
+        applied: count('APPLIED'),
+        failed: count('FAILED'),
+        notAttempted: 0,
+        unchanged: 0,
+        results,
+      })
+    }
     const priceMatch = url.pathname.match(/^\/api\/v1\/admin\/prices\/([^/]+)$/)
     if (priceMatch) {
       const sku = decodeURIComponent(priceMatch[1]!)

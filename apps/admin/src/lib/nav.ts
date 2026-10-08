@@ -63,7 +63,7 @@ export const NAV: readonly NavSection[] = [
         label: 'Imports',
         href: '/catalogue/imports',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       { id: 'media', label: 'Media', href: '/catalogue/media', roles: GENERAL, state: 'planned' },
     ],

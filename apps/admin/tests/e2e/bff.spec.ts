@@ -364,3 +364,75 @@ test('inventory (mock backend): unknown location shows a create form with an orp
   ).toBeVisible()
   await expect(page.getByText(/orphan record/)).toBeVisible()
 })
+
+const csv = (text: string) => ({
+  name: 'prices.csv',
+  mimeType: 'text/csv',
+  buffer: Buffer.from(text),
+})
+
+test('imports (mock backend): upload, map, dry run, apply with a per-row failure and a failed-rows download', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/imports')
+  await page
+    .getByLabel('CSV file (UTF-8, up to 2 MiB)')
+    .setInputFiles(csv('SKU,Price,MRP,Version\nTZP-REF-1,110,130,\n'))
+  await expect(page.getByRole('heading', { name: /Map columns/ })).toBeVisible()
+  await expect(page.getByText('1 valid')).toBeVisible()
+  await page.getByRole('button', { name: 'Validate with the backend (dry run)' }).click()
+  await expect(page.getByText(/The dry run passed for all 1 rows/)).toBeVisible()
+  await page.getByRole('button', { name: 'Apply 1 rows…' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Apply import' }).click()
+  // The mock already has a price for TZP-REF-1 and the row has no expected version, so the backend reports a row failure.
+  await expect(page.getByRole('heading', { name: '4. Result' })).toBeVisible()
+  await expect(page.getByText('1 failed', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Download failed rows (CSV)' })).toBeVisible()
+  const calls = (await backendRequests(request)).filter((r) => r.path.includes('/imports/'))
+  expect(calls).toHaveLength(2)
+  expect(calls.every((c) => c.sub === WRITER_SUB)).toBe(true)
+  expect(JSON.parse((calls[0] as unknown as { body: string }).body).dryRun).toBe(true)
+  expect(JSON.parse((calls[1] as unknown as { body: string }).body).dryRun).toBe(false)
+})
+
+test('imports (mock backend): a backend rejection shows the row error and nothing is applied', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/imports')
+  await page
+    .getByLabel('CSV file (UTF-8, up to 2 MiB)')
+    .setInputFiles(csv('SKU,Price,MRP\nTZP-REF-1,110,130\nTZP-NOPE,5,6\n'))
+  await page.getByRole('button', { name: 'Validate with the backend (dry run)' }).click()
+  await expect(page.getByText(/UNKNOWN_PRODUCT: no product TZP-NOPE/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Apply/ })).toHaveCount(0)
+  const calls = (await backendRequests(request)).filter((r) => r.path.includes('/imports/'))
+  expect(calls).toHaveLength(1)
+})
+
+test('imports (mock backend): invalid local rows block the run until skipped; non-CSV files are refused', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/imports')
+  await page.getByLabel('CSV file (UTF-8, up to 2 MiB)').setInputFiles({
+    name: 'x.xlsx',
+    mimeType: 'application/vnd.ms-excel',
+    buffer: Buffer.from('x'),
+  })
+  await expect(page.getByText('Only .csv files are supported')).toBeVisible()
+  await page
+    .getByLabel('CSV file (UTF-8, up to 2 MiB)')
+    .setInputFiles(csv('SKU,Price,MRP\nTZP-REF-1,110,130\nTZP-2,abc,1\n'))
+  await expect(page.getByText('1 with errors')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Validate with the backend (dry run)' }),
+  ).toBeDisabled()
+  await page.getByLabel(/Skip the 1 invalid rows/).check()
+  await expect(
+    page.getByRole('button', { name: 'Validate with the backend (dry run)' }),
+  ).toBeEnabled()
+})
