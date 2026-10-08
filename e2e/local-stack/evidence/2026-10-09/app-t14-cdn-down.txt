@@ -1,0 +1,13 @@
+$ scripts/app-jvm.sh t14-cdn-down   (gradle exit 0)
+junit: tests=1 failures=0 errors=0 skipped=0
+== app JVM checkpoint 't14-cdn-down' backend=http://localhost:8080 cdn=https://localhost:8443
+GET /v1/content/home?channel=app -> 3 blocks (after the app's own mapping)
+  [0] PRODUCT_RAIL 'Weekly picks 190613' ids=[TZP-90000101, TZP-90000102, TZP-90000103]
+  [1] BANNER 'App-only banner 190613' image=https://localhost:8443/c/home/3a08adf1-60a7-4118-8930-5e13ae73120b.png link=Product(productId=TZP-90000101)
+  [2] BANNER 'Both banner 190613' image=https://localhost:8443/c/home/84479301-bbf3-48d9-944a-7baefa961dea.png link=Search(query=basmati)
+ASSERT order of [Weekly picks 190613, App-only banner 190613, Both banner 190613]: OK
+GET /v1/products/TZP-90000101 -> 'Local E2E Basmati Rice 5 kg' gallery=[PRIMARY:https://localhost:8443/p/product/TZP-90000101/160001b0-b8d7-49e4-bf97-9df08bb03422.png]
+image https://localhost:8443/c/home/3a08adf1-60a7-4118-8930-5e13ae73120b.png -> Unavailable (placeholder)
+image https://localhost:8443/c/home/84479301-bbf3-48d9-944a-7baefa961dea.png -> Unavailable (placeholder)
+image https://localhost:8443/p/product/TZP-90000101/160001b0-b8d7-49e4-bf97-9df08bb03422.png -> Unavailable (placeholder)
+== checkpoint 't14-cdn-down' PASSED

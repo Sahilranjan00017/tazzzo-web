@@ -6,7 +6,7 @@ used. All secrets are local random values generated into `run/stack.env`, which 
 
 | Piece        | What runs                                                                                                                                                                                                              | Where                    |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| Backend      | `tazzzo-backend` `integration/media-content` (PR #105), the built jar run with `java -jar` (Java 21)                                                                                                                   | `http://localhost:8080`  |
+| Backend      | `tazzzo-backend` `main` (merged #95, #96, #106), built in a clean worktree of `origin/main` (`tazzzo-backend-e2e-main`), the jar run with `java -jar` (Java 21)                                                        | `http://localhost:8080`  |
 | MongoDB 7    | single-node replica set `rs0` (transactions need it), started like the dev compose stack                                                                                                                               | `127.0.0.1:27117`        |
 | Redis 7      | consumer rate limiter (REDIS mode, permissive local budgets)                                                                                                                                                           | `127.0.0.1:6391`         |
 | Object store | Versity S3 Gateway, **the same image digest `S3SignatureEnforcementIT` pins** (SigV4 + `If-None-Match` enforcing). `posix` backend in the container, ephemeral                                                         | `http://127.0.0.1:7070`  |
@@ -62,7 +62,7 @@ git-ignored `node_modules` symlink, and it uses Chromium from the local Playwrig
 
 ## CMS: what is UI-driven and what is API-driven
 
-The CMS (`apps/admin`, PR #22) has only one login: Google OIDC. Its BFF calls the backend with the signed-in human's
+The CMS (`apps/admin`, merged to `tazzzo-web` `main`) has only one login: Google OIDC. Its BFF calls the backend with the signed-in human's
 Google ID token, and the backend accepts ID tokens **only from Google's issuer**. The CMS's own E2E uses a mock OIDC
 provider together with a **fake** backend. The real backend has no local issuer and no dev session, so the CMS UI can
 only be driven against it by adding an auth bypass, and this harness refuses to add one.

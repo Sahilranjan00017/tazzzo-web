@@ -1,0 +1,66 @@
+# Fresh stack cycle, 2026-10-08T19:05:33Z
+### heads
+backend  5191eb7b95a8463069d57af84ef2896d0b7ef79e (worktree tazzzo-backend-e2e-main, detached at origin/main; dirty files: 0)
+cms      3be81e0467e3c38e4529d1f23ec5ca1d4b209d38 (tazzzo-web origin/main; apps/admin/src tree e24822b3f02f93f3ce9eb9032656932fe2caa1cd)
+store    fd003055c7fa3b06b3e4b82ff93566a67b6c47df (web/01-storefront; dirty files: 0)
+app      c5caed04593499a8f03051cb383e2958fd5e853d (feature/app-home-content; dirty files: 0)
+jar      67544426 9 Oct 00:35 tazzzo-backend-e2e-main/services/catalog-service/target/catalog-service-0.1.0-SNAPSHOT.jar
+### df
+/dev/disk3s5   460Gi   425Gi    10Gi    98%    2.6M  109M    2%   /System/Volumes/Data
+### down.sh
+remaining harness containers: 0
+### up.sh
+== containers (label tazzzo-e2e-local)
+tazzzo-e2e-mongo started
+tazzzo-e2e-redis started
+tazzzo-e2e-s3 started
+== mongo replica set
+rs0 initiated
+== bucket + CORS (S3 API: CreateBucket, PutBucketCors)
+bucket tazzzo-media-local created
+cors set on tazzzo-media-local: PUT from http://localhost:3000, http://127.0.0.1:3000 with content-type, if-none-match
+== CDN stand-in certificate (self-signed, localhost + 127.0.0.1, 2 days)
+cdn started (pid 65140, log run/logs/cdn.log)
+== backend (java -jar, provider=s3 against versitygw, public-base-url=https://localhost:8443)
+backend started (pid 65176, log run/logs/backend.log)
+backend ready: {"status":"UP","components":{"datastore":"OPEN","mongo":"UP","rate_limiter":"UP"}}
+2026-10-09T00:35:42.749+05:30  INFO 65176 --- [tazzzo-catalog-service] [           main] com.tazzzo.media.MediaStorageConfig      : media_storage provider=s3 bucket=tazzzo-media-local region=us-east-1 endpoint=127.0.0.1 path_style=true credentials=static
+### backend process
+java -jar /Users/user/Documents/CEO/Final/tazzzo-workspace/tazzzo-backend-e2e-main/services/catalog-service/target/catalog-service-0.1.0-SNAPSHOT.jar
+java -jar /Users/user/Documents/CEO/Final/tazzzo-workspace/tazzzo-backend-e2e-main/services/catalog-service/target/catalog-service-0.1.0-SNAPSHOT.jar --server.port=8080 --server.address=127.0.0.1
+### listeners
+com.docke 127.0.0.1:27117
+com.docke 127.0.0.1:6391
+com.docke 127.0.0.1:7070
+java 127.0.0.1:8080
+node [::1]:8443
+node 127.0.0.1:8443
+### seed.sh
+== taxonomy release R1
+create R1 -> 201
+publish R1 -> 200
+== products (direct insert, as AbstractConsumerIT.product)
+rs0 [primary] tazzzo_e2e> | | | | 
+rs0 [primary] tazzzo_e2e> | | | | | | TZP-90000101 upserted=1 modified=0
+TZP-90000102 upserted=1 modified=0
+TZP-90000103 upserted=1 modified=0
+
+rs0 [primary] tazzzo_e2e> == prices (admin API)
+TZP-90000101 price -> 201
+TZP-90000102 price -> 201
+TZP-90000103 price -> 201
+== wait for the card projection (grid/rail cards)
+TZV-000001 list: 3 products
+GET /v1/products/TZP-90000101 -> 200
+GET /v1/products/TZP-90000102 -> 200
+GET /v1/products/TZP-90000103 -> 200
+### web.sh start prod (E2E_WEB_REBUILD=1: fresh next build of fd00305)
+building storefront (production)
+web started (pid 65400, log run/logs/web.log)
+storefront (prod) up at http://localhost:3100
+build id: 5-jXKrcLeL7gIf8--PVNW  (Oct  9 00:36:03 2026)
+▲ Next.js 16.3.8 (Turbopack)
+✓ Compiled successfully in 797ms
+Route (app)
+GET / -> 200
+node 127.0.0.1:3100

@@ -9,7 +9,7 @@ EVIDENCE_DIR="${E2E_EVIDENCE_DIR:-$HARNESS_DIR/evidence/$(date +%F)}"
 mkdir -p "$EVIDENCE_DIR"
 
 WORKSPACE="${TAZZZO_WORKSPACE:-/Users/user/Documents/CEO/Final/tazzzo-workspace}"
-BACKEND_DIR="${E2E_BACKEND_DIR:-$WORKSPACE/tazzzo-backend-e2e}"        # integration/media-content
+BACKEND_DIR="${E2E_BACKEND_DIR:-$WORKSPACE/tazzzo-backend-e2e-main}"   # clean worktree of tazzzo-backend origin/main
 STORE_DIR="${E2E_STORE_DIR:-$WORKSPACE/tazzzo-web-store}"              # web/01-storefront
 CMS_DIR="${E2E_CMS_DIR:-$WORKSPACE/tazzzo-web-cms20}"                  # cms/21-home-content
 APP_DIR="${E2E_APP_DIR:-$WORKSPACE/tazzzo-app-content}"                # feature/app-home-content

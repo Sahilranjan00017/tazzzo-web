@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the local stack: MongoDB 7 (single-node replica set), Redis 7, Versity S3 Gateway (bucket + CORS),
-# the HTTPS CDN stand-in, and the backend (integration/media-content) as a real Java process.
+# the HTTPS CDN stand-in, and the backend (tazzzo-backend main, clean worktree) as a real Java process.
 # Then the storefront: scripts/web.sh. Seed: scripts/seed.sh. Stop everything: scripts/down.sh.
 source "$(dirname "$0")/common.sh"
 disk_guard

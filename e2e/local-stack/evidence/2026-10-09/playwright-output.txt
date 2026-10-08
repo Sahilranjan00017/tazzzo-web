@@ -1,0 +1,16 @@
+
+Running 11 tests using 1 worker
+
+  ✓   1 [chromium] › tests/media-content.spec.ts:164:5 › TEST 1-4: product image upload -> object in versitygw -> verified media set -> CDN stand-in (662ms)
+  ✓   2 [chromium] › tests/media-content.spec.ts:232:5 › MEDIA rejections: write-once, MIME, oversize, non-image bytes, missing object, foreign key, tampered size (163ms)
+  ✓   3 [chromium] › tests/media-content.spec.ts:358:5 › TEST 7: website PDP shows the uploaded image from the CDN stand-in (5.4s)
+  ✓   4 [chromium] › tests/media-content.spec.ts:385:5 › TEST 5: app (shared Kotlin, JVM) reads the PDP gallery and fetches the image (2.8s)
+  ✓   5 [chromium] › tests/media-content.spec.ts:392:5 › TEST 8/9/10 + 16: APP-only, WEB-only, BOTH banners and a draft — public channels, admin preview, website, app (53.5s)
+  ✓   6 [chromium] › tests/media-content.spec.ts:477:5 › TEST 11a: scheduled banner — absent now, present in preview at its start (498ms)
+  ✓   7 [chromium] › tests/media-content.spec.ts:496:5 › TEST 13: reorder -> order changes on website and app (1.1m)
+  ✓   8 [chromium] › tests/media-content.spec.ts:522:5 › TEST 15: reader role cannot mutate (403) and nothing changes (41ms)
+  ✓   9 [chromium] › tests/media-content.spec.ts:568:5 › TEST 14: CDN stand-in down -> placeholders, pages still render (website and app) (3.7s)
+  ✓  10 [chromium] › tests/media-content.spec.ts:611:5 › TEST 11b: the scheduled banner goes live at startsAt (public + website) (1.5m)
+  ✓  11 [chromium] › tests/media-content.spec.ts:625:5 › TEST 12: unpublish -> disappears (public immediately, website within its cache window) (1.0m)
+
+  11 passed (4.7m)

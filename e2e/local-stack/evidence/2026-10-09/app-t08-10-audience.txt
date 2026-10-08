@@ -1,0 +1,13 @@
+$ scripts/app-jvm.sh t08-10-audience   (gradle exit 0)
+junit: tests=1 failures=0 errors=0 skipped=0
+== app JVM checkpoint 't08-10-audience' backend=http://localhost:8080 cdn=https://localhost:8443
+GET /v1/content/home?channel=app -> 3 blocks (after the app's own mapping)
+  [0] BANNER 'App-only banner 190613' image=https://localhost:8443/c/home/3a08adf1-60a7-4118-8930-5e13ae73120b.png link=Product(productId=TZP-90000101)
+  [1] BANNER 'Both banner 190613' image=https://localhost:8443/c/home/84479301-bbf3-48d9-944a-7baefa961dea.png link=Search(query=basmati)
+  [2] PRODUCT_RAIL 'Weekly picks 190613' ids=[TZP-90000101, TZP-90000102, TZP-90000103]
+ASSERT order of [App-only banner 190613, Both banner 190613, Weekly picks 190613]: OK
+ASSERT absent 'Web-only banner 190613': OK
+ASSERT absent 'Draft banner 190613': OK
+image https://localhost:8443/c/home/3a08adf1-60a7-4118-8930-5e13ae73120b.png -> Ready bytes=1966 magic=89 50 4e 47
+image https://localhost:8443/c/home/84479301-bbf3-48d9-944a-7baefa961dea.png -> Ready bytes=1966 magic=89 50 4e 47
+== checkpoint 't08-10-audience' PASSED
