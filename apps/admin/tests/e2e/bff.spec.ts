@@ -191,3 +191,35 @@ test('security headers on pages and BFF responses', async ({ page, context }) =>
   }
   expect(api.headers()['cache-control']).toBe('no-store')
 })
+
+test('dashboard (mock backend): shows counts, flags capped values, forwards only the human token', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  const low = page.locator('.kpi', { hasText: 'Low-stock' })
+  await expect(low).toContainText('10,000+')
+  await expect(low).toContainText('Lower bound')
+  await expect(page.locator('.kpi', { hasText: 'Open: confirmed' })).toContainText('7')
+  const calls = (await backendRequests(request)).filter((r) =>
+    r.path.endsWith('/dashboard/summary'),
+  )
+  expect(calls).toHaveLength(1)
+  expect(calls[0]!.sub).toBe(WRITER_SUB)
+  expect(calls[0]!.authorization).toMatch(/^Bearer ey/)
+  expect(calls[0]!.headers['cookie']).toBeUndefined()
+})
+
+test('dashboard (mock backend): a backend outage shows an error with retry and no numbers', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, READER_SUB)
+  await control(request, 'dashboard', { status: 503 })
+  await page.goto('/dashboard')
+  await expect(page.locator('.panel-error')).toContainText('Dashboard unavailable')
+  await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible()
+  await expect(page.locator('.kpi')).toHaveCount(0)
+})

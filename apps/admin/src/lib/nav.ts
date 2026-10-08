@@ -31,7 +31,13 @@ export const NAV: readonly NavSection[] = [
     label: 'Overview',
     items: [
       { id: 'home', label: 'Home', href: '/', state: 'available' },
-      { id: 'dashboard', label: 'Dashboard', href: '/dashboard', roles: GENERAL, state: 'planned' },
+      {
+        id: 'dashboard',
+        label: 'Dashboard',
+        href: '/dashboard',
+        roles: GENERAL,
+        state: 'available',
+      },
     ],
   },
   {
@@ -140,6 +146,12 @@ export const NAV: readonly NavSection[] = [
     ],
   },
 ]
+
+/** Href of a module only once it is built; metrics link here so they never point at a page that does not exist. */
+export function moduleHref(id: string): string | undefined {
+  const item = NAV.flatMap((s) => s.items).find((i) => i.id === id)
+  return item?.state === 'available' ? item.href : undefined
+}
 
 export function canSee(item: NavItem, roles: readonly string[]): boolean {
   return !item.roles || item.roles.length === 0 || item.roles.some((r) => roles.includes(r))

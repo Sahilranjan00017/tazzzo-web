@@ -4,8 +4,8 @@ Updated: 2026-10-06. Re-verify git and PR state before acting on anything below.
 
 ## Reconciliation (verified live)
 
-- tazzzo-web `main` = `origin/main` = `e1a105619b09b431bd4c47c29ec16b6042412bb6` (PR #3 squash).
-- PRs #1-#3 merged. PR #4 (`feature/w4-cms-shell`) OPEN, not merged; merging needs explicit user authorization.
+- tazzzo-web `main` = `175e6092c364fb84f9be18c3354be23b00261462` (PR #4 squash, merged 2026-10-06 on user authorization after head a6a091e had full green CI).
+- PRs #1-#4 merged. Later PRs are never merged without explicit user approval.
 - One worktree, no stashes, only untracked `.serena/` (left alone).
 - web-ci green on PR #4 at the prior head `c1777b0` (run 37372527853).
 - Backend `origin/main` = `c3306b6e894cf5d2b09cc2ef0171b36f3d50d6dc`; security PR #91 still open; Dependabot PRs #82-#89 open.
@@ -40,3 +40,13 @@ product lifecycle action is `/activate`; docs/backend-contracts has no drift aga
 ## Approvals required
 
 - Merge of PR #4 (and any later PR). No deploys, no staging mutations without credentials.
+
+## Update: CMS-01 dashboard (branch `cms/01-dashboard`, stacked on `cms/00-contract-matrix`, which is docs-only off main 175e609)
+
+Added: `src/server/backend/{read,session-read,dashboard}.ts` (narrow server-side GET, human token only, no redirects, 5 s,
+closed result union), `src/lib/{backend-result,dashboard,format}.ts`, `components/dashboard/DashboardView.tsx`,
+`RefreshButton`, `/dashboard` page, green accent tokens, dashboard fake-backend endpoint. `moduleHref()` makes metric links
+appear only once the target module is `available` in nav.
+Local gates: eslint, tsc, 124 unit+component, 37 integration, 10 Playwright (mock backend), build, prettier: all pass.
+NOT done: screenshots/visual QA at 360-1440px, real staging read.
+Convention for later slices: flip the module to `available` in `src/lib/nav.ts`, read via `readAsAdmin`.
