@@ -82,4 +82,38 @@ describe('server environment (W2)', () => {
       expect.objectContaining({ message: expect.not.stringContaining('Super-Secret-Value') }),
     )
   })
+
+  it('accepts optional exact media origins and refuses anything looser', () => {
+    const upload = 'https://tazzzo-media.s3.ap-south-1.amazonaws.com'
+    expect(
+      parseServerEnv({
+        ...valid,
+        CMS_MEDIA_UPLOAD_ORIGIN: upload,
+        CMS_MEDIA_PUBLIC_ORIGIN: 'https://cdn.tazzzo.com',
+      }),
+    ).toMatchObject({
+      CMS_MEDIA_UPLOAD_ORIGIN: upload,
+      CMS_MEDIA_PUBLIC_ORIGIN: 'https://cdn.tazzzo.com',
+    })
+    expect(
+      parseServerEnv({ ...valid, CMS_MEDIA_UPLOAD_ORIGIN: '' }).CMS_MEDIA_UPLOAD_ORIGIN,
+    ).toBeUndefined()
+    for (const bad of ['*', `${upload}/p`, 'http://bucket.example', 'http://127.0.0.1:9090'])
+      expect(() => parseServerEnv({ ...valid, CMS_MEDIA_UPLOAD_ORIGIN: bad }), bad).toThrow(
+        'CMS_MEDIA_UPLOAD_ORIGIN',
+      )
+    expect(() => parseServerEnv({ ...valid, CMS_MEDIA_PUBLIC_ORIGIN: 'https://*.cdn' })).toThrow(
+      'CMS_MEDIA_PUBLIC_ORIGIN',
+    )
+    // Loopback http only outside production (local S3-compatible store).
+    expect(
+      parseServerEnv({
+        ...valid,
+        NODE_ENV: 'development',
+        CMS_BASE_URL: 'http://localhost:3000',
+        SESSION_STORE_URL: 'redis://localhost:6379',
+        CMS_MEDIA_UPLOAD_ORIGIN: 'http://127.0.0.1:9090',
+      }).CMS_MEDIA_UPLOAD_ORIGIN,
+    ).toBe('http://127.0.0.1:9090')
+  })
 })

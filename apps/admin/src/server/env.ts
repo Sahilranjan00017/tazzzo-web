@@ -1,5 +1,6 @@
 import 'server-only'
 import { z } from 'zod'
+import { parseCspOrigin } from '@/lib/security/headers'
 
 /**
  * Server environment, validated at first use and cached. Never expose a server value through a `NEXT_PUBLIC_*`
@@ -29,6 +30,12 @@ const absoluteHttpUrl = z
   .url()
   .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), 'must be http(s)')
 
+/** An optional variable where an empty value means unset. */
+const optionalText = z
+  .string()
+  .optional()
+  .transform((v) => (v === '' ? undefined : v))
+
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']),
@@ -51,8 +58,26 @@ const serverEnvSchema = z
     SESSION_ENCRYPTION_PREVIOUS_KEY: base64Key32.optional(),
     CMS_SESSION_MAX_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
     CMS_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(86_400).default(1_800),
+    /**
+     * Optional. The object-storage origin presigned upload URLs point at (e.g. `https://<bucket>.s3.ap-south-1.amazonaws.com`).
+     * Added to CSP `connect-src` only, and the BFF hands the browser an upload URL only when its origin equals this.
+     * Unset = direct upload is disabled in this deployment.
+     */
+    CMS_MEDIA_UPLOAD_ORIGIN: optionalText,
+    /** Optional. The public media origin (CDN) for thumbnails; added to CSP `img-src` only. */
+    CMS_MEDIA_PUBLIC_ORIGIN: optionalText,
   })
   .superRefine((env, ctx) => {
+    for (const name of ['CMS_MEDIA_UPLOAD_ORIGIN', 'CMS_MEDIA_PUBLIC_ORIGIN'] as const) {
+      const value = env[name]
+      if (value !== undefined && parseCspOrigin(value, env.NODE_ENV === 'production') !== value) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: 'must be an exact https origin (http only for loopback outside production)',
+        })
+      }
+    }
     if (env.NODE_ENV !== 'production') return
     if (new URL(env.CMS_BASE_URL).protocol !== 'https:') {
       ctx.addIssue({
