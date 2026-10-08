@@ -56,6 +56,10 @@ The backend admits every public read through a token bucket keyed by **client IP
 
 ### Per-visitor rate limit (`src/proxy.ts`, `src/lib/security/rate-limit.ts`)
 
+> **Production MUST set `STOREFRONT_TRUST_PROXY=true`, behind the ALB, with the app unreachable except through it**
+> (security group: ALB only). Without the setting the per-visitor limit is off; with it but a reachable app, anyone
+> can choose their own `X-Forwarded-For` and so their own bucket.
+
 A token bucket per visitor on every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets
 never reach it): **60/min, burst 20** by default, plus a stricter **12/min, burst 6** for the uncached paths that always
 cost a backend call (`/search`, `/c/<node>?cursor=...`). A refused request gets `429` with `Retry-After`, a one-line
@@ -75,8 +79,14 @@ request with a 500 and logs only the variable name). Logs are counts only, at mo
     from the right of `X-Forwarded-For` is the visitor, as the ALB appends what it saw; anything the client wrote to
     the left is ignored. A chain too short or an entry that is not a literal IP falls into one shared, limited bucket.
     IPv6 visitors are keyed by their /64. Only safe if the app is reachable through those proxies alone.
-- **Known gap (open):** requests with a `next-router-prefetch` or `purpose: prefetch` header skip the proxy entirely
-  (matcher, unchanged), so they are neither limited nor given the CSP.
+- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch:
+  `rsc: 1` **and** `next-router-prefetch: 1`, the Next server's own rule. Next answers those with a small prefetch
+  payload without rendering the page body (measured: replayed `/search` and `/c/<node>?cursor=` prefetches with fresh
+  queries made no backend call), and charging them would spend a visitor's tokens on `<Link>`s merely scrolled past
+  (a home view sends ~10). They cannot be given their own bucket: Next strips these headers before the proxy runs,
+  so inside it a prefetch looks like a navigation. Anything else carrying a prefetch-like header (`next-router-prefetch`
+  alone, `purpose: prefetch`, `sec-purpose`) is rendered in full by Next and is limited and given the CSP like any
+  page; previously all of those skipped the proxy.
 
 **Propagation of a CMS change to the website:** the backend reads HOME content live; the storefront caches it for
 60 s and then serves the stale copy once more while it revalidates in the background. Expect **up to ~60 s plus the

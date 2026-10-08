@@ -280,3 +280,62 @@ test('trusted backend caller: every backend read carries the credential; the bro
     expect(body).not.toContain('TAZZZO_CALLER')
   }
 })
+
+test('prefetch headers no longer bypass the limit: a header-spoofed burst to /search gets 429', async ({
+  request,
+}) => {
+  const searchCalls = async () =>
+    (await backendRequests()).filter((r) => r.path === '/v1/search').length
+  for (const [ip, spoof] of <Array<[string, Record<string, string>]>>[
+    ['203.0.113.60', { 'next-router-prefetch': '1' }],
+    ['203.0.113.61', { purpose: 'prefetch' }],
+  ]) {
+    const headers = { 'x-forwarded-for': ip, ...spoof }
+    const before = await searchCalls()
+    const statuses: number[] = []
+    for (let i = 0; i < 8; i++) {
+      statuses.push((await request.get(`/search?q=spoof${i}`, { headers })).status())
+    }
+    expect(statuses, JSON.stringify(spoof)).toEqual([200, 200, 200, 200, 200, 200, 429, 429])
+    expect((await searchCalls()) - before, JSON.stringify(spoof)).toBe(6)
+    // Admitted ones are full pages and now carry the CSP (they used to get none).
+    const admitted = await request.get('/', {
+      headers: { ...headers, 'x-forwarded-for': `${ip}9` },
+    })
+    expect(admitted.headers()['content-security-policy']).toMatch(/'nonce-/)
+  }
+})
+
+test("real <Link> prefetching never spends a visitor's page tokens", async ({ page, request }) => {
+  const visitor = '203.0.113.70'
+  await page.setExtraHTTPHeaders({ 'x-forwarded-for': visitor })
+  const prefetches: Array<Promise<{ status: number; forwardedFor: string | undefined }>> = []
+  page.on('response', (response) => {
+    if (response.request().headers()['next-router-prefetch'] === '1') {
+      prefetches.push(
+        response
+          .request()
+          .allHeaders()
+          .then((h) => ({ status: response.status(), forwardedFor: h['x-forwarded-for'] })),
+      )
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/') // 1 page token
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.wheel(0, 1500)
+    await page.waitForTimeout(400)
+  }
+  await expect.poll(() => prefetches.length).toBeGreaterThanOrEqual(5)
+  const seen = await Promise.all(prefetches)
+  // They really were this visitor's prefetches, and none was refused.
+  expect(seen.every((p) => p.status === 200 && p.forwardedFor === visitor)).toBe(true)
+  // Default page burst 20 (+1 token/s refill): had the prefetches been charged, far fewer than 19 would pass now.
+  let admitted = 0
+  while ((await request.get('/', { headers: { 'x-forwarded-for': visitor } })).status() === 200) {
+    admitted += 1
+    if (admitted > 40) break
+  }
+  expect(admitted).toBeGreaterThanOrEqual(19)
+  expect(admitted).toBeLessThanOrEqual(40) // and the visitor is still limited
+})

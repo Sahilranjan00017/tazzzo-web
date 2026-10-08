@@ -36,11 +36,34 @@ describe('proxy matcher', () => {
     }
   })
 
-  it('skips build assets, the favicon and router prefetches', () => {
+  it('skips build assets and the favicon only', () => {
     expect(matches('/_next/static/chunks/app.js')).toBe(false)
     expect(matches('/_next/image?url=x')).toBe(false)
     expect(matches('/favicon.ico')).toBe(false)
-    expect(matches('/', { 'next-router-prefetch': '1' })).toBe(false)
+  })
+
+  it('skips only a genuine router prefetch: rsc=1 AND next-router-prefetch=1 (the Next server rule)', () => {
+    const genuine = { rsc: '1', 'next-router-prefetch': '1' }
+    expect(matches('/search?q=rice', genuine)).toBe(false)
+    expect(
+      matches('/c/TZS-000001?cursor=a', { ...genuine, 'next-router-segment-prefetch': '/_tree' }),
+    ).toBe(false)
+    expect(matches('/', genuine)).toBe(false)
+  })
+
+  it('runs for every prefetch-LOOKING request Next renders in full (these used to skip the limit and the CSP)', () => {
+    for (const headers of <Array<Record<string, string>>>[
+      { 'next-router-prefetch': '1' },
+      { purpose: 'prefetch' },
+      { 'sec-purpose': 'prefetch' },
+      { rsc: '1' }, // an ordinary client-side navigation
+      { rsc: '1', 'next-router-prefetch': '0' },
+      { rsc: '1', 'next-router-prefetch': '11' },
+      { rsc: 'true', 'next-router-prefetch': '1' },
+      { rsc: '1, 1', 'next-router-prefetch': '1' },
+    ]) {
+      expect(matches('/search?q=rice', headers), JSON.stringify(headers)).toBe(true)
+    }
   })
 })
 
@@ -121,5 +144,27 @@ describe('proxy rate limit', () => {
     expect(() => proxy(request('/'))).toThrow(
       'invalid rate limit configuration: STOREFRONT_RATE_LIMIT_BURST',
     )
+  })
+})
+
+describe('proxy rate limit: prefetch-header spoofing', () => {
+  it('a burst to /search carrying a prefetch header is limited like any search (6, then 429)', () => {
+    vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true')
+    for (const spoof of <Array<Record<string, string>>>[
+      { 'next-router-prefetch': '1' },
+      { purpose: 'prefetch' },
+    ]) {
+      resetVisitorLimiter()
+      const statuses = Array.from(
+        { length: 8 },
+        (_, i) =>
+          proxy(
+            new NextRequest(`http://localhost/search?q=x${i}`, {
+              headers: { 'x-forwarded-for': '203.0.113.9', ...spoof },
+            }),
+          ).status,
+      )
+      expect(statuses, JSON.stringify(spoof)).toEqual([200, 200, 200, 200, 200, 200, 429, 429])
+    }
   })
 })
