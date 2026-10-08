@@ -276,3 +276,39 @@ test('products (mock backend): read-only role sees no edit or create controls', 
   await page.goto('/catalogue/products')
   await expect(page.getByRole('link', { name: 'New product' })).toHaveCount(0)
 })
+
+test('taxonomy (mock backend): browse, rename is refused without an open release, then succeeds after opening one', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/taxonomy')
+  await page.getByRole('link', { name: 'Staples' }).click()
+  await expect(page.getByRole('heading', { name: 'Children' })).toBeVisible()
+  await page.getByRole('link', { name: 'Rice' }).click()
+  await expect(page.getByRole('heading', { name: 'Change “Rice”' })).toBeVisible()
+
+  await page.getByLabel('Name', { exact: true }).fill('Rice and grains')
+  await page.getByRole('button', { name: 'Rename' }).click()
+  await expect(page.getByText(/Open a release first/)).toBeVisible()
+
+  await page.goto('/catalogue/taxonomy/releases')
+  await page.getByLabel('New release id').fill('REL-2026-10')
+  await page.getByRole('button', { name: 'Open release' }).click()
+  await expect(page.getByText('Release opened.')).toBeVisible()
+
+  await page.goto('/catalogue/taxonomy?parent=TZC-000001')
+  await page.getByLabel('Name', { exact: true }).fill('Rice and grains')
+  await page.getByRole('button', { name: 'Rename' }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Rice and grains', level: 2 }).first(),
+  ).toBeVisible()
+})
+
+test('taxonomy (mock backend): a reader browses read-only', async ({ page }) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/catalogue/taxonomy?parent=TZC-000001')
+  await expect(
+    page.getByText('Read-only: changing the taxonomy needs the cms-writer role'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Rename' })).toHaveCount(0)
+})

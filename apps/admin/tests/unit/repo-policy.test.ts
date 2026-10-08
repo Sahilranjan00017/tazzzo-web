@@ -90,6 +90,10 @@ describe('no fake or browser-held identity', () => {
       join('api', 'bff', 'catalog', 'products', '[productId]', 'lifecycle', '[action]', 'route.ts'),
       join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
       join('api', 'bff', 'catalog', 'products', 'route.ts'),
+      join('api', 'bff', 'catalog', 'taxonomy', 'nodes', '[nodeId]', '[action]', 'route.ts'),
+      join('api', 'bff', 'catalog', 'taxonomy', 'nodes', 'route.ts'),
+      join('api', 'bff', 'catalog', 'taxonomy', 'releases', '[releaseId]', 'publish', 'route.ts'),
+      join('api', 'bff', 'catalog', 'taxonomy', 'releases', 'route.ts'),
     ])
   })
 

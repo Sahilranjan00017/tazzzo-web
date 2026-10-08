@@ -62,3 +62,9 @@ Convention for later slices: flip the module to `available` in `src/lib/nav.ts`,
   Route allowlist test in repo-policy pins every BFF route; add new routes there deliberately.
 - Stack: main <- cms/00 (PR #5) <- cms/01 (PR #6) <- cms/02. Retarget bases after earlier PRs merge.
 - Next: CMS-03 taxonomy, then pricing, inventory, imports, serviceability, slots, orders, support, audit, RBAC.
+
+## Update: CMS-03 taxonomy (branch `cms/03-taxonomy`, stacked on `cms/02-products`)
+
+Added `lib/taxonomy.ts`, `server/backend/taxonomy.ts`, `server/bff/taxonomy-actions.ts` + 4 BFF routes, taxonomy and releases
+pages, `useBffAction` hook (reuse in later slices). Gates: eslint, tsc, 163 unit+component, 15 Playwright (mock) pass.
+Next: CMS-04 pricing, CMS-05 inventory (both product-discovery based; no list endpoints exist).
