@@ -5,11 +5,13 @@ import { PageHeader, StatusBadge } from '@/components/ui/primitives'
 import type { BackendReadResult } from '@/lib/backend-result'
 import type { MediaSet, OwnerType } from '@/lib/media'
 import { MediaSetEditor } from './MediaSetEditor'
-import { UploadReadiness } from './UploadReadiness'
 
 type R = Exclude<BackendReadResult<MediaSet>, { kind: 'unauthenticated' }>
 
-/** Media for one product or SKU. The admin API returns no public URL, so there is no image preview here. */
+/**
+ * Media for one product or SKU: thumbnails from the backend's resolved public URL when it has one (a neutral placeholder
+ * otherwise), upload/replace/remove and metadata editing for cms-writer, a read-only list for everyone else.
+ */
 export function MediaView({
   owner,
   result,
@@ -24,7 +26,7 @@ export function MediaView({
   const header = (
     <PageHeader
       title="Media"
-      description="Images attached to a product or SKU. The backend returns no public image URL to admins, so previews are not available here."
+      description="Images attached to a product or SKU. Uploads go straight from your browser to media storage; the backend checks each stored file when you save the set."
     />
   )
   const lookup = (
@@ -83,11 +85,12 @@ export function MediaView({
                 version {result.data.version}
               </span>
             </p>
-            <p className="notice" role="note">
-              Verification state is not reported per image. While no storage provider is configured,
-              the backend accepts image keys without checking they exist, so a listed image may not
-              actually be available.
-            </p>
+            {result.data.assets.some((a) => !a.url) ? (
+              <p className="muted">
+                Images without a preview have no public address yet (no public media base is
+                configured on the backend).
+              </p>
+            ) : null}
           </>
         ) : noSet ? (
           <p className="notice" role="status">
@@ -103,28 +106,35 @@ export function MediaView({
           />
         )}
       </section>
-      {result.kind === 'ok' && canWrite ? (
-        result.data.assets.length === 0 ? (
-          <p className="muted">The set is empty.</p>
-        ) : (
-          <section className="panel" aria-labelledby="me-h">
-            <h2 id="me-h">Edit images</h2>
-            <MediaSetEditor
-              key={`${owner.id}:${result.data.version}`}
-              ownerType={owner.type}
-              ownerId={owner.id}
-              set={result.data}
-            />
-          </section>
-        )
+      {canWrite && (result.kind === 'ok' || noSet) ? (
+        <section className="panel" aria-labelledby="me-h">
+          <h2 id="me-h">{noSet ? 'Create the media set' : 'Edit images'}</h2>
+          <MediaSetEditor
+            key={`${owner.id}:${result.kind === 'ok' ? result.data.version : 'new'}`}
+            ownerType={owner.type}
+            ownerId={owner.id}
+            set={result.kind === 'ok' ? result.data : undefined}
+          />
+        </section>
       ) : null}
       {result.kind === 'ok' && !canWrite ? (
         <>
-          <ul>
+          <ul className="media-grid" aria-label="Media assets">
             {result.data.assets.map((a) => (
-              <li key={a.assetId}>
-                <code>{a.assetKey}</code> · {a.role} · order {a.sortOrder}
-                {a.altText ? ` · “${a.altText}”` : ' · no alt text'}
+              <li key={a.assetId} className="media-card">
+                {a.url ? (
+                  // Plain <img>: next/image adds an inline style (blocked by the CSP) and needs remote-host config.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="thumb" src={a.url} alt="" width={96} height={96} />
+                ) : (
+                  <span className="thumb thumb-empty" aria-hidden="true">
+                    No preview
+                  </span>
+                )}
+                <p className="wrap">
+                  <code>{a.assetKey}</code> · {a.role} · order {a.sortOrder}
+                  {a.altText ? ` · “${a.altText}”` : ' · no alt text'}
+                </p>
               </li>
             ))}
           </ul>
@@ -132,9 +142,6 @@ export function MediaView({
             Read-only: changing media needs the cms-writer role.
           </p>
         </>
-      ) : null}
-      {canWrite && (result.kind === 'ok' || noSet) ? (
-        <UploadReadiness ownerType={owner.type} ownerId={owner.id} />
       ) : null}
     </>
   )

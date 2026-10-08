@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 
@@ -141,6 +141,25 @@ export class FakeBackend {
     version: 0,
   }
   readonly requests: RecordedRequest[] = []
+  /**
+   * Object-storage stand-in (S3 presigned PUT semantics): a target is issued for one key, bound to Content-Type,
+   * Content-Length and If-None-Match: * (anything else is 403), write-once (a second PUT is 412), CORS for the browser.
+   * `enabled` false mimics the default backend (503 MEDIA_STORAGE_NOT_CONFIGURED); `outage` makes verification 503.
+   */
+  storage: {
+    enabled: boolean
+    outage: boolean
+    publicBase: boolean
+    failNext?: { status: number; count: number }
+  } = { enabled: true, outage: false, publicBase: true }
+  readonly objects = new Map<string, { bytes: Buffer; contentType: string }>()
+  readonly issued = new Map<string, { contentType: string; size: number }>()
+  readonly storageRequests: {
+    method: string
+    path: string
+    headers: Record<string, string | string[] | undefined>
+    bytes: number
+  }[] = []
   readonly products = new Map<
     string,
     { id: string; title: string; version: number; lifecycle: string }
@@ -165,6 +184,12 @@ export class FakeBackend {
 
   reset(): void {
     this.status = 200
+    this.storage = { enabled: true, outage: false, publicBase: true }
+    this.objects.clear()
+    this.issued.clear()
+    this.storageRequests.length = 0
+    for (const key of ['p/product/tzp-ref-1/a.jpg', 'p/product/tzp-ref-1/b.png'])
+      this.objects.set(key, { bytes: TINY_PNG, contentType: 'image/png' })
     this.mutationOverride = undefined
     this.readyDown = false
     this.dashboardOverride = undefined
@@ -308,9 +333,95 @@ export class FakeBackend {
     }
   }
 
+  /** A presigned-style target for one key (the URL points at this fake's storage endpoint). */
+  issue(key: string, contentType: string, size: number) {
+    this.issued.set(key, { contentType, size })
+    return {
+      assetKey: key,
+      method: 'PUT',
+      url: `${this.url}/__storage/${key}?X-Amz-Signature=fake${randomBytes(4).toString('hex')}`,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(size),
+        'If-None-Match': '*',
+      },
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      maxBytes: 5 * 1024 * 1024,
+    }
+  }
+
+  publicUrl(key: string): string | undefined {
+    return this.storage.publicBase ? `${this.url}/__storage/${key}` : undefined
+  }
+
+  /** Mirrors `MediaIngestVerifier`: exists, size, magic bytes match the declared type. Undefined = ok. */
+  verifyStored(key: string, declared?: string): { status: number; code: string } | undefined {
+    if (this.storage.outage) return { status: 503, code: 'MEDIA_STORAGE_UNAVAILABLE' }
+    const o = this.objects.get(key)
+    if (!o || o.bytes.length < 1 || o.bytes.length > 5 * 1024 * 1024)
+      return { status: 422, code: 'INVALID_MEDIA' }
+    const sniffed = sniff(o.bytes)
+    if (!sniffed || (declared && declared !== sniffed) || o.contentType !== sniffed)
+      return { status: 422, code: 'INVALID_MEDIA' }
+    return undefined
+  }
+
+  private storageRequest(
+    req: IncomingMessage,
+    res: import('node:http').ServerResponse,
+    url: URL,
+    raw: Buffer,
+  ) {
+    const key = decodeURIComponent(url.pathname.slice('/__storage/'.length))
+    this.storageRequests.push({
+      method: req.method ?? '',
+      path: url.pathname,
+      headers: { ...req.headers },
+      bytes: raw.length,
+    })
+    const cors = {
+      'access-control-allow-origin': String(req.headers.origin ?? '*'),
+      vary: 'Origin',
+    }
+    const end = (status: number, headers: Record<string, string> = {}, bytes?: Buffer) => {
+      res.writeHead(status, { ...cors, ...headers })
+      res.end(bytes)
+    }
+    if (req.method === 'OPTIONS')
+      return end(204, {
+        'access-control-allow-methods': 'PUT',
+        'access-control-allow-headers': 'content-type, if-none-match',
+        'access-control-max-age': '60',
+      })
+    if (req.method === 'GET') {
+      const o = this.objects.get(key)
+      return o ? end(200, { 'content-type': o.contentType }, o.bytes) : end(404)
+    }
+    if (req.method !== 'PUT') return end(405)
+    const fail = this.storage.failNext
+    if (fail && fail.count > 0) {
+      fail.count -= 1
+      return end(fail.status)
+    }
+    const signed = this.issued.get(key)
+    if (
+      !signed ||
+      req.headers['content-type'] !== signed.contentType ||
+      Number(req.headers['content-length']) !== signed.size ||
+      req.headers['if-none-match'] !== '*' ||
+      raw.length !== signed.size
+    )
+      return end(403)
+    if (this.objects.has(key)) return end(412)
+    this.objects.set(key, { bytes: raw, contentType: signed.contentType })
+    return end(200)
+  }
+
   private async handle(req: IncomingMessage, res: import('node:http').ServerResponse) {
-    const body = await readBody(req)
+    const raw = await readBody(req)
+    const body = raw.toString('utf8')
     const url = new URL(req.url ?? '/', this.url)
+    if (url.pathname.startsWith('/__storage/')) return this.storageRequest(req, res, url, raw)
     const json = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
       res.writeHead(status, {
         'content-type': 'application/json',
@@ -503,10 +614,22 @@ export class FakeBackend {
       return json(200, { items: [...this.areas.values()] })
     if (url.pathname === '/api/v1/admin/media/uploads' && req.method === 'POST') {
       if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
-      // Today's real backend answer: no storage provider is configured.
-      return json(503, {
-        error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'internal detail: bucket none' },
-      })
+      const b = JSON.parse(body) as {
+        ownerType: string
+        ownerId: string
+        contentType: string
+        sizeBytes: number
+      }
+      const ext = EXTENSIONS[b.contentType]
+      if (!ext || !(b.sizeBytes >= 1 && b.sizeBytes <= 5 * 1024 * 1024))
+        return json(422, { error: { code: 'INVALID_MEDIA', message: 'unsupported' } })
+      if (!this.products.has(b.ownerId)) return json(404, { error: { code: 'NOT_FOUND' } })
+      if (!this.storage.enabled)
+        return json(503, {
+          error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'internal detail: bucket none' },
+        })
+      const key = `p/${b.ownerType}/${b.ownerId.replace(/[^A-Za-z0-9_-]/g, '-')}/${randomUUID()}.${ext}`
+      return json(201, this.issue(key, b.contentType, b.sizeBytes))
     }
     if (url.pathname === '/api/v1/admin/app-config') {
       if (req.method === 'GET') return json(200, this.appConfig)
@@ -590,7 +713,7 @@ export class FakeBackend {
               ownerId: decodeURIComponent(mediaM[2]!),
               version: m.version,
               active: true,
-              assets: m.assets,
+              assets: m.assets.map((a) => ({ ...a, url: this.publicUrl(String(a.assetKey)) })),
             })
           : json(404, { error: { code: 'NOT_FOUND' } })
       if (req.method === 'PUT') {
@@ -601,6 +724,18 @@ export class FakeBackend {
         }
         if (b.expectedVersion === undefined ? m !== undefined : m?.version !== b.expectedVersion)
           return json(409, { error: { code: 'STALE_VERSION' } })
+        if (this.storage.enabled) {
+          const existing = new Set((m?.assets ?? []).map((a) => String(a.assetKey)))
+          const prefix = `p/${mediaM[1]}/${decodeURIComponent(mediaM[2]!).replace(/[^A-Za-z0-9_-]/g, '-')}/`
+          for (const a of b.assets) {
+            const key = String(a.assetKey)
+            if (existing.has(key)) continue
+            if (!key.startsWith(prefix))
+              return json(422, { error: { code: 'INVALID_MEDIA', message: 'other owner' } })
+            const bad = this.verifyStored(key, a.contentType as string | undefined)
+            if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
+          }
+        }
         const next = { version: (m?.version ?? 0) + 1, assets: b.assets }
         this.media.set(key, next)
         return json(m ? 200 : 201, {
@@ -1065,6 +1200,20 @@ export class FakeBackend {
     json: (status: number, payload: unknown) => void,
   ) {
     if (url.pathname === '/__control/requests') return json(200, this.requests)
+    if (url.pathname === '/__control/storage-requests') return json(200, this.storageRequests)
+    if (url.pathname === '/__control/storage' && method === 'POST') {
+      this.storage = {
+        ...this.storage,
+        ...(JSON.parse(body || '{}') as Partial<FakeBackend['storage']>),
+      }
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/bump-media' && method === 'POST') {
+      const { key } = JSON.parse(body) as { key: string }
+      const m = this.media.get(key)
+      if (m) this.media.set(key, { ...m, version: m.version + 1 })
+      return json(200, { ok: true })
+    }
     if (url.pathname === '/__control/reset' && method === 'POST') {
       this.reset()
       return json(200, { ok: true })
@@ -1096,10 +1245,39 @@ export class FakeBackend {
   }
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve) => {
-    let data = ''
-    req.on('data', (chunk) => (data += chunk))
-    req.on('end', () => resolve(data))
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
   })
 }
+
+const EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+}
+
+/** Same closed-world sniff as the backend's `MediaSniffer`. */
+function sniff(b: Buffer): string | undefined {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
+  if (
+    b.length >= 8 &&
+    b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10]))
+  )
+    return 'image/png'
+  if (
+    b.length >= 12 &&
+    b.toString('latin1', 0, 4) === 'RIFF' &&
+    b.toString('latin1', 8, 12) === 'WEBP'
+  )
+    return 'image/webp'
+  return undefined
+}
+
+/** A valid 1x1 PNG, served for the seeded media keys so thumbnails render. */
+export const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+)

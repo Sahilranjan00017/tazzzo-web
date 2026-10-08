@@ -1,10 +1,10 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { MediaSetEditor } from '@/components/media/MediaSetEditor'
 import { MediaView } from '@/components/media/MediaView'
-import { UploadReadiness } from '@/components/media/UploadReadiness'
 import { ToastProvider } from '@/components/ui/Toast'
+import { FakeXhr, JPEG_HEAD, PNG_HEAD, imageFile } from '../support/fake-xhr'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({
@@ -13,8 +13,11 @@ vi.mock('next/navigation', () => ({
 beforeEach(() => {
   refresh.mockClear()
   vi.restoreAllMocks()
+  FakeXhr.reset()
 })
 const wrap = (ui: React.ReactNode) => render(<ToastProvider>{ui}</ToastProvider>)
+const K1 = 'p/product/tzp-1/a.jpg'
+const K2 = 'p/product/tzp-1/b.png'
 const set = {
   ownerType: 'product',
   ownerId: 'TZP-1',
@@ -23,26 +26,43 @@ const set = {
   assets: [
     {
       assetId: 'A1',
-      assetKey: 'p/product/tzp-1/a.jpg',
+      assetKey: K1,
       role: 'PRIMARY',
       sortOrder: 0,
       altText: 'Front',
       width: 800,
       height: 800,
       contentType: 'image/jpeg',
+      url: 'https://cdn.tazzzo.com/p/product/tzp-1/a.jpg',
     },
-    {
-      assetId: 'A2',
-      assetKey: 'p/product/tzp-1/b.png',
-      role: 'GALLERY',
-      sortOrder: 1,
-      altText: null,
-    },
+    { assetId: 'A2', assetKey: K2, role: 'GALLERY', sortOrder: 1, altText: null },
   ],
 }
+const NEW_KEY = 'p/product/TZP-1/9f2c.png'
+const target = (key = NEW_KEY) => ({
+  assetKey: key,
+  method: 'PUT',
+  url: `https://tazzzo-media.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Signature=s`,
+  headers: { 'Content-Type': 'image/png', 'Content-Length': '32', 'If-None-Match': '*' },
+  expiresAt: '2026-10-08T10:05:00Z',
+  maxBytes: 5242880,
+})
+const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 })
+const fail = (status: number, code?: string) =>
+  new Response(JSON.stringify({ error: 'x', ...(code ? { code } : {}) }), { status })
+const png = () => imageFile('front.png', 'image/png', PNG_HEAD)
+const editor = () => (
+  <MediaSetEditor ownerType="product" ownerId="TZP-1" set={set} createXhr={FakeXhr.factory} />
+)
+const dialog = () => screen.getByRole('dialog', { hidden: true })
+const saveButton = () => within(dialog()).getByRole('button', { name: 'Save media', hidden: true })
+const bodies = (f: MockInstance, path: string) =>
+  f.mock.calls
+    .filter((c) => c[0] === path)
+    .map((c) => JSON.parse(String((c[1] as RequestInit).body)))
 
 describe('MediaView', () => {
-  it('warns that listed images are unverified without storage, and offers no preview', () => {
+  it('shows backend thumbnails, a neutral placeholder without a URL, and is read-only for readers', () => {
     wrap(
       <MediaView
         owner={{ type: 'product', id: 'TZP-1' }}
@@ -50,12 +70,17 @@ describe('MediaView', () => {
         canWrite={false}
       />,
     )
-    expect(screen.getAllByRole('note')[0]).toHaveTextContent('without checking they exist')
-    expect(document.querySelector('img')).toBeNull()
+    const imgs = document.querySelectorAll('img')
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.getAttribute('src')).toBe('https://cdn.tazzzo.com/p/product/tzp-1/a.jpg')
+    expect(screen.getByText('No preview')).toBeInTheDocument()
     expect(screen.getByText(/no alt text/)).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('Read-only')
+    expect(screen.queryByLabelText('Image file')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Review|Replace/ })).toBeNull()
   })
-  it('shows no-set, permission and invalid-input states', () => {
-    const { rerender } = wrap(
+  it('lets a writer create a set for an owner that has none', () => {
+    wrap(
       <MediaView
         owner={{ type: 'product', id: 'TZP-1' }}
         result={{ kind: 'not_found' }}
@@ -63,14 +88,16 @@ describe('MediaView', () => {
       />,
     )
     expect(screen.getByText(/has no media set/)).toBeInTheDocument()
-    rerender(
-      <ToastProvider>
-        <MediaView
-          owner={{ type: 'product', id: 'TZP-1' }}
-          result={{ kind: 'forbidden' }}
-          canWrite={false}
-        />
-      </ToastProvider>,
+    expect(screen.getByRole('heading', { name: 'Create the media set' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Image file')).toBeInTheDocument()
+  })
+  it('shows permission and invalid-input states', () => {
+    const { rerender } = wrap(
+      <MediaView
+        owner={{ type: 'product', id: 'TZP-1' }}
+        result={{ kind: 'forbidden' }}
+        canWrite={false}
+      />,
     )
     expect(screen.getByRole('alert')).toHaveTextContent('Not permitted')
     rerender(
@@ -82,99 +109,189 @@ describe('MediaView', () => {
   })
 })
 
-describe('MediaSetEditor', () => {
-  it('validates the primary rule and alt text locally, with no request', async () => {
+describe('MediaSetEditor: metadata', () => {
+  it('labels controls by asset key and validates locally (primary rule, alt-text control characters)', async () => {
     const user = userEvent.setup()
     const f = vi.spyOn(globalThis, 'fetch')
-    wrap(<MediaSetEditor ownerType="product" ownerId="TZP-1" set={set} />)
-    await user.clear(screen.getByLabelText('Order for A1'))
-    await user.type(screen.getByLabelText('Order for A1'), '4')
+    wrap(editor())
+    await user.clear(screen.getByLabelText(`Order for ${K1}`))
+    await user.type(screen.getByLabelText(`Order for ${K1}`), '4')
     await user.click(screen.getByRole('button', { name: 'Review changes' }))
     expect(screen.getByRole('alert')).toHaveTextContent('primary image must have order 0')
-    await user.clear(screen.getByLabelText('Order for A1'))
-    await user.type(screen.getByLabelText('Order for A1'), '0')
-    await user.type(screen.getByLabelText('Alt text for A2'), '<script>')
+    await user.clear(screen.getByLabelText(`Order for ${K1}`))
+    await user.type(screen.getByLabelText(`Order for ${K1}`), '0')
+    // A control character in the middle (pasted text) is refused, as the backend would.
+    await user.click(screen.getByLabelText(`Alt text for ${K2}`))
+    await user.paste('Side\u0007view')
     await user.click(screen.getByRole('button', { name: 'Review changes' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('300 characters or fewer')
+    expect(screen.getByRole('alert')).toHaveTextContent('no control characters')
     expect(f).not.toHaveBeenCalled()
   })
-  it('sends the whole set with the loaded version, drops removed assets, never adds keys', async () => {
+
+  it('saves the whole set with the loaded version and drops removed assets', async () => {
     const user = userEvent.setup()
-    const f = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ data: { version: 4 } }), { status: 200 }))
-    wrap(<MediaSetEditor ownerType="product" ownerId="TZP-1" set={set} />)
-    await user.type(screen.getByLabelText('Alt text for A2'), 'Side view')
-    await user.click(screen.getByLabelText('Remove A1'))
-    await user.click(screen.getByLabelText('Role for A2'))
-    await user.selectOptions(screen.getByLabelText('Role for A2'), 'PRIMARY')
-    await user.clear(screen.getByLabelText('Order for A2'))
-    await user.type(screen.getByLabelText('Order for A2'), '0')
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok({ version: 4 }))
+    wrap(editor())
+    await user.type(screen.getByLabelText(`Alt text for ${K2}`), 'Side view')
+    await user.click(screen.getByLabelText(`Remove ${K1}`))
+    await user.selectOptions(screen.getByLabelText(`Role for ${K2}`), 'PRIMARY')
+    await user.clear(screen.getByLabelText(`Order for ${K2}`))
+    await user.type(screen.getByLabelText(`Order for ${K2}`), '0')
     await user.click(screen.getByRole('button', { name: 'Review changes' }))
-    expect(screen.getByRole('dialog', { hidden: true })).toHaveTextContent('1 removed from the set')
-    await user.click(
-      within(screen.getByRole('dialog', { hidden: true })).getByRole('button', {
-        name: 'Save media',
-        hidden: true,
-      }),
-    )
-    expect(f.mock.calls[0]![0]).toBe('/api/bff/media/product/TZP-1')
-    const body = JSON.parse(String(f.mock.calls[0]![1]?.body))
+    expect(dialog()).toHaveTextContent('1 removed from the set')
+    await user.click(saveButton())
+    const [body] = bodies(f, '/api/bff/media/product/TZP-1')
     expect(body.expectedVersion).toBe(3)
     expect(body.assets).toEqual([
-      {
-        assetId: 'A2',
-        assetKey: 'p/product/tzp-1/b.png',
-        role: 'PRIMARY',
-        sortOrder: 0,
-        altText: 'Side view',
-      },
+      { assetId: 'A2', assetKey: K2, role: 'PRIMARY', sortOrder: 0, altText: 'Side view' },
     ])
+    await waitFor(() => expect(dialog()).not.toHaveAttribute('open'))
+  })
+
+  it('a version conflict keeps the edits on screen and offers an explicit reload', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(fail(409, 'STALE_VERSION'))
+    wrap(editor())
+    await user.type(screen.getByLabelText(`Alt text for ${K2}`), 'Side view')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await user.click(saveButton())
+    const alert = await screen.findByText(/Someone else changed this media set/)
+    expect(alert.closest('[role="alert"]')).not.toBeNull()
+    expect(screen.getByLabelText(`Alt text for ${K2}`)).toHaveValue('Side view')
+    expect(dialog()).not.toHaveAttribute('open')
+    expect(refresh).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Review changes' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Reload latest version' }))
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('any other failure keeps the dialog open and says why (never closes silently)', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(fail(422, 'INVALID_MEDIA'))
+    wrap(editor())
+    await user.type(screen.getByLabelText(`Alt text for ${K2}`), 'Side view')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await user.click(saveButton())
+    expect(
+      await within(dialog()).findByText(/missing from storage/, undefined, {}),
+    ).toBeInTheDocument()
+    expect(dialog()).toHaveAttribute('open')
   })
 })
 
-describe('UploadReadiness', () => {
-  const pick = async (user: ReturnType<typeof userEvent.setup>, file: File) =>
-    user.upload(screen.getByLabelText('Image file'), file)
-  it('rejects a bad file locally and never calls the backend', async () => {
-    const user = userEvent.setup({ applyAccept: false })
-    const f = vi.spyOn(globalThis, 'fetch')
-    wrap(<UploadReadiness ownerType="product" ownerId="TZP-1" />)
-    await pick(user, new File(['x'], 'a.gif', { type: 'image/gif' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('JPEG, PNG or WebP')
-    expect(screen.getByRole('button', { name: 'Check upload readiness' })).toBeDisabled()
-    expect(f).not.toHaveBeenCalled()
-  })
-  it('reports the storage blocker honestly and never claims an upload', async () => {
+describe('MediaSetEditor: upload', () => {
+  it('uploads straight to storage with progress, adds the image, and saves it with role, alt and order', async () => {
     const user = userEvent.setup()
     const f = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: 'upstream_error', code: 'MEDIA_STORAGE_NOT_CONFIGURED' }),
-          { status: 502 },
-        ),
+      .mockImplementation(async (input) =>
+        input === '/api/bff/media/uploads' ? ok(target()) : ok({ version: 4 }),
       )
-    wrap(<UploadReadiness ownerType="product" ownerId="TZP-1" />)
-    await pick(user, new File(['abc'], 'a.png', { type: 'image/png' }))
-    await user.click(screen.getByRole('button', { name: 'Check upload readiness' }))
-    expect(await screen.findByText(/no media storage provider is configured/)).toBeInTheDocument()
-    expect(JSON.parse(String(f.mock.calls[0]![1]?.body))).toEqual({
-      ownerType: 'product',
-      ownerId: 'TZP-1',
-      contentType: 'image/png',
-      sizeBytes: 3,
-    })
-    expect(screen.queryByText(/uploaded successfully|upload complete/i)).toBeNull()
-  })
-  it('even when the backend could issue a target, says nothing was uploaded', async () => {
-    const user = userEvent.setup()
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ data: { ready: true } }), { status: 200 }),
+    wrap(editor())
+    await user.upload(screen.getByLabelText('Image file'), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    expect(bodies(f, '/api/bff/media/uploads')).toEqual([
+      { ownerType: 'product', ownerId: 'TZP-1', contentType: 'image/png', sizeBytes: 32 },
+    ])
+    const x = FakeXhr.last()
+    expect(x.method).toBe('PUT')
+    expect(x.url).toBe(target().url)
+    expect(x.withCredentials).toBe(false)
+    expect(x.headers).toEqual({ 'Content-Type': 'image/png', 'If-None-Match': '*' })
+    x.progress(16, 32)
+    expect(await screen.findByRole('progressbar', { name: 'Uploading front.png' })).toHaveAttribute(
+      'value',
+      '50',
     )
-    wrap(<UploadReadiness ownerType="product" ownerId="TZP-1" />)
-    await pick(user, new File(['abc'], 'a.png', { type: 'image/png' }))
-    await user.click(screen.getByRole('button', { name: 'Check upload readiness' }))
-    expect(await screen.findByText(/nothing was uploaded/)).toBeInTheDocument()
+    x.respond(200)
+    expect(await screen.findByLabelText(`Alt text for ${NEW_KEY}`)).toBeInTheDocument()
+    expect(screen.getByLabelText(`Order for ${NEW_KEY}`)).toHaveValue('2')
+    await user.type(screen.getByLabelText(`Alt text for ${NEW_KEY}`), 'Pack front')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(dialog()).toHaveTextContent('3 images will remain, 1 added')
+    await user.click(saveButton())
+    const [body] = bodies(f, '/api/bff/media/product/TZP-1')
+    expect(body.expectedVersion).toBe(3)
+    expect(body.assets[2]).toMatchObject({
+      assetKey: NEW_KEY,
+      role: 'GALLERY',
+      sortOrder: 2,
+      altText: 'Pack front',
+      contentType: 'image/png',
+    })
+    expect(body.assets[2].assetId).toMatch(/^img-/)
+  })
+
+  it('a used (412) or refused (403) upload link fails visibly; Retry requests a FRESH link', async () => {
+    const user = userEvent.setup()
+    const f = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ok(target()))
+    wrap(editor())
+    await user.upload(screen.getByLabelText('Image file'), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().respond(412)
+    expect(await screen.findByText(/already used/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry upload' }))
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(2))
+    FakeXhr.last().respond(403)
+    expect(await screen.findByText(/link expired or the request did not match/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry upload' }))
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(3))
+    FakeXhr.last().respond(200)
+    expect(await screen.findByLabelText(`Alt text for ${NEW_KEY}`)).toBeInTheDocument()
+    expect(bodies(f, '/api/bff/media/uploads')).toHaveLength(3)
+  })
+
+  it('names a storage outage (retryable) and storage switched off (not retryable)', async () => {
+    const user = userEvent.setup()
+    const f = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(fail(502, 'MEDIA_STORAGE_UNAVAILABLE'))
+    wrap(editor())
+    await user.upload(screen.getByLabelText('Image file'), png())
+    expect(await screen.findByText(/storage is unavailable right now/)).toBeInTheDocument()
+    f.mockResolvedValueOnce(fail(502, 'MEDIA_STORAGE_NOT_CONFIGURED'))
+    await user.click(screen.getByRole('button', { name: 'Retry upload' }))
+    expect(await screen.findByText(/no media storage is configured/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry upload' })).toBeNull()
+    expect(FakeXhr.instances).toHaveLength(0)
+  })
+
+  it('refuses SVG and spoofed files locally: no target request, no bytes sent', async () => {
+    const user = userEvent.setup({ applyAccept: false })
+    const f = vi.spyOn(globalThis, 'fetch')
+    wrap(editor())
+    await user.upload(
+      screen.getByLabelText('Image file'),
+      new File(['<svg onload="x"/>'], 'logo.svg', { type: 'image/svg+xml' }),
+    )
+    expect(await screen.findByText(/SVG images are not accepted/)).toBeInTheDocument()
+    await user.upload(
+      screen.getByLabelText('Image file'),
+      imageFile('a.png', 'image/png', JPEG_HEAD),
+    )
+    expect(await screen.findByText(/labelled PNG but its contents are JPEG/)).toBeInTheDocument()
+    expect(f).not.toHaveBeenCalled()
+    expect(FakeXhr.instances).toHaveLength(0)
+  })
+
+  it('replaces an image: new upload, same slot and asset id, new key', async () => {
+    const user = userEvent.setup()
+    const f = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input) =>
+        input === '/api/bff/media/uploads' ? ok(target()) : ok({ version: 4 }),
+      )
+    wrap(editor())
+    await user.click(screen.getByRole('button', { name: `Replace ${K2}` }))
+    await user.upload(screen.getByLabelText(`Replacement image for ${K2}`), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().respond(200)
+    expect(await screen.findByLabelText(`Order for ${NEW_KEY}`)).toHaveValue('1')
+    expect(screen.queryByLabelText(`Order for ${K2}`)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(dialog()).toHaveTextContent('1 replaced')
+    await user.click(saveButton())
+    const [body] = bodies(f, '/api/bff/media/product/TZP-1')
+    expect(body.assets[1]).toMatchObject({ assetId: 'A2', assetKey: NEW_KEY, sortOrder: 1 })
   })
 })
