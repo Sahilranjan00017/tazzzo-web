@@ -387,6 +387,7 @@ a.nav-link:hover {
 }
 .page-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 .panel {
@@ -994,4 +995,150 @@ input[type='file'] {
   .media-card {
     flex-direction: column;
   }
+}
+
+/* ---- home content: banners, reorder, preview frames ---- */
+.banner-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1rem;
+}
+.banner-images h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+.banner-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+/* App: the app's CMS banner ratio (tazzzo-app RemoteHomeScreen, 528:178), centre crop. */
+.banner-app {
+  aspect-ratio: 528 / 178;
+}
+/* Website (storefront .banner__media): 16:9, and 3:1 on desktop only when every banner of a carousel has a desktop image. */
+.banner-web-16x9 {
+  aspect-ratio: 16 / 9;
+}
+.banner-web-3x1 {
+  aspect-ratio: 3 / 1;
+}
+.banner-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.banner-title {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  max-width: 80%;
+  padding: 0.15rem 0.5rem;
+  color: #fff;
+  background: rgb(20 23 28 / 0.6);
+  border-radius: 0.35rem;
+  font-weight: 600;
+}
+.drag-handle {
+  display: inline-block;
+  margin-right: 0.5rem;
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+}
+.row-dragging {
+  opacity: 0.5;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  padding: 0.5rem 0.75rem;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+.tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.phone-frame,
+.browser-frame {
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.phone-frame {
+  width: min(100%, 24rem);
+  padding: 1.25rem 0.5rem;
+  border-width: 0.6rem;
+  border-color: var(--text);
+  border-radius: 2rem;
+}
+.browser-frame {
+  width: 100%;
+  border-radius: var(--radius);
+}
+.browser-mobile {
+  width: min(100%, 24rem);
+}
+.browser-bar {
+  padding: 0.35rem 0.75rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+.preview-screen {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.75rem;
+  list-style: none;
+}
+.preview-block {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.preview-draft .banner-frame,
+.preview-draft .preview-section {
+  outline: 2px dashed var(--warning);
+  outline-offset: 2px;
+}
+.preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.preview-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+.preview-subtitle {
+  margin: 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }

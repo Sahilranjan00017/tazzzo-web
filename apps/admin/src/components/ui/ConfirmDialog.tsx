@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 
 /**
  * Modal confirmation on the native <dialog> (focus trap, Esc to cancel, inert background). Destructive actions
@@ -32,6 +32,8 @@ export function ConfirmDialog({
   children?: ReactNode
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  // Unique per dialog: a page can hold several (e.g. status actions and an editor), and shared ids would mislabel them.
+  const id = useId()
   useEffect(() => {
     const dialog = ref.current
     if (!dialog) return
@@ -43,15 +45,15 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       className="dialog"
-      aria-labelledby="confirm-title"
-      aria-describedby="confirm-desc"
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-desc`}
       onCancel={(event) => {
         event.preventDefault()
         if (!busy) onCancel()
       }}
     >
-      <h2 id="confirm-title">{title}</h2>
-      <p id="confirm-desc">{description}</p>
+      <h2 id={`${id}-title`}>{title}</h2>
+      <p id={`${id}-desc`}>{description}</p>
       {children}
       <div className="dialog-actions">
         <button

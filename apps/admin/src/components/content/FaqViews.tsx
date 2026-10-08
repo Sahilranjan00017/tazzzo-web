@@ -161,7 +161,8 @@ export function FaqDetailView({
       <>
         <PageHeader title="Not an FAQ" />
         <p className="notice" role="alert">
-          This content entry is a {b.type}, not an FAQ. Home content is managed in its own module.
+          This content entry is a {b.type}, not an FAQ. Home content is managed in{' '}
+          <Link href={`/content/home/${encodeURIComponent(b.blockId)}`}>Home content</Link>.
         </p>
       </>
     )
