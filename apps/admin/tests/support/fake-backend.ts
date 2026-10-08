@@ -82,6 +82,16 @@ export class FakeBackend {
       cancelledBy?: string
     }
   >()
+  readonly cases = new Map<
+    string,
+    {
+      caseId: string
+      status: string
+      version: number
+      assignedTo: string | null
+      messages: { id: string; author: string; staffId?: string; text: string; at: string }[]
+    }
+  >()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -115,6 +125,21 @@ export class FakeBackend {
     this.nodes.clear()
     this.prices.clear()
     this.orders.clear()
+    this.cases.clear()
+    this.cases.set('SUP_1', {
+      caseId: 'SUP_1',
+      status: 'OPEN',
+      version: 2,
+      assignedTo: null,
+      messages: [
+        {
+          id: 'm1',
+          author: 'CUSTOMER',
+          text: '<b>where</b> is my order',
+          at: '2026-10-06T03:30:00Z',
+        },
+      ],
+    })
     this.orders.set('O-100', { orderId: 'O-100', status: 'CONFIRMED', version: 2 })
     this.orders.set('O-101', { orderId: 'O-101', status: 'OUT_FOR_DELIVERY', version: 3 })
     this.stock.clear()
@@ -294,6 +319,71 @@ export class FakeBackend {
         }
       }
       return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
+    }
+    const caseView = (c: NonNullable<ReturnType<typeof this.cases.get>>) => ({
+      ...c,
+      customerId: 'C-1',
+      category: 'ORDER_ISSUE',
+      orderId: 'O-100',
+      subject: 'Late order',
+      createdAt: '2026-10-06T03:30:00Z',
+      updatedAt: '2026-10-06T03:30:00Z',
+    })
+    if (url.pathname === '/api/v1/admin/support/cases' && req.method === 'GET') {
+      const st = url.searchParams.get('status')
+      return json(200, {
+        items: [...this.cases.values()]
+          .filter((c) => !st || c.status === st)
+          .map((c) => ({ ...caseView(c), messageCount: c.messages.length, messages: undefined })),
+      })
+    }
+    const sup = url.pathname.match(
+      /^\/api\/v1\/admin\/support\/cases\/([^/]+)(\/messages|\/assign|\/status)?$/,
+    )
+    if (sup) {
+      const c = this.cases.get(decodeURIComponent(sup[1]!))
+      if (!c) return json(404, { error: { code: 'NOT_FOUND' } })
+      if (req.method === 'GET' && !sup[2]) return json(200, caseView(c))
+      if (req.method === 'POST' && sup[2]) {
+        if (!roles.includes('support-agent')) return json(403, { error: { code: 'FORBIDDEN' } })
+        const b = JSON.parse(body) as { message?: string; to?: string; expectedVersion?: number }
+        if (sup[2] === '/messages') {
+          if (c.status === 'CLOSED') return json(409, { error: { code: 'STATE_CONFLICT' } })
+          const next = {
+            ...c,
+            status: c.status === 'OPEN' ? 'IN_PROGRESS' : c.status,
+            version: c.version + 1,
+            messages: [
+              ...c.messages,
+              {
+                id: `m${c.messages.length + 1}`,
+                author: 'STAFF',
+                staffId: `google:${claims?.sub}`,
+                text: b.message ?? '',
+                at: '2026-10-06T04:00:00Z',
+              },
+            ],
+          }
+          this.cases.set(c.caseId, next)
+          return json(200, caseView(next))
+        }
+        if (b.expectedVersion !== c.version) return json(409, { error: { code: 'STALE_VERSION' } })
+        if (sup[2] === '/assign') {
+          const next = {
+            ...c,
+            assignedTo: `google:${claims?.sub}`,
+            status: c.status === 'OPEN' ? 'IN_PROGRESS' : c.status,
+            version: c.version + 1,
+          }
+          this.cases.set(c.caseId, next)
+          return json(200, caseView(next))
+        }
+        if (c.status === 'CLOSED' || b.to === c.status)
+          return json(409, { error: { code: 'STATE_CONFLICT' } })
+        const next = { ...c, status: String(b.to), version: c.version + 1 }
+        this.cases.set(c.caseId, next)
+        return json(200, caseView(next))
+      }
     }
     const orderView = (o: {
       orderId: string
