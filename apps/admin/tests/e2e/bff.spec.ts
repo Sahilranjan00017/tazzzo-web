@@ -935,3 +935,136 @@ test('go-to box and access matrix (mock backend)', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Go to an id' }).press('Enter')
   await expect(page.locator('.goto-error')).toContainText('cannot open Orders')
 })
+
+test('home content (mock backend): create banner -> upload -> publish -> reorder -> preview per channel', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/home')
+  await expect(page.getByRole('row', { name: /Mango season/ })).toContainText('Live')
+  await expect(page.getByRole('row', { name: /Shop by category/ })).toContainText('Scheduled')
+  await page.getByRole('link', { name: 'New banner' }).click()
+  await expect(page).toHaveURL(/\/content\/home\/new\?type=BANNER/)
+  await page.getByLabel(/^Title/).fill('E2E monsoon offer')
+  await chooseImage(page, 'Mobile image', 'monsoon.png')
+  // First calls of new BFF routes compile under `next dev`: allow for it.
+  await expect(page.getByText(/Uploaded monsoon.png/)).toBeVisible({ timeout: 30_000 })
+  await page.getByLabel('Link type').selectOption('category')
+  await page.getByLabel('Category id').fill('tzc-000001')
+  await expect(page.getByText('category:TZC-000001')).toBeVisible()
+  await page.getByLabel(/^Order/).fill('15')
+  await page.getByRole('button', { name: 'Review new draft' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/\/content\/home\/CB_/, { timeout: 30_000 })
+  await expect(page.getByText('Draft', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: 'Publish' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Both')
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click()
+  await expect(page.getByText('Published.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Unpublish' })).toBeVisible()
+
+  // Reorder with the keyboard controls: the new banner (order 15) moves below Bestsellers.
+  await page.goto('/content/home')
+  await page.getByRole('button', { name: 'Reorder' }).click()
+  await page.getByRole('button', { name: 'Move E2E monsoon offer down' }).click()
+  await expect(page.getByText(/E2E monsoon offer moved to position 3 of 4/)).toBeAttached()
+  await page.getByRole('button', { name: 'Save order' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save order' }).click()
+  await expect(page.getByText('Order saved.')).toBeVisible({ timeout: 30_000 })
+
+  const calls = await backendRequests(request)
+  const writes = calls.filter((r) => r.method !== 'GET' && r.path.includes('/content/'))
+  const bodyOf = (r: Recorded) => JSON.parse((r as unknown as { body: string }).body)
+  const create = writes.find((w) => w.path === '/api/v1/admin/content/blocks')!
+  expect(bodyOf(create)).toMatchObject({
+    placement: 'HOME',
+    type: 'BANNER',
+    audience: 'BOTH',
+    sort: 15,
+    payload: { link: 'category:TZC-000001' },
+  })
+  expect(bodyOf(create).payload.imageAssetKey).toMatch(/^c\/home\//)
+  const reorder = writes.find((w) => w.path.endsWith('/reorder'))!
+  const order = bodyOf(reorder).order as { blockId: string; expectedVersion: number }[]
+  expect(order).toHaveLength(4)
+  expect(order[0]).toEqual({ blockId: 'CB_homebanner000001', expectedVersion: 2 })
+  expect(order[1]).toEqual({ blockId: 'CB_homerail00000001', expectedVersion: 2 })
+  expect(order.map((o) => o.blockId)).not.toContain('CB_homearchived0001')
+  expect(writes.every((w) => w.sub === WRITER_SUB)).toBe(true)
+  const puts = (await storageRequests(request)).filter((r) => r.method === 'PUT')
+  expect(puts).toHaveLength(1)
+  expect(puts[0]!.path).toMatch(/^\/__storage\/c\/home\//)
+  expect(puts[0]!.headers.cookie).toBeUndefined()
+  expect(puts[0]!.headers.authorization).toBeUndefined()
+
+  // Preview: app (phone) with drafts, in the new order; the scheduled grid is not yet visible.
+  await page.goto('/content/home/preview')
+  const items = page.locator('.preview-screen > li')
+  await expect(items).toHaveCount(3)
+  await expect(items.nth(0)).toContainText('Mango season')
+  await expect(items.nth(1)).toContainText('Bestsellers')
+  await expect(items.nth(1)).toContainText('Draft (preview only)')
+  await expect(items.nth(2)).toContainText('E2E monsoon offer')
+  await expect(items.nth(2).getByRole('img')).toHaveAttribute('src', /\/__storage\/c\/home\//)
+  // Website desktop, published only: the app-only rail drops out.
+  await page.getByRole('link', { name: 'Website, desktop' }).click()
+  await expect(page).toHaveURL(/view=web-desktop/)
+  await page.getByLabel('Drafts').selectOption('false')
+  await page.getByRole('button', { name: 'Show preview' }).click()
+  await expect(items).toHaveCount(2)
+  await expect(page.locator('[data-view="web-desktop"]')).toBeVisible()
+  // Preview at a future time (IST): the scheduled grid appears for the website.
+  await page.getByLabel('Preview at (IST, UTC+05:30)').fill('2099-01-02T10:00')
+  await page.getByRole('button', { name: 'Show preview' }).click()
+  await expect(items.filter({ hasText: 'Shop by category' })).toHaveCount(1)
+  const previews = (await backendRequests(request)).filter((r) =>
+    r.path.startsWith('/api/v1/admin/content/preview/home'),
+  )
+  expect(previews.at(-1)!.path).toContain('at=2099-01-02T04%3A30%3A00.000Z')
+  expect(previews.every((r) => r.method === 'GET')).toBe(true)
+})
+
+test('home content (mock backend): a reader sees lists, details and previews with no mutation controls', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/content/home')
+  await expect(page.getByRole('row', { name: /Mango season/ })).toBeVisible()
+  await expect(
+    page.getByText('Read-only: changing Home content needs the cms-writer role'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reorder' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /^New / })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Mango season' }).click()
+  await expect(page.getByRole('button', { name: /Publish|Unpublish|Archive|Review/ })).toHaveCount(
+    0,
+  )
+  await expect(page.getByLabel('Mobile image', { exact: true })).toHaveCount(0)
+  await page.goto('/content/home/preview?view=web-mobile')
+  await expect(page.locator('[data-view="web-mobile"]')).toBeVisible()
+})
+
+test('home content (mock backend): a concurrent edit gives a conflict that keeps the edits and offers a reload', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/home/CB_homebanner000001')
+  await page.getByLabel(/^Title/).fill('My unsaved title')
+  await control(request, 'bump-block', { id: 'CB_homebanner000001' })
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page
+    .getByRole('dialog', { name: /Save changes/ })
+    .getByRole('button', { name: 'Save' })
+    .click()
+  // The first call compiles this BFF route under `next dev`, which can take several seconds.
+  await expect(page.getByText(/This block changed since you loaded it/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByLabel(/^Title/)).toHaveValue('My unsaved title')
+  await page.getByRole('button', { name: 'Reload latest version' }).click()
+  await expect(page.getByLabel(/^Title/)).toHaveValue('Mango season')
+  await expect(page.getByText(/version 3/)).toBeVisible()
+})

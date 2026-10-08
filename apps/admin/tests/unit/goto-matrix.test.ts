@@ -73,6 +73,7 @@ describe('access matrix', () => {
       'service-areas': 'Service areas, delivery slots',
       slots: 'Service areas, delivery slots',
       support: 'Support cases',
+      'home-content': 'Home content, FAQs, app config',
       faqs: 'Home content, FAQs, app config',
       'app-config': 'Home content, FAQs, app config',
       audit: 'Audit log',

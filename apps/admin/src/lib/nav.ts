@@ -125,7 +125,7 @@ export const NAV: readonly NavSection[] = [
         label: 'Home content',
         href: '/content/home',
         roles: GENERAL,
-        state: 'planned',
+        state: 'available',
       },
       { id: 'faqs', label: 'FAQs', href: '/content/faqs', roles: GENERAL, state: 'available' },
       {
