@@ -70,7 +70,7 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
-  it('uses only the ratified auth/session libraries and exposes only the W2 auth routes (no BFF proxy)', () => {
+  it('uses only the ratified auth/session libraries and exposes only the declared auth and narrow BFF routes (no proxy)', () => {
     const pkg = JSON.parse(read(APP, 'package.json')) as Record<string, Record<string, string>>
     const runtime = Object.keys(pkg.dependencies ?? {})
     expect(runtime).toContain('openid-client')
@@ -87,7 +87,9 @@ describe('no fake or browser-held identity', () => {
       join('api', 'auth', 'google', 'callback', 'route.ts'),
       join('api', 'auth', 'google', 'start', 'route.ts'),
       join('api', 'auth', 'logout', 'route.ts'),
+      join('api', 'bff', 'catalog', 'products', '[productId]', 'lifecycle', '[action]', 'route.ts'),
       join('api', 'bff', 'catalog', 'products', '[productId]', 'title', 'route.ts'),
+      join('api', 'bff', 'catalog', 'products', 'route.ts'),
     ])
   })
 

@@ -50,3 +50,15 @@ appear only once the target module is `available` in nav.
 Local gates: eslint, tsc, 124 unit+component, 37 integration, 10 Playwright (mock backend), build, prettier: all pass.
 NOT done: screenshots/visual QA at 360-1440px, real staging read.
 Convention for later slices: flip the module to `available` in `src/lib/nav.ts`, read via `readAsAdmin`.
+
+## Update 2026-10-07: decisions and CMS-02
+
+- Multi-channel scope (PR #7, docs only, NOT merged): direction approved, decisions D1-D9 recorded (legacy=BOTH,
+  `channel=app|web` param, FAQ/legal global, 3 banner variants, 60 s delay disclosed incl. emergency unpublish, media provider
+  external, promotions = separate gap doc, web layouts and web rate-limit identity deferred). Implementation of channel
+  publishing is NOT authorized; no runtime code for it may be written until a scope-authorizing message.
+- CMS-02 products (branch `cms/02-products`, stacked on `cms/01-dashboard`): list/detail/edit/lifecycle/create, BFF routes
+  (`products` POST, `[id]/title` PATCH, `[id]/lifecycle/[action]` POST), `lib/{products,product-create,gtin,bff-client}.ts`.
+  Route allowlist test in repo-policy pins every BFF route; add new routes there deliberately.
+- Stack: main <- cms/00 (PR #5) <- cms/01 (PR #6) <- cms/02. Retarget bases after earlier PRs merge.
+- Next: CMS-03 taxonomy, then pricing, inventory, imports, serviceability, slots, orders, support, audit, RBAC.

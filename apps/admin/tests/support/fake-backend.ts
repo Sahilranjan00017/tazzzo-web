@@ -42,7 +42,10 @@ export class FakeBackend {
   /** Forces a status (and optional body) for the dashboard summary, e.g. 503 to mimic a Mongo outage. */
   dashboardOverride?: { status: number; body?: unknown }
   readonly requests: RecordedRequest[] = []
-  readonly products = new Map<string, { id: string; title: string; version: number }>()
+  readonly products = new Map<
+    string,
+    { id: string; title: string; version: number; lifecycle: string }
+  >()
   private server?: Server
   private jwks?: ReturnType<typeof createRemoteJWKSet>
 
@@ -67,7 +70,12 @@ export class FakeBackend {
     this.dashboardOverride = undefined
     this.requests.length = 0
     this.products.clear()
-    this.products.set('TZP-REF-1', { id: 'TZP-REF-1', title: 'Basmati 5 kg', version: 3 })
+    this.products.set('TZP-REF-1', {
+      id: 'TZP-REF-1',
+      title: 'Basmati 5 kg',
+      version: 3,
+      lifecycle: 'draft',
+    })
   }
 
   private async identify(authorization: string | undefined): Promise<JWTPayload | undefined> {
@@ -143,6 +151,68 @@ export class FakeBackend {
       })
     }
 
+    const full = (p: { id: string; title: string; version: number; lifecycle: string }) => ({
+      ...p,
+      productType: 'single',
+      brandCode: 'BR',
+      classification: { verticalId: 'VT-1', releaseId: 'REL-1', status: 'confirmed' },
+      attributes: { net_weight: '5 kg' },
+      taxonomyPath: 'Staples > Rice',
+    })
+    if (url.pathname === '/api/v1/products' && req.method === 'GET') {
+      const items = [...this.products.values()].map((p) => ({
+        id: p.id,
+        productType: 'single',
+        lifecycle: p.lifecycle,
+        brandCode: 'BR',
+        title: p.title,
+        verticalId: 'VT-1',
+        classificationStatus: 'confirmed',
+        version: p.version,
+      }))
+      return json(200, { items })
+    }
+    if (url.pathname === '/api/v1/products' && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const input = JSON.parse(body) as { id: string; title: string }
+      if (this.products.has(input.id)) return json(409, { error: { code: 'IDENTITY_COLLISION' } })
+      const created = { id: input.id, title: input.title, version: 1, lifecycle: 'draft' }
+      this.products.set(created.id, created)
+      return json(201, full(created))
+    }
+    const lifecycle = url.pathname.match(
+      /^\/api\/v1\/products\/([^/]+)\/(activate|retire|revive|archive)$/,
+    )
+    if (lifecycle && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const current = this.products.get(decodeURIComponent(lifecycle[1]!))
+      if (!current) return json(404, { error: { code: 'NOT_FOUND' } })
+      if (Number(req.headers['if-match']) !== current.version)
+        return json(409, { error: { code: 'STALE_VERSION' } })
+      const to = {
+        activate: 'active',
+        retire: 'discontinued',
+        revive: 'active',
+        archive: 'archived',
+      }[lifecycle[2] as 'activate']
+      const legal: Record<string, string[]> = {
+        activate: ['draft'],
+        retire: ['active'],
+        revive: ['discontinued'],
+        archive: ['discontinued'],
+      }
+      if (!legal[lifecycle[2]!]!.includes(current.lifecycle))
+        return json(409, { error: { code: 'STATE_CONFLICT' } })
+      const next = { ...current, lifecycle: to, version: current.version + 1 }
+      this.products.set(next.id, next)
+      return json(200, full(next))
+    }
+    const getProduct = url.pathname.match(/^\/api\/v1\/products\/([^/]+)$/)
+    if (getProduct && req.method === 'GET') {
+      const found = this.products.get(decodeURIComponent(getProduct[1]!))
+      return found ? json(200, full(found)) : json(404, { error: { code: 'NOT_FOUND' } })
+    }
+
     const product = url.pathname.match(/^\/api\/v1\/products\/([^/]+)$/)
     if (product && req.method === 'PATCH') {
       const o = this.mutationOverride
@@ -177,7 +247,6 @@ export class FakeBackend {
       return json(200, {
         ...next,
         productType: 'single',
-        lifecycle: 'active',
         brandCode: 'BR',
         classification: {},
         attributes: {},
@@ -196,6 +265,17 @@ export class FakeBackend {
     if (url.pathname === '/__control/requests') return json(200, this.requests)
     if (url.pathname === '/__control/reset' && method === 'POST') {
       this.reset()
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/bump-product' && method === 'POST') {
+      const { id } = JSON.parse(body) as { id: string }
+      const p = this.products.get(id)
+      if (p)
+        this.products.set(id, {
+          ...p,
+          version: p.version + 1,
+          title: `${p.title} (edited elsewhere)`,
+        })
       return json(200, { ok: true })
     }
     if (url.pathname === '/__control/dashboard' && method === 'POST') {

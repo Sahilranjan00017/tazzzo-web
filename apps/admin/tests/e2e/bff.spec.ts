@@ -223,3 +223,56 @@ test('dashboard (mock backend): a backend outage shows an error with retry and n
   await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible()
   await expect(page.locator('.kpi')).toHaveCount(0)
 })
+
+test('products (mock backend): list, open, rename, activate; reader is read-only', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/products')
+  await expect(page.getByRole('link', { name: 'TZP-REF-1' })).toBeVisible()
+  await page.getByRole('link', { name: 'TZP-REF-1' }).click()
+  await expect(page.getByRole('heading', { name: 'Basmati 5 kg' })).toBeVisible()
+
+  await page.getByLabel('Title', { exact: true }).fill('Basmati 10 kg')
+  await page.getByRole('button', { name: 'Save title' }).click()
+  await expect(page.getByRole('heading', { name: 'Basmati 10 kg' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Activate' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Activate' }).click()
+  await expect(page.getByText('active', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retire' })).toBeVisible()
+
+  const writes = (await backendRequests(request)).filter(
+    (r) => r.method !== 'GET' && r.path.includes('/products/'),
+  )
+  expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual([
+    'PATCH /api/v1/products/TZP-REF-1',
+    'POST /api/v1/products/TZP-REF-1/activate',
+  ])
+  expect(writes.every((w) => w.sub === WRITER_SUB)).toBe(true)
+})
+
+test('products (mock backend): a concurrent edit gives a stale-version message and a reload, not an overwrite', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/products/TZP-REF-1')
+  await page.getByLabel('Title', { exact: true }).fill('Mine')
+  await control(request, 'bump-product', { id: 'TZP-REF-1' })
+  await page.getByRole('button', { name: 'Save title' }).click()
+  await expect(page.getByText(/changed this since you loaded/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: /edited elsewhere/ })).toBeVisible()
+})
+
+test('products (mock backend): read-only role sees no edit or create controls', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/catalogue/products/TZP-REF-1')
+  await expect(page.getByText('Read-only: editing needs the cms-writer role')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save title' })).toHaveCount(0)
+  await page.goto('/catalogue/products')
+  await expect(page.getByRole('link', { name: 'New product' })).toHaveCount(0)
+})
