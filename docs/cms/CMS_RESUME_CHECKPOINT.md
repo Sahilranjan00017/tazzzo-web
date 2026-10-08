@@ -68,3 +68,10 @@ Convention for later slices: flip the module to `available` in `src/lib/nav.ts`,
 Added `lib/taxonomy.ts`, `server/backend/taxonomy.ts`, `server/bff/taxonomy-actions.ts` + 4 BFF routes, taxonomy and releases
 pages, `useBffAction` hook (reuse in later slices). Gates: eslint, tsc, 163 unit+component, 15 Playwright (mock) pass.
 Next: CMS-04 pricing, CMS-05 inventory (both product-discovery based; no list endpoints exist).
+
+## Update: CMS-04 pricing + CMS-05 inventory (branch `cms/04-pricing-inventory`, stacked on `cms/03-taxonomy`)
+
+`lib/{money,commerce}.ts`, `server/backend/commerce.ts`, `server/bff/commerce-actions.ts` + 3 routes, `/pricing`, `/inventory`.
+Gates: eslint, tsc, 193 unit+component, 37 integration, 19 Playwright (mock), build, prettier pass.
+Dashboard no longer links low/out-of-stock counts to a page (no list endpoint exists; link would mislead).
+Stack: main <- #5 <- #6 <- #8 <- #9 <- this. Next: CMS-06 imports (needs contract 3.5), then serviceability, slots, orders, support, audit.

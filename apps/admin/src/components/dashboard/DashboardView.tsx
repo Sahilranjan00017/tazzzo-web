@@ -127,14 +127,12 @@ export function DashboardView({ result }: { result: DashboardResult }) {
         <Metric
           label="Low-stock"
           count={d.inventory.low_stock}
-          moduleId="inventory"
           tone="warning"
           hint="Counts on-hand only; reserved stock is not subtracted."
         />
         <Metric
           label="Out-of-stock"
           count={d.inventory.out_of_stock}
-          moduleId="inventory"
           tone="danger"
           hint="Counts on-hand only; reserved stock is not subtracted."
         />

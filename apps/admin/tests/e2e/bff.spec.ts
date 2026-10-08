@@ -312,3 +312,55 @@ test('taxonomy (mock backend): a reader browses read-only', async ({ page }) => 
   ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Rename' })).toHaveCount(0)
 })
+
+test('pricing (mock backend): find a SKU, update price with a before/after confirmation, human-attributed', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/pricing?sku=TZP-REF-1')
+  await expect(page.getByText('₹129.00')).toBeVisible()
+  await page.getByLabel('Selling price (₹)').fill('119.50')
+  await page.getByRole('button', { name: 'Review change' }).click()
+  await expect(page.getByRole('dialog')).toContainText('₹129.00 → ₹119.50')
+  await page.getByRole('dialog').getByRole('button', { name: 'Update price' }).click()
+  await expect(page.getByText('Price saved.')).toBeVisible()
+  const put = (await backendRequests(request)).filter((r) => r.method === 'PUT')
+  expect(put).toHaveLength(1)
+  expect(put[0]!.sub).toBe(WRITER_SUB)
+})
+
+test('pricing (mock backend): a reader sees the price read-only', async ({ page, request }) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/pricing?sku=TZP-REF-1')
+  await expect(page.getByText('Read-only: changing prices needs the cms-writer role')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review change' })).toHaveCount(0)
+  await request.post(`${BACKEND()}/__control/reset`)
+})
+
+test('inventory (mock backend): absolute stock set, reserved floor enforced by the backend, deactivate', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/inventory?sku=TZP-REF-1&location=LOC-1')
+  await expect(page.getByText('In stock')).toBeVisible()
+  await page.getByLabel('On-hand quantity').fill('30')
+  await page.getByRole('button', { name: 'Review change' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save stock' }).click()
+  await expect(page.getByRole('term').filter({ hasText: 'On hand' })).toBeVisible()
+  await expect(page.getByText('30', { exact: true }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Deactivate' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Deactivate' }).click()
+  await expect(page.getByText('Inactive')).toBeVisible()
+})
+
+test('inventory (mock backend): unknown location shows a create form with an orphan-record warning', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/inventory?sku=TZP-REF-1&location=NEW-LOC')
+  await expect(
+    page.getByText('No stock record exists for this product at this location.'),
+  ).toBeVisible()
+  await expect(page.getByText(/orphan record/)).toBeVisible()
+})

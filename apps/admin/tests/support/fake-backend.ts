@@ -55,6 +55,21 @@ export class FakeBackend {
       version: number
     }
   >()
+  readonly prices = new Map<
+    string,
+    { sellingPricePaise: number; mrpPaise: number; version: number }
+  >()
+  readonly stock = new Map<
+    string,
+    {
+      onHand: number
+      reserved: number
+      lowStockThreshold: number
+      maxPurchasable: number
+      version: number
+      active: boolean
+    }
+  >()
   readonly requests: RecordedRequest[] = []
   readonly products = new Map<
     string,
@@ -86,6 +101,17 @@ export class FakeBackend {
     this.openRelease = undefined
     this.releases.clear()
     this.nodes.clear()
+    this.prices.clear()
+    this.stock.clear()
+    this.prices.set('TZP-REF-1', { sellingPricePaise: 12900, mrpPaise: 14900, version: 2 })
+    this.stock.set('TZP-REF-1|LOC-1', {
+      onHand: 20,
+      reserved: 8,
+      lowStockThreshold: 5,
+      maxPurchasable: 10,
+      version: 2,
+      active: true,
+    })
     this.nodes.set('TZS-000001', {
       id: 'TZS-000001',
       nodeType: 'super_category',
@@ -241,6 +267,92 @@ export class FakeBackend {
         }
       }
       return json(404, { error: { code: 'NO_SUCH_ENDPOINT' } })
+    }
+    const priceMatch = url.pathname.match(/^\/api\/v1\/admin\/prices\/([^/]+)$/)
+    if (priceMatch) {
+      const sku = decodeURIComponent(priceMatch[1]!)
+      if (!this.products.has(sku)) return json(404, { error: { code: 'NOT_FOUND' } })
+      const row = this.prices.get(sku)
+      const view = (r: { sellingPricePaise: number; mrpPaise: number; version: number }) => ({
+        skuId: sku,
+        currency: 'INR',
+        ...r,
+        active: true,
+        status: 'ACTIVE',
+      })
+      if (req.method === 'GET')
+        return row ? json(200, view(row)) : json(404, { error: { code: 'NOT_FOUND' } })
+      if (req.method === 'PUT') {
+        if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+        const b = JSON.parse(body) as {
+          sellingPricePaise: number
+          mrpPaise: number
+          currency?: string
+          expectedVersion?: number
+        }
+        if (b.mrpPaise < b.sellingPricePaise) return json(422, { error: { code: 'INVALID_PRICE' } })
+        if (
+          b.expectedVersion === undefined ? row !== undefined : row?.version !== b.expectedVersion
+        )
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = {
+          sellingPricePaise: b.sellingPricePaise,
+          mrpPaise: b.mrpPaise,
+          version: (row?.version ?? 0) + 1,
+        }
+        this.prices.set(sku, next)
+        return json(row ? 200 : 201, view(next))
+      }
+    }
+    const invMatch = url.pathname.match(
+      /^\/api\/v1\/admin\/inventory\/([^/]+)\/([^/]+)(\/activate|\/deactivate)?$/,
+    )
+    if (invMatch) {
+      const sku = decodeURIComponent(invMatch[1]!)
+      const loc = decodeURIComponent(invMatch[2]!)
+      const key = `${sku}|${loc}`
+      if (!this.products.has(sku)) return json(404, { error: { code: 'NOT_FOUND' } })
+      const row = this.stock.get(key)
+      const view = (r: NonNullable<typeof row>) => ({
+        skuId: sku,
+        fulfillmentLocationId: loc,
+        ...r,
+        available: r.onHand - r.reserved,
+      })
+      if (req.method === 'GET')
+        return row ? json(200, view(row)) : json(404, { error: { code: 'NOT_FOUND' } })
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body || '{}') as {
+        onHand?: number
+        lowStockThreshold?: number
+        maxPurchasable?: number
+        expectedVersion?: number
+      }
+      if (req.method === 'PUT') {
+        if (
+          b.expectedVersion === undefined ? row !== undefined : row?.version !== b.expectedVersion
+        )
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        if (row && (b.onHand ?? 0) < row.reserved)
+          return json(422, { error: { code: 'INVALID_INVENTORY' } })
+        const next = {
+          onHand: b.onHand ?? 0,
+          reserved: row?.reserved ?? 0,
+          lowStockThreshold: b.lowStockThreshold ?? 0,
+          maxPurchasable: b.maxPurchasable ?? 0,
+          version: (row?.version ?? 0) + 1,
+          active: row?.active ?? true,
+        }
+        this.stock.set(key, next)
+        return json(row ? 200 : 201, view(next))
+      }
+      if (req.method === 'POST' && invMatch[3] && row) {
+        if (b.expectedVersion !== row.version)
+          return json(409, { error: { code: 'STALE_VERSION' } })
+        const next = { ...row, active: invMatch[3] === '/activate', version: row.version + 1 }
+        this.stock.set(key, next)
+        return json(200, view(next))
+      }
     }
     const full = (p: { id: string; title: string; version: number; lifecycle: string }) => ({
       ...p,
