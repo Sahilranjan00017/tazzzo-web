@@ -2,14 +2,26 @@ import { z } from 'zod'
 import type { BffResult } from './bff-client'
 import { bffErrorMessage } from './bff-client'
 import { PRODUCT_ID } from './products'
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  IMAGE_TYPES,
+  rememberMaxBytes,
+  sizeLimitCopy,
+  sizeLimitOf,
+} from './upload'
 
-/** Media-set contract (backend main c3306b6, `MediaAdminController`). Client-safe. */
+/**
+ * Media-set contract (backend `MediaAdminController`, PR #95 head c8f57de). Client-safe. Image roles are only PRIMARY and
+ * GALLERY in the backend contract (`ImageRole`); packaging/nutrition/ingredients/lifestyle roles are a pending backend
+ * decision and are deliberately not offered here.
+ */
 export const OWNER_TYPES = ['product', 'sku'] as const
 export type OwnerType = (typeof OWNER_TYPES)[number]
-export const CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
+export const CONTENT_TYPES = IMAGE_TYPES
 /** Backend default maximum upload size (configurable server-side up to 50 MiB). */
-export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+export const DEFAULT_MAX_BYTES = DEFAULT_MAX_UPLOAD_BYTES
 export const MAX_ASSETS = 50
+export const IMAGE_ROLES = ['PRIMARY', 'GALLERY'] as const
 
 export const assetSchema = z.object({
   assetId: z.string(),
@@ -20,6 +32,8 @@ export const assetSchema = z.object({
   width: z.number().int().nullish(),
   height: z.number().int().nullish(),
   contentType: z.string().nullish(),
+  /** Resolved public URL (backend #95); absent while no public media base is configured. Display only. */
+  url: z.string().nullish(),
 })
 export type MediaAsset = z.infer<typeof assetSchema>
 
@@ -32,11 +46,20 @@ export const mediaSetSchema = z.object({
 })
 export type MediaSet = z.infer<typeof mediaSetSchema>
 
-/** Alt text rules (backend): at most 300 characters, no angle brackets. */
+/**
+ * Alt text rules (backend `MediaAsset`): trimmed, at most 300 characters, no angle brackets and no control characters
+ * (U+0000-U+001F, U+007F). Leading/trailing whitespace is trimmed first, exactly as the backend does.
+ */
 export const altText = z
   .string()
-  .max(300)
-  .refine((v) => !/[<>]/.test(v), 'no angle brackets')
+  .transform((v) => v.trim())
+  .pipe(
+    z
+      .string()
+      .max(300)
+      .refine((v) => !/[<>]/.test(v), 'no angle brackets')
+      .refine((v) => !/[\u0000-\u001f\u007f]/.test(v), 'no control characters'),
+  )
 
 const KEY = /^[A-Za-z0-9][A-Za-z0-9/_.-]*$/
 export const assetInput = z
@@ -47,7 +70,7 @@ export const assetInput = z
       .max(512)
       .regex(KEY)
       .refine((k) => !k.includes('..') && !k.includes('//'), 'unsafe key'),
-    role: z.enum(['PRIMARY', 'GALLERY']),
+    role: z.enum(IMAGE_ROLES),
     sortOrder: z.number().int().min(0).max(1_000_000),
     altText: altText.optional(),
     width: z.number().int().min(1).max(20000).optional(),
@@ -111,28 +134,32 @@ export const uploadRequestInput = z
   })
   .strict()
 
-/** Client-side check of a chosen file before any upload request. The backend repeats it. */
-export function checkFile(file: { type: string; size: number }): string | undefined {
-  if (!(CONTENT_TYPES as readonly string[]).includes(file.type))
-    return 'Only JPEG, PNG or WebP images are accepted.'
-  if (file.size < 1) return 'The file is empty.'
-  if (file.size > DEFAULT_MAX_BYTES)
-    return 'The file is larger than 5 MiB, the backend default limit.'
-  return undefined
+/** Upload copy shared by every image upload (media sets and home content). Never echoes backend text. */
+export const UPLOAD_CODE_COPY: Record<string, string> = {
+  MEDIA_STORAGE_NOT_CONFIGURED:
+    'Uploads are switched off: no media storage is configured on the backend. Nothing was uploaded.',
+  MEDIA_STORAGE_UNAVAILABLE:
+    'Media storage is unavailable right now (an outage between the backend and storage). Nothing was saved; try again shortly.',
+  UPLOAD_ORIGIN_NOT_CONFIGURED:
+    'Direct upload is not enabled in this CMS deployment (no storage origin is configured). Nothing was uploaded.',
 }
 
 const CODE_COPY: Record<string, string> = {
-  MEDIA_STORAGE_NOT_CONFIGURED:
-    'Uploads are blocked: no media storage provider is configured on the backend yet. This is an external dependency; nothing was uploaded.',
+  ...UPLOAD_CODE_COPY,
   INVALID_MEDIA:
-    'The backend rejected the media (check type, size, alt text, order and the primary image rule).',
+    'The backend rejected the media: an image is missing from storage, is not the declared type, is too large, or breaks a rule (alt text, order, one primary image at order 0). Nothing was saved.',
   STALE_VERSION:
-    'This media set changed since you loaded it (or it already exists / does not exist). It has been reloaded; review it and try again.',
+    'This media set changed since you loaded it (or it was created meanwhile). Your edits are still shown; reload to see the latest version.',
 }
 
 export function mediaErrorMessage(result: Extract<BffResult<unknown>, { ok: false }>): string {
+  const limit = sizeLimitOf(result)
+  if (limit !== undefined) {
+    rememberMaxBytes(limit)
+    return sizeLimitCopy(limit)
+  }
   if (result.code && CODE_COPY[result.code]) return CODE_COPY[result.code]!
   if (result.status === 502 || result.status === 503)
-    return 'The media service is unavailable right now (storage may not be configured). Nothing was changed.'
+    return 'The media service is unavailable right now. Nothing was changed.'
   return bffErrorMessage(result, 'media change')
 }

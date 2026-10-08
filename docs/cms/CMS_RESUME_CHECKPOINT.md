@@ -132,3 +132,13 @@ Gates: eslint, tsc, 383 unit/component, 42 Playwright x2 (mock). Remaining: secu
 Responsive sweep spec (`tests/e2e/responsive.spec.ts`), CSS fixes (360 px overflow, desktop drawer toggle, 2-column KPIs), docs:
 CMS_SECURITY_REVIEW, CMS_VISUAL_QA, CMS_INTEGRATION_EVIDENCE, CMS_RELEASE_READINESS. Master gate: FAIL (see readiness doc).
 Stack tip: #18 <- this. Nothing is merged except PR #4. Pending CI check on #15-#19. Independent work left: advanced catalogue ops, taxonomy move/merge/split, attribute schemas.
+
+## Update 2026-10-08: CMS-20 media upload (branch `cms/20-media-upload`, stacked on `cms/16-qa-security`)
+
+Real image upload against backend PR #95 (head c8f57de): presigned single-use PUT straight from the browser (XHR with
+progress, `withCredentials=false`), fresh target per retry, local type/size/magic-byte checks (never SVG), upload/replace/
+remove in one versioned whole-set save, thumbnails from the optional resolved `url`, 409 keeps edits with an explicit
+reload, non-409 failures keep the dialog open, alt text rejects control characters, rows labelled by key. New optional env
+`CMS_MEDIA_UPLOAD_ORIGIN` (CSP connect-src only) and `CMS_MEDIA_PUBLIC_ORIGIN` (CSP img-src only); BFF refuses targets off
+that origin and answers 503 UPLOAD_ORIGIN_NOT_CONFIGURED without it. Mutation layer gained `precondition`; `useBffAction`
+gained `refreshOnConflict`. Fake backend models storage (CORS, signed headers, 403/412, verification, outage).

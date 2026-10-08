@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { buildContentSecurityPolicy, generateCspNonce } from '@/lib/security/headers'
+import {
+  buildContentSecurityPolicy,
+  generateCspNonce,
+  parseCspOrigin,
+} from '@/lib/security/headers'
 
 /** Session cookie names (production `__Host-` and plain-http development). Presence only: never trusted here. */
 const SESSION_COOKIES = ['__Host-tz_cms_session', 'tz_cms_session_dev']
@@ -25,9 +29,15 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   const cspNonce = generateCspNonce()
+  const isDev = process.env.NODE_ENV === 'development'
+  // Same production test as the server env schema (`NODE_ENV === 'production'`), so both accept the same origins.
+  const production = process.env.NODE_ENV === 'production'
+  // Optional, explicit media origins. An invalid value is never added (fail closed); the server env schema rejects it.
   const csp = buildContentSecurityPolicy({
     cspNonce,
-    isDev: process.env.NODE_ENV === 'development',
+    isDev,
+    uploadOrigin: parseCspOrigin(process.env.CMS_MEDIA_UPLOAD_ORIGIN, production),
+    imageOrigin: parseCspOrigin(process.env.CMS_MEDIA_PUBLIC_ORIGIN, production),
   })
 
   const requestHeaders = new Headers(request.headers)

@@ -683,18 +683,36 @@ test('notifications (mock backend): only the two counters; per-message detail is
   await expect(page.getByRole('button', { name: /retry|resend/i })).toHaveCount(0)
 })
 
+const MEDIA_PAGE = '/catalogue/media?type=product&id=TZP-REF-1'
+const A1 = 'p/product/tzp-ref-1/a.jpg'
+const A2 = 'p/product/tzp-ref-1/b.png'
+/** A real (tiny) PNG: the browser sniff and the fake storage's verifier both read its magic bytes. */
+const PNG_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+)
+type StorageReq = { method: string; path: string; headers: Record<string, string>; bytes: number }
+async function storageRequests(request: APIRequestContext): Promise<StorageReq[]> {
+  return (await request.get(`${BACKEND()}/__control/storage-requests`)).json() as Promise<
+    StorageReq[]
+  >
+}
+async function chooseImage(page: Page, label = 'Image file', name = 'pack.png') {
+  await page.getByLabel(label).setInputFiles({ name, mimeType: 'image/png', buffer: PNG_BYTES })
+}
+
 test('media (mock backend): edit metadata as a whole-set replace; removed assets leave the set', async ({
   page,
   request,
 }) => {
   await signIn(page, WRITER_SUB)
-  await page.goto('/catalogue/media?type=product&id=TZP-REF-1')
-  await expect(page.getByText(/without checking they exist/)).toBeVisible()
-  expect(await page.locator('img').count()).toBe(0)
-  await page.getByLabel('Alt text for A2').fill('Side view')
-  await page.getByLabel('Remove A1').check()
-  await page.getByLabel('Role for A2').selectOption('PRIMARY')
-  await page.getByLabel('Order for A2').fill('0')
+  await page.goto(MEDIA_PAGE)
+  // Thumbnails come from the backend's resolved public URL (CSP img-src allows only that configured origin).
+  await expect(page.locator('img.thumb')).toHaveCount(2)
+  await page.getByLabel(`Alt text for ${A2}`).fill('Side view')
+  await page.getByLabel(`Remove ${A1}`).check()
+  await page.getByLabel(`Role for ${A2}`).selectOption('PRIMARY')
+  await page.getByLabel(`Order for ${A2}`).fill('0')
   await page.getByRole('button', { name: 'Review changes' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Save media' }).click()
   await expect(page.getByText('Media saved.')).toBeVisible()
@@ -706,18 +724,129 @@ test('media (mock backend): edit metadata as a whole-set replace; removed assets
   expect(put[0]!.sub).toBe(WRITER_SUB)
 })
 
-test('media (mock backend): upload readiness shows the storage blocker and leaks no backend detail', async ({
+test('media (mock backend): upload goes browser -> storage directly (no cookie, no token), then the set is saved and verified', async ({
   page,
+  request,
 }) => {
   await signIn(page, WRITER_SUB)
-  await page.goto('/catalogue/media?type=product&id=TZP-REF-1')
-  await page
-    .getByLabel('Image file')
-    .setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('abc') })
-  await page.getByRole('button', { name: 'Check upload readiness' }).click()
-  await expect(page.getByText(/no media storage provider is configured/)).toBeVisible()
+  const html = await page.request.get(MEDIA_PAGE)
+  const csp = html.headers()['content-security-policy'] ?? ''
+  expect(csp).toContain(`connect-src 'self' ${BACKEND()}`)
+  expect(csp).not.toMatch(/connect-src[^;]*\*/)
+  await page.goto(MEDIA_PAGE)
+  await chooseImage(page)
+  const newAlt = page.getByLabel(/^Alt text for p\/product\/TZP-REF-1\//)
+  await expect(newAlt).toBeVisible()
+  await expect(page.getByText(/Uploaded pack.png/)).toBeVisible()
+  await newAlt.fill('Pack, front')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('dialog')).toContainText('3 images will remain, 1 added')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save media' }).click()
+  await expect(page.getByText('Media saved.')).toBeVisible()
+
+  const puts = (await storageRequests(request)).filter((r) => r.method === 'PUT')
+  expect(puts).toHaveLength(1)
+  expect(puts[0]!.headers['content-type']).toBe('image/png')
+  expect(puts[0]!.headers['if-none-match']).toBe('*')
+  expect(Number(puts[0]!.headers['content-length'])).toBe(PNG_BYTES.length)
+  expect(puts[0]!.bytes).toBe(PNG_BYTES.length)
+  expect(puts[0]!.headers.cookie).toBeUndefined()
+  expect(puts[0]!.headers.authorization).toBeUndefined()
+  const key = decodeURIComponent(puts[0]!.path.slice('/__storage/'.length))
+  const saved = (await backendRequests(request)).filter(
+    (r) => r.method === 'PUT' && r.path.startsWith('/api/v1/admin/media/'),
+  )
+  const body = JSON.parse((saved[0] as unknown as { body: string }).body)
+  expect(body.assets.find((a: { assetKey: string }) => a.assetKey === key)).toMatchObject({
+    role: 'GALLERY',
+    sortOrder: 2,
+    altText: 'Pack, front',
+    contentType: 'image/png',
+  })
+  // After the refresh the new image is listed from the backend, with its stored thumbnail.
+  await expect(page.getByLabel(`Alt text for ${key}`)).toHaveValue('Pack, front')
+  await expect(page.locator('img.thumb')).toHaveCount(3)
+})
+
+test('media (mock backend): a failed storage PUT is retried with a fresh upload link', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto(MEDIA_PAGE)
+  await control(request, 'storage', { failNext: { status: 403, count: 1 } })
+  await chooseImage(page)
+  await expect(page.getByText(/Storage refused the upload/)).toBeVisible()
+  await page.getByRole('button', { name: 'Retry upload' }).click()
+  await expect(page.getByLabel(/^Alt text for p\/product\/TZP-REF-1\//)).toBeVisible()
+  const targets = (await backendRequests(request)).filter(
+    (r) => r.method === 'POST' && r.path === '/api/v1/admin/media/uploads',
+  )
+  expect(targets).toHaveLength(2)
+  const puts = (await storageRequests(request)).filter((r) => r.method === 'PUT')
+  expect(new Set(puts.map((p) => p.path)).size).toBe(2)
+})
+
+test('media (mock backend): storage switched off or failing is named, nothing leaks, edits survive', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await control(request, 'storage', { enabled: false })
+  await page.goto(MEDIA_PAGE)
+  await chooseImage(page)
+  await expect(page.getByText(/no media storage is configured/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry upload' })).toHaveCount(0)
   expect(await page.content()).not.toContain('bucket none')
-  await expect(page.getByText(/uploaded successfully/i)).toHaveCount(0)
+
+  // Storage on, upload succeeds, then storage fails while the backend verifies the new key at save time.
+  await control(request, 'storage', { enabled: true })
+  await chooseImage(page)
+  await expect(page.getByLabel(/^Alt text for p\/product\/TZP-REF-1\//)).toBeVisible()
+  await control(request, 'storage', { outage: true })
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save media' }).click()
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(
+    'Media storage is unavailable right now',
+  )
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('media (mock backend): the backend upload limit is named from its own refusal, then enforced locally', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await control(request, 'storage', { maxBytes: 10 })
+  await page.goto(MEDIA_PAGE)
+  await chooseImage(page)
+  await expect(page.getByText(/this backend accepts images up to 1 KiB/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await chooseImage(page, 'Image file', 'again.png')
+  await expect(page.getByText(/the limit is 1 KiB/)).toBeVisible()
+  const targets = (await backendRequests(request)).filter(
+    (r) => r.method === 'POST' && r.path === '/api/v1/admin/media/uploads',
+  )
+  expect(targets).toHaveLength(1)
+  expect((await storageRequests(request)).filter((r) => r.method === 'PUT')).toHaveLength(0)
+})
+
+test('media (mock backend): a concurrent change gives a conflict that keeps the edits and offers a reload', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto(MEDIA_PAGE)
+  await page.getByLabel(`Alt text for ${A2}`).fill('My unsaved alt text')
+  await control(request, 'bump-media', { key: 'product|TZP-REF-1' })
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save media' }).click()
+  await expect(page.getByText(/Someone else changed this media set/)).toBeVisible()
+  await expect(page.getByLabel(`Alt text for ${A2}`)).toHaveValue('My unsaved alt text')
+  await page.getByRole('button', { name: 'Reload latest version' }).click()
+  await expect(page.getByText('version 4')).toBeVisible()
+  await expect(page.getByLabel(`Alt text for ${A2}`)).toHaveValue('')
 })
 
 test('media (mock backend): a reader sees the set read-only and no upload control', async ({

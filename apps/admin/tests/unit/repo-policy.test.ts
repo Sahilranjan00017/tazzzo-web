@@ -171,6 +171,18 @@ describe('no fake or browser-held identity', () => {
     }
   })
 
+  it('sends bytes to object storage only from the upload module, never with credentials', () => {
+    const xhr = SOURCE.filter((f) => /XMLHttpRequest\(\)/.test(read(f))).map((f) =>
+      relative(APP, f),
+    )
+    expect(xhr).toEqual([join('src', 'lib', 'upload.ts')])
+    const upload = read(APP, 'src', 'lib', 'upload.ts')
+    expect(upload).toMatch(/xhr\.withCredentials = false/)
+    expect(upload).toMatch(
+      /CREDENTIAL = \/\^\(cookie\|cookie2\|authorization\|proxy-authorization\)\$\/i/,
+    )
+  })
+
   it('never holds a shared service token for human requests', () => {
     for (const f of SOURCE) {
       expect(read(f), relative(APP, f)).not.toMatch(

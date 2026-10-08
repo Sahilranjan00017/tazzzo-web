@@ -27,8 +27,15 @@ const setRefreshing = (v: boolean) => {
  * One guarded BFF mutation at a time. 401 sends the person to sign in again; success refreshes the server data;
  * a 404/409 also refreshes so the screen shows the authoritative state. Failures toast operator-friendly text.
  * Never retries (the backend has no idempotency keys). `busy` is true while a call OR the follow-up refresh is running.
+ *
+ * `refreshOnConflict: false` keeps the page as it is on a 409, for editors that must keep a person's unsaved edits on
+ * screen and offer an explicit reload instead (the refresh would remount them with the newer version).
  */
-export function useBffAction(describe: (failure: Failed) => string) {
+export function useBffAction(
+  describe: (failure: Failed) => string,
+  options: { refreshOnConflict?: boolean } = {},
+) {
+  const refreshOnConflict = options.refreshOnConflict ?? true
   const router = useRouter()
   const { toast } = useToast()
   const [calling, setCalling] = useState(false)
@@ -63,11 +70,12 @@ export function useBffAction(describe: (failure: Failed) => string) {
         router.refresh()
       } else {
         toast('error', describe(result))
-        if (result.status === 409 || result.status === 404) startTransition(() => router.refresh())
+        if ((result.status === 409 && refreshOnConflict) || result.status === 404)
+          startTransition(() => router.refresh())
       }
       return result
     },
-    [router, toast, describe],
+    [router, toast, describe, refreshOnConflict],
   )
   return { run, busy: calling || isPending || anyRefreshing }
 }

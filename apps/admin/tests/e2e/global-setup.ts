@@ -12,6 +12,9 @@ export default async function globalSetup(): Promise<void> {
       ...process.env,
       NODE_ENV: 'development',
       CMS_BASE_URL: base,
+      // The fake backend also plays object storage (presigned PUT target) and the public media base.
+      CMS_MEDIA_UPLOAD_ORIGIN: harness.backend.url,
+      CMS_MEDIA_PUBLIC_ORIGIN: harness.backend.url,
       NEXT_TELEMETRY_DISABLED: '1',
     },
     detached: true,

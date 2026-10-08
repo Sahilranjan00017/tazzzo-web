@@ -914,3 +914,84 @@ input[type='file'] {
     grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
   }
 }
+
+/* ---- image upload (media sets, home content) ---- */
+.dropzone {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.dropzone-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone-disabled {
+  opacity: 0.6;
+}
+.dropzone p {
+  margin: 0;
+}
+.upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.upload-progress progress {
+  flex: 1 1 auto;
+  height: 0.6rem;
+  accent-color: var(--accent);
+}
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.media-card {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.media-card p {
+  margin: 0;
+}
+.media-fields {
+  display: grid;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thumb {
+  flex: 0 0 auto;
+  width: 6rem;
+  height: 6rem;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.thumb-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: center;
+  border: 1px dashed var(--border);
+}
+.wrap code {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .media-card {
+    flex-direction: column;
+  }
+}

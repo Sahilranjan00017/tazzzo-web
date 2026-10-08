@@ -4,6 +4,7 @@ import {
   STATIC_SECURITY_HEADERS,
   buildContentSecurityPolicy,
   generateCspNonce,
+  parseCspOrigin,
 } from '@/lib/security/headers'
 
 function directives(csp: string): Map<string, string[]> {
@@ -59,6 +60,70 @@ describe('production CSP', () => {
     expect(() => buildContentSecurityPolicy({ cspNonce: '', isDev: false })).toThrow()
     expect(() =>
       buildContentSecurityPolicy({ cspNonce: "x' 'unsafe-inline", isDev: false }),
+    ).toThrow()
+  })
+})
+
+describe('media origins (CMS_MEDIA_UPLOAD_ORIGIN / CMS_MEDIA_PUBLIC_ORIGIN)', () => {
+  const nonce = generateCspNonce()
+  const upload = 'https://tazzzo-media.s3.ap-south-1.amazonaws.com'
+  const cdn = 'https://cdn.tazzzo.com'
+
+  it('adds the upload origin to connect-src ONLY and the CDN to img-src ONLY; every other directive is unchanged', () => {
+    const base = directives(buildContentSecurityPolicy({ cspNonce: nonce, isDev: false }))
+    const d = directives(
+      buildContentSecurityPolicy({
+        cspNonce: nonce,
+        isDev: false,
+        uploadOrigin: upload,
+        imageOrigin: cdn,
+      }),
+    )
+    expect(d.get('connect-src')).toEqual(["'self'", upload])
+    expect(d.get('img-src')).toEqual(["'self'", 'blob:', 'data:', cdn])
+    for (const [name, values] of base) {
+      if (name === 'connect-src' || name === 'img-src') continue
+      expect(d.get(name), name).toEqual(values)
+    }
+    expect([...d.values()].flat()).not.toContain('*')
+  })
+
+  it('accepts only exact origins: https, or loopback http outside production', () => {
+    expect(parseCspOrigin(upload, true)).toBe(upload)
+    expect(parseCspOrigin('http://127.0.0.1:9090', false)).toBe('http://127.0.0.1:9090')
+    expect(parseCspOrigin('http://localhost:9090', false)).toBe('http://localhost:9090')
+    for (const bad of [
+      undefined,
+      '',
+      '*',
+      'https://*.amazonaws.com',
+      'https:',
+      `${upload}/`,
+      `${upload}/p/`,
+      `${upload}?x=1`,
+      'https://user:pw@bucket.example',
+      'http://bucket.example',
+      'javascript:alert(1)',
+      "https://a.example 'unsafe-inline'",
+    ])
+      expect(parseCspOrigin(bad, false), String(bad)).toBeUndefined()
+    expect(parseCspOrigin('http://127.0.0.1:9090', true)).toBeUndefined()
+  })
+
+  it('refuses to build a policy with a non-canonical origin (no directive injection)', () => {
+    expect(() =>
+      buildContentSecurityPolicy({
+        cspNonce: nonce,
+        isDev: false,
+        uploadOrigin: "* 'unsafe-eval'",
+      }),
+    ).toThrow()
+    expect(() =>
+      buildContentSecurityPolicy({
+        cspNonce: nonce,
+        isDev: false,
+        imageOrigin: 'https://a.example; script-src *',
+      }),
     ).toThrow()
   })
 })

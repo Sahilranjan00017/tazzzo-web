@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { checkFile, mediaErrorMessage, setInput } from '@/lib/media'
+import { altText, mediaErrorMessage, setInput } from '@/lib/media'
 
 const asset = (over: Record<string, unknown> = {}) => ({
   assetId: 'A1',
@@ -67,20 +67,27 @@ describe('media set schema', () => {
   })
 })
 
-describe('file checks and copy', () => {
-  it('accepts jpeg/png/webp up to 5 MiB only', () => {
-    expect(checkFile({ type: 'image/webp', size: 1000 })).toBeUndefined()
-    expect(checkFile({ type: 'image/gif', size: 1000 })).toMatch(/JPEG, PNG or WebP/)
-    expect(checkFile({ type: 'image/png', size: 0 })).toMatch(/empty/)
-    expect(checkFile({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })).toMatch(/5 MiB/)
-    expect(checkFile({ type: 'image/svg+xml', size: 10 })).toBeDefined()
+describe('alt text and copy', () => {
+  it('mirrors the backend alt-text rule: trimmed, <=300, no angle brackets, no control characters', () => {
+    expect(altText.parse('  Front view  ')).toBe('Front view')
+    expect(altText.safeParse('x'.repeat(300)).success).toBe(true)
+    expect(altText.safeParse(' ' + 'x'.repeat(300) + ' ').success).toBe(true) // trimmed first
+    for (const bad of ['a\u0000b', 'tab\there', 'line\nbreak', 'del\u007f', '<b>', 'x'.repeat(301)])
+      expect(altText.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
+    // Leading/trailing control whitespace is trimmed away, as the backend's String.trim() does.
+    expect(altText.parse('\tFront\n')).toBe('Front')
   })
-  it('names the storage blocker and never claims success', () => {
+  it('names each backend code, including the storage outage, and never claims success', () => {
     const f = (status: number, code?: string) => ({ ok: false as const, status, error: 'x', code })
     expect(mediaErrorMessage(f(502, 'MEDIA_STORAGE_NOT_CONFIGURED'))).toMatch(
-      /no media storage provider/,
+      /no media storage is configured/,
     )
-    expect(mediaErrorMessage(f(409, 'STALE_VERSION'))).toMatch(/changed since you loaded/)
+    expect(mediaErrorMessage(f(502, 'MEDIA_STORAGE_UNAVAILABLE'))).toMatch(/storage is unavailable/)
+    expect(mediaErrorMessage(f(503, 'UPLOAD_ORIGIN_NOT_CONFIGURED'))).toMatch(
+      /not enabled in this CMS deployment/,
+    )
+    expect(mediaErrorMessage(f(422, 'INVALID_MEDIA'))).toMatch(/missing from storage/)
+    expect(mediaErrorMessage(f(409, 'STALE_VERSION'))).toMatch(/Your edits are still shown/)
     expect(mediaErrorMessage(f(502))).toMatch(/Nothing was changed/)
   })
 })
@@ -97,16 +104,23 @@ describe('media BFF specs', () => {
       body: { expectedVersion: 2 },
     })
   })
-  it('upload request: strict, bounded, and the signed target never reaches the browser', () => {
+  it('upload request: strict and bounded input; only the validated target fields reach the browser', () => {
     const ok = { ownerType: 'product', ownerId: 'TZP-1', contentType: 'image/png', sizeBytes: 1000 }
     expect(a.requestUploadMutation.input.safeParse(ok).success).toBe(true)
     expect(a.requestUploadMutation.input.safeParse({ ...ok, sizeBytes: 52_428_801 }).success).toBe(
       false,
     )
     expect(
+      a.requestUploadMutation.input.safeParse({ ...ok, contentType: 'image/svg+xml' }).success,
+    ).toBe(false)
+    expect(
       a.requestUploadMutation.input.safeParse({ ...ok, contentType: 'text/html' }).success,
     ).toBe(false)
-    const out = a.requestUploadMutation.toClient({ assetKey: 'p/x', expiresAt: 'soon' })
-    expect(out).toEqual({ ready: true })
+    expect(a.requestUploadMutation.input.safeParse({ ...ok, url: 'https://x' }).success).toBe(false)
+    expect(a.requestUploadMutation.backend(a.requestUploadMutation.input.parse(ok))).toEqual({
+      path: '/api/v1/admin/media/uploads',
+      body: ok,
+    })
+    expect(a.requestUploadMutation.precondition).toBeDefined()
   })
 })

@@ -47,6 +47,11 @@ export interface BffMutationSpec<In, Out, Client> {
    * Whatever it returns is merged under `detail`; nothing else from the backend body is ever passed through.
    */
   errorDetail?: (body: unknown) => unknown
+  /**
+   * A deployment-configuration gate checked after the session is validated and BEFORE the backend is called: a returned
+   * machine code (e.g. `UPLOAD_ORIGIN_NOT_CONFIGURED`) is answered as 503 with that code and the backend is not contacted.
+   */
+  precondition?: () => string | undefined
 }
 
 export interface BffDeps {
@@ -193,6 +198,13 @@ export async function runBffMutation<In, Out, Client>(
       return respond(503, 'upstream_error', { error: 'unavailable' })
     throw error
   }
+
+  const unmet = spec.precondition?.()
+  if (unmet !== undefined)
+    return respond(503, 'upstream_error', {
+      error: 'unavailable',
+      ...(SAFE_CODE.test(unmet) ? { code: unmet } : {}),
+    })
 
   const call = spec.backend(parsed.data)
   let upstream: Response
