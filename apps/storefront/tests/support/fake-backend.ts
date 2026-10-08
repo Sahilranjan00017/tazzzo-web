@@ -13,13 +13,16 @@ import { deflateSync } from 'node:zlib'
  *   BOTH only), in stored order, with `Cache-Control: public, max-age=60`;
  * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}/children`, `/v1/categories/{id}/products`,
  *   `/v1/search` with the documented shapes; unknown ids are a flat 404.
- * Every API request is recorded; tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
+ * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
 export interface RecordedRequest {
   method: string
   path: string
   query: string
+  /** The trusted-caller headers as received (test values only), or null when absent. */
+  caller: string | null
+  callerSecret: string | null
 }
 
 type Audience = 'APP_ONLY' | 'WEB_ONLY' | 'BOTH'
@@ -230,7 +233,17 @@ export class FakeBackend {
       }
       return error(404, 'NOT_FOUND')
     }
-    this.requests.push({ method: req.method ?? '', path: url.pathname, query: url.search })
+    const header = (name: string) => {
+      const value = req.headers[name]
+      return typeof value === 'string' ? value : null
+    }
+    this.requests.push({
+      method: req.method ?? '',
+      path: url.pathname,
+      query: url.search,
+      caller: header('x-tazzzo-caller'),
+      callerSecret: header('x-tazzzo-caller-secret'),
+    })
     if (req.method !== 'GET') return error(405, 'INVALID_REQUEST')
 
     if (url.pathname === '/v1/content/home') {

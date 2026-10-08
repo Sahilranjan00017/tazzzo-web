@@ -1,10 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { parseMediaBase } from '@/lib/media-base'
 import { buildContentSecurityPolicy, generateCspNonce } from '@/lib/security/headers'
+import { recordOutcome, visitorLimiter } from '@/lib/security/rate-limit'
 
 /**
- * Per-request CSP nonce (Next.js 16 `proxy.ts`). The storefront has no authentication; this only sets the policy.
- * `img-src` admits the configured media origin (`TAZZZO_MEDIA_BASE_URL`), validated exactly like the server env.
+ * Per-request CSP nonce (Next.js 16 `proxy.ts`) and the per-visitor rate limit (`src/lib/security/rate-limit.ts`;
+ * per instance, in memory). The storefront has no authentication. `img-src` admits the configured media origin
+ * (`TAZZZO_MEDIA_BASE_URL`), validated exactly like the server env. A refused request gets a plain-text 429 with
+ * `Retry-After` and the same CSP; nothing is rendered and the backend is not called.
  */
 export function proxy(request: NextRequest): NextResponse {
   const cspNonce = generateCspNonce()
@@ -14,6 +17,21 @@ export function proxy(request: NextRequest): NextResponse {
     isDev: process.env.NODE_ENV === 'development',
     mediaOrigin: media?.origin ?? null,
   })
+
+  const now = Date.now()
+  const outcome = visitorLimiter().check(request.nextUrl, request.headers, now)
+  recordOutcome(outcome, now)
+  if (outcome.kind === 'limited') {
+    return new NextResponse('Too many requests. Please wait a moment and try again.\n', {
+      status: 429,
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Retry-After': String(outcome.retryAfterSeconds),
+        'Content-Security-Policy': csp,
+      },
+    })
+  }
 
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-nonce', cspNonce)

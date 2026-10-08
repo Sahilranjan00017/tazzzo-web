@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { E2E_CALLER_NAME, E2E_CALLER_SECRET } from './global-setup'
 
 /**
  * The production build under its real policy. Every test records CSP violations (the DOM event, which fires for
@@ -158,11 +159,23 @@ test('CDN down in production: every image becomes the placeholder, the page stay
   await fetch(`${backend()}/__control/media?down=1`, { method: 'POST' })
   try {
     await page.goto('/')
-    await expect(
-      page
-        .locator('.banner[data-block-id="CB_web1"]')
-        .getByRole('img', { name: 'Sacks of basmati rice' }),
-    ).toHaveAttribute('data-testid', 'image-fallback')
+    const bannerFallback = page
+      .locator('.banner[data-block-id="CB_web1"]')
+      .getByRole('img', { name: 'Sacks of basmati rice' })
+    await expect(bannerFallback).toHaveAttribute('data-testid', 'image-fallback')
+    // The placeholder keeps the banner box and its brand mark sits in the centre (it used to be pinned top-left
+    // because `.banner__media { display: block }` overrode the placeholder's flex layout).
+    await expect(bannerFallback).toHaveCSS('display', 'flex')
+    const frame = await bannerFallback.boundingBox()
+    const mark = await bannerFallback.locator('svg').boundingBox()
+    expect(frame && mark).toBeTruthy()
+    expect(frame!.width).toBeGreaterThan(mark!.width * 2)
+    expect(Math.abs(mark!.x + mark!.width / 2 - (frame!.x + frame!.width / 2))).toBeLessThanOrEqual(
+      1,
+    )
+    expect(
+      Math.abs(mark!.y + mark!.height / 2 - (frame!.y + frame!.height / 2)),
+    ).toBeLessThanOrEqual(1)
     await expect(page.getByRole('heading', { name: 'Bestsellers' })).toBeVisible()
     await expect(
       page
@@ -179,5 +192,91 @@ test('CDN down in production: every image becomes the placeholder, the page stay
     expect(problems.page).toEqual([])
   } finally {
     await fetch(`${backend()}/__control/media?down=0`, { method: 'POST' })
+  }
+})
+
+async function backendRequests(): Promise<
+  Array<{ path: string; caller: string | null; callerSecret: string | null }>
+> {
+  return (await (await fetch(`${backend()}/__control/requests`)).json()) as Array<{
+    path: string
+    caller: string | null
+    callerSecret: string | null
+  }>
+}
+
+test('per-visitor rate limit (default limits, behind a trusted proxy): a burst to /search gets 429', async ({
+  request,
+}) => {
+  const visitor = { 'x-forwarded-for': '203.0.113.50' }
+  const searchCalls = async () =>
+    (await backendRequests()).filter((r) => r.path === '/v1/search').length
+  const before = await searchCalls()
+
+  const statuses: number[] = []
+  for (let i = 0; i < 6; i++) {
+    statuses.push((await request.get(`/search?q=rice${i}`, { headers: visitor })).status())
+  }
+  expect(statuses).toEqual([200, 200, 200, 200, 200, 200])
+
+  const refused = await request.get('/search?q=dal', { headers: visitor, maxRedirects: 0 })
+  expect(refused.status()).toBe(429)
+  const headers = refused.headers()
+  expect(Number(headers['retry-after'])).toBeGreaterThanOrEqual(1)
+  expect(headers['content-type']).toBe('text/plain; charset=utf-8')
+  expect(headers['cache-control']).toBe('no-store')
+  expect(await refused.text()).toBe('Too many requests. Please wait a moment and try again.\n')
+  // The security headers are unchanged on a refusal.
+  expect(headers['content-security-policy']).toMatch(
+    /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
+  )
+  expect(headers['x-content-type-options']).toBe('nosniff')
+  expect(headers['x-frame-options']).toBe('DENY')
+
+  // A refused request never reaches the backend: exactly the six admitted searches did.
+  expect((await searchCalls()) - before).toBe(6)
+
+  // Writing a fresh address on the client-controlled left of X-Forwarded-For buys nothing.
+  const spoofed = await request.get('/search?q=dal', {
+    headers: { 'x-forwarded-for': '198.51.100.77, 203.0.113.50' },
+  })
+  expect(spoofed.status()).toBe(429)
+  // Ordinary pages still have their own (larger) bucket; another visitor is unaffected.
+  expect((await request.get('/', { headers: visitor })).status()).toBe(200)
+  expect(
+    (
+      await request.get('/search?q=dal', { headers: { 'x-forwarded-for': '203.0.113.51' } })
+    ).status(),
+  ).toBe(200)
+})
+
+test('trusted backend caller: every backend read carries the credential; the browser never sees it', async ({
+  page,
+}) => {
+  const bodies: string[] = []
+  page.on('response', async (response) => {
+    if (!response.url().startsWith('http://localhost')) return
+    try {
+      bodies.push(await response.text())
+    } catch {
+      // redirects and aborted responses have no body
+    }
+  })
+  await page.goto('/')
+  await page.locator('.banner[data-block-id="CB_web1"] a').click()
+  await expect(page).toHaveURL(/\/p\/TZP-1001$/)
+  await page.goto('/search?q=rice')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  const calls = await backendRequests()
+  expect(calls.length).toBeGreaterThan(0)
+  for (const call of calls) {
+    expect(call.caller, call.path).toBe(E2E_CALLER_NAME)
+    expect(call.callerSecret, call.path).toBe(E2E_CALLER_SECRET)
+  }
+  expect(bodies.length).toBeGreaterThan(3)
+  for (const body of bodies) {
+    expect(body).not.toContain(E2E_CALLER_SECRET)
+    expect(body).not.toContain('TAZZZO_CALLER')
   }
 })

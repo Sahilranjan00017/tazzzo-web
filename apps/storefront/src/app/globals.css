@@ -211,6 +211,11 @@ h2 {
   }
 }
 
+/* A banner's placeholder takes the banner box but stays a flex container, so its mark is centred. */
+.banner__media.img-fallback {
+  display: flex;
+}
+
 .banner__link,
 .banner__static {
   display: block;

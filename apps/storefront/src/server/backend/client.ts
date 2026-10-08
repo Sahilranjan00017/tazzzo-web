@@ -11,6 +11,12 @@ import { serverEnv } from '@/server/env'
  * one per visitor. Client IPs are not forwarded (the backend ignores `X-Forwarded-For` from an untrusted peer) and no
  * installation id is sent (it would add a second shared bucket, never relieve the IP one).
  *
+ * When `TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET` are configured, every read carries them as `X-Tazzzo-Caller` /
+ * `X-Tazzzo-Caller-Secret` so the backend can admit this website through its own trusted-caller bucket. They are sent
+ * only to `TAZZZO_API_BASE_URL` (https in production; redirects are refused, so they cannot follow one elsewhere)
+ * and never logged. Next's data-cache key is a hash that includes request headers, so rotating the secret simply
+ * misses the cache once.
+ *
  * Failures are typed, never thrown at the page: 404 is `not_found`, 400 is `bad_request`, everything else (429, 5xx,
  * timeout, network, non-JSON) is `unavailable`.
  *
@@ -66,7 +72,8 @@ export async function getJson(
   options: GetOptions = {},
 ): Promise<BackendResult<unknown>> {
   if (!pathAndQuery.startsWith('/v1/')) throw new Error('public API paths only')
-  const url = `${serverEnv().apiBaseUrl}${pathAndQuery}`
+  const env = serverEnv()
+  const url = `${env.apiBaseUrl}${pathAndQuery}`
   const cacheable = options.cache !== false
   const now = Date.now()
   if (cacheable) {
@@ -83,7 +90,7 @@ export async function getJson(
   try {
     response = await fetch(url, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: requestHeaders(env.caller),
       redirect: 'error',
       signal: AbortSignal.timeout(TIMEOUT_MS),
       ...caching,
@@ -110,6 +117,18 @@ export async function getJson(
     console.warn(`storefront_backend_malformed path=${routeLabel(pathAndQuery)}`)
     return { ok: false, kind: 'unavailable' }
   }
+}
+
+export const CALLER_HEADER = 'X-Tazzzo-Caller'
+export const CALLER_SECRET_HEADER = 'X-Tazzzo-Caller-Secret'
+
+function requestHeaders(caller: { name: string; secret: string } | null): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (caller) {
+    headers[CALLER_HEADER] = caller.name
+    headers[CALLER_SECRET_HEADER] = caller.secret
+  }
+  return headers
 }
 
 /** A log label without the query string (search text is customer input and is never logged). */

@@ -14,7 +14,55 @@ describe('parseServerEnv', () => {
       apiBaseUrl: 'https://api.tazzzo.test',
       siteUrl: 'https://www.tazzzo.test',
       media: { base: 'https://cdn.tazzzo.test/assets', origin: 'https://cdn.tazzzo.test' },
+      caller: null,
     })
+  })
+
+  const SECRET = 'a'.repeat(31) + '!~' // 33 visible ASCII characters
+
+  it('reads the optional trusted-caller credential when both parts are set', () => {
+    expect(
+      parseServerEnv({ ...valid, TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: SECRET })
+        .caller,
+    ).toEqual({ name: 'storefront', secret: SECRET })
+    const longest = {
+      TAZZZO_CALLER_NAME: 'web_store_'.repeat(2),
+      TAZZZO_CALLER_SECRET: 'c'.repeat(256),
+    }
+    expect(parseServerEnv({ ...valid, ...longest }).caller?.name).toBe('web_store_web_store_')
+    expect(
+      parseServerEnv({ ...valid, TAZZZO_CALLER_NAME: '', TAZZZO_CALLER_SECRET: '' }).caller,
+    ).toBeNull()
+  })
+
+  it.each([
+    [{ TAZZZO_CALLER_NAME: 'storefront' }, 'TAZZZO_CALLER_SECRET'],
+    [{ TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
+    [{ TAZZZO_CALLER_NAME: 'Store Front', TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
+    [{ TAZZZO_CALLER_NAME: 'store-front', TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
+    [{ TAZZZO_CALLER_NAME: 'a'.repeat(21), TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
+    [
+      { TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: 'b'.repeat(257) },
+      'TAZZZO_CALLER_SECRET',
+    ],
+    [{ TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: 'short' }, 'TAZZZO_CALLER_SECRET'],
+    [
+      { TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: `${SECRET} with space` },
+      'TAZZZO_CALLER_SECRET',
+    ],
+    [
+      { TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: `${SECRET}\r\nX-Evil: 1` },
+      'TAZZZO_CALLER_SECRET',
+    ],
+  ])('rejects caller config %#, naming only the field and never the value', (override, field) => {
+    let message = ''
+    try {
+      parseServerEnv({ ...valid, ...override })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toBe(`invalid server environment: ${field}`)
+    expect(message).not.toContain('aaaa')
   })
 
   it('treats an unset media base as "no images" rather than an error', () => {

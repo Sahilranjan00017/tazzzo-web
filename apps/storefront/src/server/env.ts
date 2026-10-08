@@ -3,8 +3,10 @@ import { z } from 'zod'
 import { isLoopbackHost, parseMediaBase, type MediaBase } from '@/lib/media-base'
 
 /**
- * Server environment, validated at first use and cached. The storefront holds no secrets: the public `/v1` API needs
- * no credential. Hosts are configuration only, never hardcoded. Nothing here is exposed through `NEXT_PUBLIC_*`.
+ * Server environment, validated at first use and cached. The public `/v1` API needs no credential; the one optional
+ * secret is the trusted-caller credential (`TAZZZO_CALLER_*`), which only `src/server/backend/client.ts` sends and
+ * which never reaches the browser. Hosts are configuration only, never hardcoded. Nothing here is exposed through
+ * `NEXT_PUBLIC_*`, and a validation error names only the field, never a value.
  */
 const absoluteHttpUrl = z
   .string()
@@ -30,8 +32,33 @@ const serverEnvSchema = z
     ),
     /** The backend's media public base URL. Optional: unset means every image shows the placeholder. */
     TAZZZO_MEDIA_BASE_URL: z.string().optional(),
+    /**
+     * Trusted-caller identity for the backend's admission gate (its own bucket instead of this server's IP bucket).
+     * Optional; set both or neither. Sent as `X-Tazzzo-Caller` / `X-Tazzzo-Caller-Secret` on every backend read.
+     * Same grammar as the backend's trusted-caller configuration (name `[a-z][a-z_]{0,19}`, secret 32-256 visible
+     * ASCII characters), so a value the backend would ignore fails here instead of silently using the IP bucket.
+     */
+    TAZZZO_CALLER_NAME: z
+      .string()
+      .regex(/^[a-z][a-z_]{0,19}$/)
+      .optional()
+      .or(z.literal('')),
+    TAZZZO_CALLER_SECRET: z
+      .string()
+      .regex(/^[\x21-\x7e]{32,256}$/)
+      .optional()
+      .or(z.literal('')),
   })
   .superRefine((env, ctx) => {
+    const hasName = Boolean(env.TAZZZO_CALLER_NAME)
+    const hasSecret = Boolean(env.TAZZZO_CALLER_SECRET)
+    if (hasName !== hasSecret) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [hasName ? 'TAZZZO_CALLER_SECRET' : 'TAZZZO_CALLER_NAME'],
+        message: 'TAZZZO_CALLER_NAME and TAZZZO_CALLER_SECRET are set together or not at all',
+      })
+    }
     if (
       env.TAZZZO_MEDIA_BASE_URL !== undefined &&
       env.TAZZZO_MEDIA_BASE_URL.trim() !== '' &&
@@ -68,6 +95,8 @@ export interface ServerEnv {
   apiBaseUrl: string
   siteUrl: string
   media: MediaBase | null
+  /** The trusted-caller credential, or null when not configured. Server-only; never logged. */
+  caller: { name: string; secret: string } | null
 }
 
 export function parseServerEnv(env: Record<string, string | undefined>): ServerEnv {
@@ -81,6 +110,10 @@ export function parseServerEnv(env: Record<string, string | undefined>): ServerE
     apiBaseUrl: data.TAZZZO_API_BASE_URL.replace(/\/+$/, ''),
     siteUrl: new URL(data.TAZZZO_SITE_URL).origin,
     media: parseMediaBase(data.TAZZZO_MEDIA_BASE_URL, data.NODE_ENV),
+    caller:
+      data.TAZZZO_CALLER_NAME && data.TAZZZO_CALLER_SECRET
+        ? { name: data.TAZZZO_CALLER_NAME, secret: data.TAZZZO_CALLER_SECRET }
+        : null,
   }
 }
 
