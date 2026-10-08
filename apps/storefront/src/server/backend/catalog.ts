@@ -1,7 +1,7 @@
 import 'server-only'
 import { cache } from 'react'
 import type { CategoryNode } from '@/lib/categories'
-import { parseHomeBlocks, type HomeBlock } from '@/lib/content/blocks'
+import { parseHome, type HomeBlock, type HomeParseReport } from '@/lib/content/blocks'
 import { isNodeId, isProductId } from '@/lib/ids'
 import {
   parseProductDetail,
@@ -24,13 +24,39 @@ export const getHomeBlocks = cache(
   async (): Promise<{ ok: true; blocks: HomeBlock[] } | Unavailable> => {
     const result = await getJson('/v1/content/home?channel=web')
     if (!result.ok) return { ok: false, reason: 'unavailable' }
+    const media = serverEnv().media
     try {
-      return { ok: true, blocks: parseHomeBlocks(result.data, serverEnv().media) }
+      const { blocks, report } = parseHome(result.data, media)
+      logHomeReport(report, media !== null)
+      return { ok: true, blocks }
     } catch {
+      console.warn('storefront_home_malformed_envelope')
       return { ok: false, reason: 'unavailable' }
     }
   },
 )
+
+const HOME_REPORT_LOG_INTERVAL_MS = 60_000
+let lastHomeReport: { key: string; at: number } | undefined
+
+/**
+ * One warning line with COUNTS ONLY (no ids, titles or URLs) when home blocks were skipped or degraded. Every page view
+ * re-parses the cached response, so the line is logged when the counts change or at most once a minute.
+ */
+export function logHomeReport(
+  report: HomeParseReport,
+  mediaConfigured: boolean,
+  now = Date.now(),
+): void {
+  if (Object.values(report).every((n) => n === 0)) return
+  const key =
+    `unknown_type=${report.unknownType} malformed=${report.malformed} invalid_ids=${report.invalidIds} ` +
+    `invalid_links=${report.invalidLinks} images_not_allowed=${report.imagesNotAllowed} ` +
+    `media_base=${mediaConfigured ? 'configured' : 'unset'}`
+  if (lastHomeReport?.key === key && now - lastHomeReport.at < HOME_REPORT_LOG_INTERVAL_MS) return
+  lastHomeReport = { key, at: now }
+  console.warn(`storefront_home_blocks_degraded ${key}`)
+}
 
 /** `GET /v1/products/{id}`. Null for a missing/hidden product (one flat 404 by design) or a malformed body. */
 export const getProduct = cache(

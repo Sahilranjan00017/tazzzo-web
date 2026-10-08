@@ -8,15 +8,17 @@ import { RailSection } from './_sections/RailSection'
 
 export async function generateMetadata(): Promise<Metadata> {
   const home = await getHomeBlocks()
-  const banner = home.ok ? home.blocks.find((b) => b.type === 'BANNER') : undefined
+  const banner = home.ok
+    ? home.blocks.find((b) => b.type === 'BANNER' && b.imageUrl !== null)
+    : undefined
+  const ogImage = banner?.type === 'BANNER' ? (banner.desktopImageUrl ?? banner.imageUrl) : null
   return {
     title: { absolute: 'Tazzzo' },
     alternates: { canonical: '/' },
     openGraph: {
       url: '/',
-      images: banner
-        ? [{ url: banner.desktopImageUrl ?? banner.imageUrl, alt: banner.altText }]
-        : undefined,
+      images:
+        ogImage && banner?.type === 'BANNER' ? [{ url: ogImage, alt: banner.altText }] : undefined,
     },
   }
 }

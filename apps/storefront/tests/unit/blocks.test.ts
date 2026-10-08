@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupSections, parseHomeBlocks, MAX_GRID, MAX_RAIL } from '@/lib/content/blocks'
+import { groupSections, parseHome, parseHomeBlocks, MAX_GRID, MAX_RAIL } from '@/lib/content/blocks'
 import type { MediaBase } from '@/lib/media-base'
 
 const media: MediaBase = {
@@ -99,7 +99,7 @@ describe('parseHomeBlocks', () => {
     expect(missing).toMatchObject({ href: null })
   })
 
-  it('drops a banner whose image is missing, not https or off the media host (never shown broken)', () => {
+  it('keeps a banner whose image cannot be shown, with the placeholder (imageUrl null) and no desktop image', () => {
     for (const imageUrl of [
       undefined,
       '',
@@ -109,9 +109,57 @@ describe('parseHomeBlocks', () => {
       '/assets/m.jpg',
       'javascript:alert(1)',
     ]) {
-      expect(parseHomeBlocks({ blocks: [banner({ imageUrl })] }, media)).toEqual([])
+      const [b] = parseHomeBlocks(
+        { blocks: [banner({ imageUrl, desktopImageUrl: img('w.jpg') })] },
+        media,
+      )
+      expect(b, String(imageUrl)).toMatchObject({
+        blockId: 'CB_1',
+        imageUrl: null,
+        href: '/c/TZC-000001',
+      })
+      expect(b).not.toHaveProperty('desktopImageUrl')
     }
-    expect(parseHomeBlocks({ blocks: [banner()] }, null)).toEqual([])
+    // No media base configured: every banner is still there, every one with the placeholder.
+    expect(parseHomeBlocks({ blocks: [banner()] }, null)).toMatchObject([{ imageUrl: null }])
+  })
+
+  it('reports what was skipped or degraded, as counts only', () => {
+    const { blocks, report } = parseHome(
+      {
+        blocks: [
+          banner({ blockId: 'ok' }),
+          banner({ blockId: 'B2', imageUrl: 'https://evil.example/a.jpg' }),
+          banner({
+            blockId: 'B3',
+            desktopImageUrl: 'https://evil.example/w.jpg',
+            link: 'https://x',
+          }),
+          banner({ blockId: 'B4', link: undefined }),
+          { blockId: 'V', type: 'VIDEO', title: 'v' },
+          { blockId: 'R', type: 'PRODUCT_RAIL', title: 'R', ids: ['TZP-1', 'bad', 'TZP-1'] },
+          { blockId: 'G', type: 'CATEGORY_GRID', title: 'G', ids: ['nope', 'TZP-1'] },
+          null,
+          { type: 'BANNER' },
+        ],
+      },
+      media,
+    )
+    expect(blocks.map((b) => b.blockId)).toEqual(['ok', 'B2', 'B3', 'B4', 'R'])
+    expect(report).toEqual({
+      unknownType: 1,
+      malformed: 3, // the grid left without ids, null, the banner without id/title
+      invalidIds: 3, // 'bad', 'nope', 'TZP-1' in a grid (not a node id); the duplicate is not invalid
+      invalidLinks: 1, // B4 has no link at all: not counted
+      imagesNotAllowed: 2,
+    })
+    expect(parseHome({ blocks: [banner()] }, media).report).toEqual({
+      unknownType: 0,
+      malformed: 0,
+      invalidIds: 0,
+      invalidLinks: 0,
+      imagesNotAllowed: 0,
+    })
   })
 
   it('ignores an unusable desktop image and keeps the banner', () => {

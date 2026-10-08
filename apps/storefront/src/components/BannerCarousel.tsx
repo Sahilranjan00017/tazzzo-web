@@ -11,7 +11,8 @@ export interface BannerSlide {
   title: string
   subtitle: string | null
   altText: string
-  imageUrl: string
+  /** Null when the image cannot be shown: the branded placeholder stands in. */
+  imageUrl: string | null
   desktopImageUrl?: string
   href: string | null
 }
@@ -28,7 +29,31 @@ function subscribeReducedMotion(onChange: () => void): () => void {
 }
 
 function BannerPicture({ slide, priority }: { slide: BannerSlide; priority: boolean }) {
-  const { narrow, wide } = bannerSources(slide.imageUrl, slide.desktopImageUrl)
+  if (slide.imageUrl === null) {
+    return <ImagePlaceholder label={slide.altText} className="banner__media" />
+  }
+  return (
+    <BannerImage
+      slide={slide}
+      imageUrl={slide.imageUrl}
+      desktopImageUrl={slide.desktopImageUrl}
+      priority={priority}
+    />
+  )
+}
+
+function BannerImage({
+  slide,
+  imageUrl,
+  desktopImageUrl,
+  priority,
+}: {
+  slide: BannerSlide
+  imageUrl: string
+  desktopImageUrl: string | undefined
+  priority: boolean
+}) {
+  const { narrow, wide } = bannerSources(imageUrl, desktopImageUrl)
   const { failed, onError, ref } = useImageFallback(narrow)
   if (failed) return <ImagePlaceholder label={slide.altText} className="banner__media" />
   return (
@@ -70,13 +95,17 @@ function SlideBody({ slide, priority }: { slide: BannerSlide; priority: boolean 
 
 /**
  * Home banners in backend order. One banner is a static hero; several form a carousel (WAI-ARIA APG pattern):
- * previous/next and per-slide buttons, Left/Right arrow keys, a pause/play button, autoplay that stops while the
- * pointer or focus is inside and never runs under `prefers-reduced-motion`. Without JavaScript the first slide shows.
+ * previous/next and per-slide buttons, Left/Right arrow keys, and autoplay that stops while the pointer or focus is
+ * inside. The pause/play button records the shopper's choice: once paused, nothing (pointer leaving, focus leaving)
+ * restarts it except pressing Play. Under `prefers-reduced-motion` there is no autoplay at all, so no pause/play
+ * button either. Without JavaScript (and before hydration) the first slide shows and nothing rotates.
  * Only the very first banner on the page loads eagerly (`priority`); every other banner image is lazy.
  */
 export function BannerCarousel({ slides, priority }: { slides: BannerSlide[]; priority: boolean }) {
   const [index, setIndex] = useState(0)
-  const [playing, setPlaying] = useState(true)
+  /** The shopper's explicit choice; only the pause/play button changes it. */
+  const [userPaused, setUserPaused] = useState(false)
+  /** Temporary hold while the pointer or focus is inside the carousel. */
   const [interacting, setInteracting] = useState(false)
   const reducedMotion = useSyncExternalStore(
     subscribeReducedMotion,
@@ -85,7 +114,7 @@ export function BannerCarousel({ slides, priority }: { slides: BannerSlide[]; pr
   )
   const count = slides.length
   const go = useCallback((next: number) => setIndex(((next % count) + count) % count), [count])
-  const autoplay = count > 1 && playing && !interacting && !reducedMotion
+  const autoplay = count > 1 && !userPaused && !interacting && !reducedMotion
 
   useEffect(() => {
     if (!autoplay) return
@@ -136,15 +165,16 @@ export function BannerCarousel({ slides, priority }: { slides: BannerSlide[]; pr
       }}
     >
       <div className="banners__controls">
-        <button
-          type="button"
-          className="banners__toggle"
-          onClick={() => setPlaying((p) => !p)}
-          aria-label={playing && !reducedMotion ? 'Pause slideshow' : 'Play slideshow'}
-          disabled={reducedMotion}
-        >
-          {playing && !reducedMotion ? 'Pause' : 'Play'}
-        </button>
+        {!reducedMotion && (
+          <button
+            type="button"
+            className="banners__toggle"
+            onClick={() => setUserPaused((p) => !p)}
+            aria-label={userPaused ? 'Play slideshow' : 'Pause slideshow'}
+          >
+            {userPaused ? 'Play' : 'Pause'}
+          </button>
+        )}
         <button type="button" onClick={() => go(index - 1)} aria-label="Previous slide">
           ‹
         </button>

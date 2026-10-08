@@ -214,3 +214,53 @@ describe('catalog reads', () => {
     expect(fetchMock.mock.calls[1]![1]).toMatchObject({ cache: 'no-store' })
   })
 })
+
+describe('home degradation log', () => {
+  const report = (over: Partial<Record<string, number>> = {}) => ({
+    unknownType: 0,
+    malformed: 0,
+    invalidIds: 0,
+    invalidLinks: 0,
+    imagesNotAllowed: 0,
+    ...over,
+  })
+
+  it('logs counts only, once per change or per minute, and nothing for a clean response', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    catalog.logHomeReport(report(), true, 1_000)
+    expect(warn).not.toHaveBeenCalled()
+    catalog.logHomeReport(report({ unknownType: 1, imagesNotAllowed: 2 }), false, 1_000)
+    catalog.logHomeReport(report({ unknownType: 1, imagesNotAllowed: 2 }), false, 30_000)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]![0]).toBe(
+      'storefront_home_blocks_degraded unknown_type=1 malformed=0 invalid_ids=0 invalid_links=0 images_not_allowed=2 media_base=unset',
+    )
+    catalog.logHomeReport(report({ unknownType: 2 }), false, 31_000) // counts changed
+    catalog.logHomeReport(report({ unknownType: 2 }), false, 92_000) // a minute later
+    expect(warn).toHaveBeenCalledTimes(3)
+  })
+
+  it('home read logs the counts of a degraded response and still renders the rest', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockResolvedValueOnce(
+      reply({
+        status: 200,
+        body: {
+          blocks: [
+            { blockId: 'V', type: 'VIDEO', title: 'v' },
+            { blockId: 'R', type: 'PRODUCT_RAIL', title: 'R', ids: ['TZP-1', '../x?y=1'] },
+          ],
+        },
+      }),
+    )
+    const home = await catalog.getHomeBlocks()
+    expect(home).toMatchObject({ ok: true, blocks: [{ blockId: 'R', ids: ['TZP-1'] }] })
+    const line = warn.mock.calls
+      .map((c) => String(c[0]))
+      .find((l) => l.startsWith('storefront_home'))
+    expect(line).toContain('unknown_type=1')
+    expect(line).toContain('invalid_ids=1')
+    expect(line).toContain('media_base=configured')
+    expect(line).not.toMatch(/TZP|\?|http/)
+  })
+})

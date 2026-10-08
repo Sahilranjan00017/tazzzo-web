@@ -126,6 +126,48 @@ describe('BannerCarousel', () => {
     expect(screen.getByRole('button', { name: 'Play slideshow' })).toBeInTheDocument()
   })
 
+  it('an explicit pause survives the pointer and focus leaving; only Play resumes', () => {
+    vi.useFakeTimers()
+    const { container } = render(<BannerCarousel slides={[slide(1), slide(2)]} priority />)
+    const region = screen.getByTestId('banner-carousel')
+    const visible = () => slides(container).findIndex((s) => !s.hidden)
+    fireEvent.mouseEnter(region)
+    fireEvent.click(screen.getByRole('button', { name: 'Pause slideshow' }))
+    fireEvent.mouseLeave(region)
+    fireEvent.focus(screen.getByRole('button', { name: 'Next slide' }))
+    fireEvent.blur(screen.getByRole('button', { name: 'Next slide' }), {
+      relatedTarget: document.body,
+    })
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(visible()).toBe(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Play slideshow' }))
+    act(() => vi.advanceTimersByTime(6_000))
+    expect(visible()).toBe(1)
+  })
+
+  it('hover only holds autoplay temporarily when the shopper did not pause', () => {
+    vi.useFakeTimers()
+    const { container } = render(<BannerCarousel slides={[slide(1), slide(2)]} priority />)
+    const region = screen.getByTestId('banner-carousel')
+    const visible = () => slides(container).findIndex((s) => !s.hidden)
+    fireEvent.mouseEnter(region)
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(visible()).toBe(0)
+    fireEvent.mouseLeave(region)
+    act(() => vi.advanceTimersByTime(6_000))
+    expect(visible()).toBe(1)
+  })
+
+  it('a banner whose image cannot be shown renders the placeholder and keeps its link', () => {
+    render(<BannerCarousel slides={[slide(1, { imageUrl: null })]} priority />)
+    expect(document.querySelector('img')).toBeNull()
+    expect(screen.getByRole('img', { name: 'Alt 1' })).toHaveAttribute(
+      'data-testid',
+      'image-fallback',
+    )
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/p/TZP-1')
+  })
+
   it('does not autoplay under prefers-reduced-motion', () => {
     vi.useFakeTimers()
     const original = window.matchMedia
@@ -137,7 +179,9 @@ describe('BannerCarousel', () => {
       const { container } = render(<BannerCarousel slides={[slide(1), slide(2)]} priority />)
       act(() => vi.advanceTimersByTime(30_000))
       expect(slides(container).findIndex((s) => !s.hidden)).toBe(0)
-      expect(screen.getByRole('button', { name: 'Play slideshow' })).toBeDisabled()
+      // Nothing rotates, so there is nothing to pause: no misleading (disabled) "Play" control.
+      expect(screen.queryByRole('button', { name: /slideshow/ })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Next slide' })).toBeEnabled()
     } finally {
       window.matchMedia = original
     }
