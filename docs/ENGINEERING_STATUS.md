@@ -8,7 +8,7 @@
 | W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                   |
 | CMS business modules                                | NOT STARTED |                                                                                                         |
 | Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                 |
-| Customer web app (`apps/web`)                       | NOT STARTED |                                                                                                         |
+| Customer website (`apps/storefront`)                | IN REVIEW   | Home (`/v1/content/home?channel=web`), PDP, category, search on the public `/v1` API; see app README    |
 
 **W3 (merged, PR #3):** a narrow BFF mutation layer (`src/server/bff/mutation.ts`). There is no generic proxy: every route
 declares its one backend path, method, strict request schema, response schema and header allowlist. Each mutation
