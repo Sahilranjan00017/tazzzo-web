@@ -1,7 +1,7 @@
 # tazzzo-web
 
-Tazzzo web surfaces. Today this repository contains only the **internal Admin/CMS foundation** (`apps/admin`). The
-customer-facing web app will be added later as `apps/web`.
+Tazzzo web surfaces: the **internal Admin/CMS** (`apps/admin`) and the **customer website** (`apps/storefront`, see
+[its README](apps/storefront/README.md)).
 
 ## Current state
 
@@ -62,7 +62,12 @@ pnpm test         # Vitest unit tests
 pnpm test:integration # Valkey (Testcontainers, needs Docker) + mock OIDC + fake backend + real Next runtime
 pnpm test:e2e     # Playwright (Chromium) end to end; first run: pnpm --filter admin exec playwright install chromium
 pnpm build        # production build (standalone output)
+pnpm dev:storefront     # customer website
+pnpm test:e2e:storefront # storefront Playwright E2E (fake public API + fake media host)
+pnpm test:e2e:storefront:prod # storefront E2E on the production build (production CSP)
 ```
+
+`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` run for every app.
 
 ## Layout
 

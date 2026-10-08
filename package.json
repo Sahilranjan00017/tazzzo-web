@@ -7,14 +7,17 @@
   },
   "scripts": {
     "dev": "pnpm --filter admin dev",
-    "build": "pnpm --filter admin build",
-    "lint": "pnpm --filter admin lint",
-    "typecheck": "pnpm --filter admin typecheck",
-    "test": "pnpm --filter admin test",
+    "dev:storefront": "pnpm --filter storefront dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:integration": "pnpm --filter admin test:integration",
-    "test:e2e": "pnpm --filter admin test:e2e"
+    "test:e2e": "pnpm --filter admin test:e2e",
+    "test:e2e:storefront": "pnpm --filter storefront test:e2e",
+    "test:e2e:storefront:prod": "pnpm --filter storefront build && pnpm --filter storefront test:e2e:prod"
   },
   "devDependencies": {
     "prettier": "3.9.9"
