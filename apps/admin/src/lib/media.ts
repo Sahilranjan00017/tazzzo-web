@@ -2,7 +2,13 @@ import { z } from 'zod'
 import type { BffResult } from './bff-client'
 import { bffErrorMessage } from './bff-client'
 import { PRODUCT_ID } from './products'
-import { DEFAULT_MAX_UPLOAD_BYTES, IMAGE_TYPES } from './upload'
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  IMAGE_TYPES,
+  rememberMaxBytes,
+  sizeLimitCopy,
+  sizeLimitOf,
+} from './upload'
 
 /**
  * Media-set contract (backend `MediaAdminController`, PR #95 head c8f57de). Client-safe. Image roles are only PRIMARY and
@@ -147,6 +153,11 @@ const CODE_COPY: Record<string, string> = {
 }
 
 export function mediaErrorMessage(result: Extract<BffResult<unknown>, { ok: false }>): string {
+  const limit = sizeLimitOf(result)
+  if (limit !== undefined) {
+    rememberMaxBytes(limit)
+    return sizeLimitCopy(limit)
+  }
   if (result.code && CODE_COPY[result.code]) return CODE_COPY[result.code]!
   if (result.status === 502 || result.status === 503)
     return 'The media service is unavailable right now. Nothing was changed.'

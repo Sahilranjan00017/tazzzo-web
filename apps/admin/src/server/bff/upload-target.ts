@@ -61,3 +61,19 @@ export const toUploadTarget = (o: z.infer<typeof uploadTargetOut>): UploadTarget
   expiresAt: o.expiresAt ?? null,
   maxBytes: o.maxBytes ?? null,
 })
+
+/**
+ * `errorDetail` for 422s that may be a size refusal: the backend names its limit in the message
+ * (`sizeBytes must be between 1 and N` at target time, `stored object size is outside 1..N` at reference time). Only that
+ * number is passed on, as `{ reason: 'size', maxBytes }`; nothing else from the backend body reaches the browser.
+ */
+export function sizeLimitDetail(body: unknown): { reason: 'size'; maxBytes: number } | undefined {
+  const message = (body as { error?: { message?: unknown } } | undefined)?.error?.message
+  if (typeof message !== 'string') return undefined
+  const m =
+    /(?:sizeBytes must be between 1 and |stored object size is outside 1\.\.)(\d{1,9})\b/.exec(
+      message,
+    )
+  const maxBytes = m ? Number(m[1]) : Number.NaN
+  return maxBytes >= 1 && maxBytes <= 52_428_800 ? { reason: 'size', maxBytes } : undefined
+}

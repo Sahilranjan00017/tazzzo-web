@@ -100,6 +100,13 @@ export function MediaSetEditor({
   const keep = (img: UploadedImage) => {
     if (img.previewUrl) previews.current.push(img.previewUrl)
   }
+  /** A local preview that no row shows any more is released at once (not only on unmount). */
+  const release = (url: string | undefined) => {
+    const at = url ? previews.current.indexOf(url) : -1
+    if (!url || at < 0) return
+    previews.current.splice(at, 1)
+    if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+  }
 
   function addUploaded(img: UploadedImage) {
     keep(img)
@@ -129,6 +136,7 @@ export function MediaSetEditor({
 
   function replaceWith(rowId: string, img: UploadedImage) {
     keep(img)
+    release(rows.find((r) => r.rowId === rowId)?.url)
     setRows((rs) =>
       rs.map((r) =>
         r.rowId === rowId
@@ -301,6 +309,7 @@ export function MediaSetEditor({
                       <button
                         type="button"
                         className="btn"
+                        disabled={conflict}
                         aria-expanded={replacing === r.rowId}
                         onClick={() => setReplacing(replacing === r.rowId ? undefined : r.rowId)}
                       >
@@ -315,6 +324,7 @@ export function MediaSetEditor({
                       requestTarget={requestTarget}
                       describe={mediaErrorMessage}
                       onUploaded={(img) => replaceWith(r.rowId, img)}
+                      disabled={conflict}
                       createXhr={createXhr}
                     />
                   ) : null}
@@ -341,7 +351,7 @@ export function MediaSetEditor({
         <h2 id="add-h">Add an image</h2>
         <ImageUploadField
           label="Image file"
-          hint="JPEG, PNG or WebP, up to 5 MiB (the backend default). Choose a file or drop it here. SVG is never accepted."
+          hint="JPEG, PNG or WebP, up to the backend's limit (5 MiB unless configured otherwise). Choose a file or drop it here. SVG is never accepted."
           requestTarget={requestTarget}
           describe={mediaErrorMessage}
           onUploaded={addUploaded}

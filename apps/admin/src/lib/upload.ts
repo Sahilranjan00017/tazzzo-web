@@ -15,6 +15,43 @@ export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 export type ImageType = (typeof IMAGE_TYPES)[number]
 /** Backend default ceiling (`MediaUploadPolicy.DEFAULT_MAX_BYTES`); a deployment may lower or raise it up to 50 MiB. */
 export const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+/** The contract ceiling (`MediaUploadPolicy` accepts a configured limit of at most 50 MiB). */
+export const CONTRACT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+/**
+ * The backend's real upload limit, learned from what it says: `maxBytes` on every issued target, or the limit named in a
+ * size refusal (422, surfaced by the BFF as `detail.maxBytes`). Until it is known, the local check only enforces the
+ * contract ceiling: refusing at the 5 MiB default would make a larger configured limit unreachable. The backend
+ * decides either way; its refusal is shown with the real limit.
+ */
+let learnedMaxBytes: number | undefined
+export function rememberMaxBytes(bytes: number | null | undefined): void {
+  if (
+    typeof bytes === 'number' &&
+    Number.isInteger(bytes) &&
+    bytes > 0 &&
+    bytes <= CONTRACT_MAX_UPLOAD_BYTES
+  )
+    learnedMaxBytes = bytes
+}
+export const uploadLimit = (): { bytes: number; known: boolean } =>
+  learnedMaxBytes !== undefined
+    ? { bytes: learnedMaxBytes, known: true }
+    : { bytes: CONTRACT_MAX_UPLOAD_BYTES, known: false }
+/** Test seam. */
+export const forgetMaxBytes = () => {
+  learnedMaxBytes = undefined
+}
+
+/** The backend limit named in a size refusal, as passed through by the BFF (`detail: { reason: 'size', maxBytes }`). */
+export function sizeLimitOf(f: { detail?: unknown }): number | undefined {
+  const d = f.detail as { reason?: unknown; maxBytes?: unknown } | undefined
+  return d?.reason === 'size' && typeof d.maxBytes === 'number' ? d.maxBytes : undefined
+}
+export const sizeLimitCopy = (maxBytes: number, size?: number) =>
+  size !== undefined
+    ? `The file is ${mib(size)}; this backend accepts images up to ${mib(maxBytes)}. Nothing was uploaded.`
+    : `An image is larger than this backend accepts (up to ${mib(maxBytes)}). Nothing was saved.`
 export const IMAGE_ACCEPT = IMAGE_TYPES.join(',')
 const TYPE_LABEL: Record<string, string> = {
   'image/jpeg': 'JPEG',
@@ -45,7 +82,10 @@ async function readHead(file: Blob, bytes: number): Promise<Uint8Array> {
   })
 }
 
-const mib = (bytes: number) => `${Math.round((bytes / 1024 / 1024) * 10) / 10} MiB`
+const mib = (bytes: number) =>
+  bytes < 1024 * 1024
+    ? `${Math.max(1, Math.ceil(bytes / 1024))} KiB`
+    : `${Math.round((bytes / 1024 / 1024) * 10) / 10} MiB`
 
 export type FileCheck = { ok: true; contentType: ImageType } | { ok: false; message: string }
 
@@ -206,7 +246,7 @@ export const PUT_FAILURE_COPY: Record<PutFailure, string> = {
   network:
     'The upload did not reach storage (network problem, or the storage address is not allowed by this CMS). Retry to request a fresh link.',
   timeout: 'The upload took too long and was stopped. Retry to request a fresh link.',
-  aborted: 'The upload was cancelled.',
+  aborted: 'Upload cancelled. Nothing was uploaded or saved; choose the file again or retry.',
   storage_error: 'Storage answered with an error. Retry to request a fresh link.',
 }
 
@@ -246,20 +286,26 @@ export async function uploadImage(
 ): Promise<UploadResult> {
   deps.onPhase?.('requesting')
   const r = await deps.requestTarget(contentType, file.size)
-  if (!r.ok)
+  if (deps.signal?.aborted)
+    return { ok: false, message: PUT_FAILURE_COPY.aborted, retryable: true, reason: 'aborted' }
+  if (!r.ok) {
+    const limit = sizeLimitOf(r)
+    rememberMaxBytes(limit)
     return {
       ok: false,
-      message: deps.describe(r),
+      message: limit !== undefined ? sizeLimitCopy(limit, file.size) : deps.describe(r),
       retryable: targetFailureRetryable(r),
       status: r.status,
     }
+  }
   const target = uploadTargetSchema.safeParse(r.data)
   if (!target.success)
     return { ok: false, message: PUT_FAILURE_COPY.invalid_target, retryable: false }
+  rememberMaxBytes(target.data.maxBytes)
   if (target.data.maxBytes !== null && file.size > target.data.maxBytes)
     return {
       ok: false,
-      message: `The file is ${mib(file.size)}; this backend accepts up to ${mib(target.data.maxBytes)}.`,
+      message: sizeLimitCopy(target.data.maxBytes, file.size),
       retryable: false,
     }
   deps.onPhase?.('uploading')
@@ -272,7 +318,7 @@ export async function uploadImage(
   return {
     ok: false,
     message: PUT_FAILURE_COPY[put.reason],
-    retryable: put.reason !== 'invalid_target' && put.reason !== 'aborted',
+    retryable: put.reason !== 'invalid_target',
     reason: put.reason,
     status: put.status,
   }

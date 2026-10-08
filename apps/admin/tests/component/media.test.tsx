@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { MediaSetEditor } from '@/components/media/MediaSetEditor'
 import { MediaView } from '@/components/media/MediaView'
 import { ToastProvider } from '@/components/ui/Toast'
+import { forgetMaxBytes } from '@/lib/upload'
 import { FakeXhr, JPEG_HEAD, PNG_HEAD, imageFile } from '../support/fake-xhr'
 
 const refresh = vi.fn()
@@ -14,6 +15,7 @@ beforeEach(() => {
   refresh.mockClear()
   vi.restoreAllMocks()
   FakeXhr.reset()
+  forgetMaxBytes()
 })
 const wrap = (ui: React.ReactNode) => render(<ToastProvider>{ui}</ToastProvider>)
 const K1 = 'p/product/tzp-1/a.jpg'
@@ -293,5 +295,97 @@ describe('MediaSetEditor: upload', () => {
     await user.click(saveButton())
     const [body] = bodies(f, '/api/bff/media/product/TZP-1')
     expect(body.assets[1]).toMatchObject({ assetId: 'A2', assetKey: NEW_KEY, sortOrder: 1 })
+  })
+
+  it('Cancel stops an in-flight upload; nothing is added and it can be retried', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ok(target()))
+    wrap(editor())
+    await user.upload(screen.getByLabelText('Image file'), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().progress(8, 32)
+    await user.click(await screen.findByRole('button', { name: 'Cancel upload' }))
+    expect(FakeXhr.last().aborted).toBe(true)
+    expect(await screen.findByText(/Upload cancelled/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(`Alt text for ${NEW_KEY}`)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry upload' })).toBeInTheDocument()
+  })
+
+  it('learns the backend limit from a target and then refuses larger files locally', async () => {
+    const user = userEvent.setup()
+    const f = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => ok({ ...target(), maxBytes: 40 }))
+    wrap(editor())
+    await user.upload(screen.getByLabelText('Image file'), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().respond(200)
+    expect(await screen.findByLabelText(`Alt text for ${NEW_KEY}`)).toBeInTheDocument()
+    await user.upload(
+      screen.getByLabelText('Image file'),
+      imageFile('big.png', 'image/png', PNG_HEAD, 100),
+    )
+    expect(await screen.findByText('The file is 1 KiB; the limit is 1 KiB.')).toBeInTheDocument()
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('a size refusal at save names the backend limit', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: 'invalid_request',
+          code: 'INVALID_MEDIA',
+          detail: { reason: 'size', maxBytes: 2097152 },
+        }),
+        { status: 422 },
+      ),
+    )
+    wrap(editor())
+    await user.type(screen.getByLabelText(`Alt text for ${K2}`), 'Side')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await user.click(saveButton())
+    expect(
+      await within(dialog()).findByText(
+        'An image is larger than this backend accepts (up to 2 MiB). Nothing was saved.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('after a conflict, replacing is disabled like adding', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(fail(409, 'STALE_VERSION'))
+    wrap(editor())
+    await user.click(screen.getByRole('button', { name: `Replace ${K2}` }))
+    await user.type(screen.getByLabelText(`Alt text for ${K2}`), 'Side')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await user.click(saveButton())
+    await screen.findByText(/Someone else changed this media set/)
+    expect(screen.getByRole('button', { name: 'Cancel replace' })).toBeDisabled()
+    expect(screen.getByLabelText(`Replacement image for ${K2}`)).toBeDisabled()
+    expect(screen.getByLabelText('Image file')).toBeDisabled()
+  })
+
+  it('a superseded local preview is released when its image is replaced again', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ok(target()))
+    const created: string[] = []
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      created.push(`blob:preview-${created.length + 1}`)
+      return created.at(-1)!
+    })
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    wrap(editor())
+    await user.click(screen.getByRole('button', { name: `Replace ${K2}` }))
+    await user.upload(screen.getByLabelText(`Replacement image for ${K2}`), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().respond(200)
+    await screen.findByLabelText(`Order for ${NEW_KEY}`)
+    expect(revoke).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: `Replace ${NEW_KEY}` }))
+    await user.upload(screen.getByLabelText(`Replacement image for ${NEW_KEY}`), png())
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(2))
+    FakeXhr.last().respond(200)
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:preview-1'))
   })
 })

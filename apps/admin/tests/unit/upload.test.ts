@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CONTRACT_MAX_UPLOAD_BYTES,
   checkImageFile,
+  forgetMaxBytes,
+  sizeLimitOf,
+  uploadLimit,
   percent,
   prepareTargetHeaders,
   putToStorage,
@@ -24,7 +28,10 @@ const target = (over: Partial<UploadTarget> = {}): UploadTarget => ({
 })
 const png = () => imageFile('a.png', 'image/png', PNG_HEAD) // 12 + 20 = 32 bytes
 
-beforeEach(() => FakeXhr.reset())
+beforeEach(() => {
+  FakeXhr.reset()
+  forgetMaxBytes()
+})
 
 describe('magic-byte sniff (mirrors the backend MediaSniffer)', () => {
   it('detects JPEG, PNG and WebP and nothing else', () => {
@@ -297,5 +304,78 @@ describe('upload state machine', () => {
     ).toEqual({ phase: 'invalid', fileName: 'x.gif', message: 'no' })
     expect(percent(5, 0)).toBe(0)
     expect(percent(150, 100)).toBe(100)
+  })
+})
+
+describe('backend upload limit', () => {
+  const describeFail = () => 'described'
+  it('before the backend has said anything, only the 50 MiB contract ceiling applies locally', () => {
+    expect(uploadLimit()).toEqual({ bytes: CONTRACT_MAX_UPLOAD_BYTES, known: false })
+  })
+  it('learns maxBytes from an issued target and enforces it on the next file', async () => {
+    const p = uploadImage(png(), 'image/png', {
+      requestTarget: () =>
+        Promise.resolve({ ok: true, data: target({ maxBytes: 10 * 1024 * 1024 }) }),
+      describe: describeFail,
+      createXhr: FakeXhr.factory,
+    })
+    await vi.waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    FakeXhr.last().respond(200)
+    await p
+    expect(uploadLimit()).toEqual({ bytes: 10 * 1024 * 1024, known: true })
+    const big = new File([new Uint8Array(11 * 1024 * 1024)], 'big.png', { type: 'image/png' })
+    expect(await checkImageFile(big, uploadLimit().bytes)).toMatchObject({
+      ok: false,
+      message: 'The file is 11 MiB; the limit is 10 MiB.',
+    })
+  })
+  it('a size refusal names the backend limit and teaches it', async () => {
+    const r = await uploadImage(png(), 'image/png', {
+      requestTarget: () =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          error: 'invalid_request',
+          code: 'INVALID_MEDIA',
+          detail: { reason: 'size', maxBytes: 2 * 1024 * 1024 },
+        }),
+      describe: describeFail,
+    })
+    expect(r).toEqual({
+      ok: false,
+      message: 'The file is 1 KiB; this backend accepts images up to 2 MiB. Nothing was uploaded.',
+      retryable: false,
+      status: 422,
+    })
+    expect(uploadLimit()).toEqual({ bytes: 2 * 1024 * 1024, known: true })
+    expect(sizeLimitOf({ detail: { reason: 'other', maxBytes: 1 } })).toBeUndefined()
+  })
+})
+
+describe('cancel', () => {
+  it('a cancel while the target is being requested sends nothing; a cancel mid-upload aborts the PUT; both can be retried', async () => {
+    const ac = new AbortController()
+    const r = await uploadImage(png(), 'image/png', {
+      requestTarget: async () => {
+        ac.abort()
+        return { ok: true, data: target() }
+      },
+      describe: () => 'x',
+      signal: ac.signal,
+      createXhr: FakeXhr.factory,
+    })
+    expect(r).toMatchObject({ ok: false, reason: 'aborted', retryable: true })
+    expect(FakeXhr.instances).toHaveLength(0)
+    const ac2 = new AbortController()
+    const p = uploadImage(png(), 'image/png', {
+      requestTarget: () => Promise.resolve({ ok: true, data: target() }),
+      describe: () => 'x',
+      signal: ac2.signal,
+      createXhr: FakeXhr.factory,
+    })
+    await vi.waitFor(() => expect(FakeXhr.instances).toHaveLength(1))
+    ac2.abort()
+    expect(FakeXhr.last().aborted).toBe(true)
+    expect(await p).toMatchObject({ ok: false, reason: 'aborted', retryable: true })
   })
 })
