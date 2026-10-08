@@ -203,6 +203,56 @@ export class FakeBackend {
     this.areas.clear()
     this.media.clear()
     this.blocks.clear()
+    const seedBy = `google:${WRITER_SUB}`
+    const home = (
+      blockId: string,
+      type: string,
+      title: string,
+      sort: number,
+      status: string,
+      audience: string,
+      payload: Record<string, unknown>,
+      extra: Record<string, unknown> = {},
+    ) =>
+      this.blocks.set(blockId, {
+        blockId,
+        placement: 'HOME',
+        type,
+        title,
+        sort,
+        status,
+        audience,
+        payload,
+        version: 2,
+        createdBy: seedBy,
+        updatedBy: seedBy,
+        createdAt: '2026-10-06T03:30:00Z',
+        updatedAt: '2026-10-06T03:30:00Z',
+        ...extra,
+      })
+    this.objects.set('c/home/seed-mobile.png', { bytes: TINY_PNG, contentType: 'image/png' })
+    home('CB_homebanner000001', 'BANNER', 'Mango season', 10, 'PUBLISHED', 'BOTH', {
+      imageAssetKey: 'c/home/seed-mobile.png',
+      link: 'category:TZC-000001',
+      subtitle: 'Fresh every morning',
+    })
+    home('CB_homerail00000001', 'PRODUCT_RAIL', 'Bestsellers', 20, 'DRAFT', 'APP_ONLY', {
+      ids: ['TZP-REF-1'],
+    })
+    home(
+      'CB_homegrid00000001',
+      'CATEGORY_GRID',
+      'Shop by category',
+      30,
+      'PUBLISHED',
+      'WEB_ONLY',
+      { ids: ['TZC-000001'] },
+      { startsAt: '2099-01-01T00:00:00Z' },
+    )
+    home('CB_homearchived0001', 'BANNER', 'Old offer', 40, 'ARCHIVED', 'BOTH', {
+      imageAssetKey: 'c/home/seed-mobile.png',
+      link: 'search:rice',
+    })
     this.blocks.set('CB_faqseed000000001', {
       blockId: 'CB_faqseed000000001',
       placement: 'HELP',
@@ -363,6 +413,53 @@ export class FakeBackend {
     const sniffed = sniff(o.bytes)
     if (!sniffed || (declared && declared !== sniffed) || o.contentType !== sniffed)
       return { status: 422, code: 'INVALID_MEDIA' }
+    return undefined
+  }
+
+  private sortedBlocks(placement: string) {
+    return [...this.blocks.values()]
+      .filter((x) => x.placement === placement)
+      .sort((a, b) => Number(a.sort) - Number(b.sort) || a.blockId.localeCompare(b.blockId))
+  }
+
+  /** The backend's admin view: derived effectiveStatus and resolved image URLs. */
+  blockView(
+    x: Record<string, unknown> & { blockId: string; status: string; version: number },
+    at = Date.now(),
+  ) {
+    const p = (x.payload ?? {}) as Record<string, unknown>
+    const eff =
+      x.status === 'ARCHIVED'
+        ? 'ARCHIVED'
+        : x.status !== 'PUBLISHED'
+          ? 'DRAFT'
+          : x.startsAt && at < Date.parse(String(x.startsAt))
+            ? 'SCHEDULED'
+            : x.endsAt && at >= Date.parse(String(x.endsAt))
+              ? 'EXPIRED'
+              : 'LIVE'
+    const url = (k: unknown) => (typeof k === 'string' ? this.publicUrl(k) : undefined)
+    return {
+      ...x,
+      effectiveStatus: eff,
+      imageUrl: url(p.imageAssetKey),
+      desktopImageUrl: url(p.desktopImageAssetKey),
+    }
+  }
+
+  /** `ContentService.verifyNewImages`: a newly referenced banner key must be a content key held in storage. */
+  private verifyContentImages(
+    p: Record<string, unknown> | undefined,
+    before: Record<string, unknown> | undefined,
+  ): { status: number; code: string } | undefined {
+    if (!this.storage.enabled || !p) return undefined
+    for (const key of [p.imageAssetKey, p.desktopImageAssetKey]) {
+      if (typeof key !== 'string') continue
+      if (before && (key === before.imageAssetKey || key === before.desktopImageAssetKey)) continue
+      if (!key.startsWith('c/home/')) return { status: 422, code: 'INVALID_CONTENT' }
+      const bad = this.verifyStored(key)
+      if (bad) return bad.status === 422 ? { status: 422, code: 'INVALID_CONTENT' } : bad
+    }
     return undefined
   }
 
@@ -651,22 +748,119 @@ export class FakeBackend {
         return json(200, this.appConfig)
       }
     }
+    const actor = `google:${claims?.sub ?? 'unknown'}`
+    const nowIso = () => new Date().toISOString()
     if (url.pathname === '/api/v1/admin/content/blocks' && req.method === 'GET') {
       const placement = url.searchParams.get('placement') ?? 'HOME'
       const st = url.searchParams.get('status')
+      const au = url.searchParams.get('audience')
       return json(200, {
-        items: [...this.blocks.values()].filter(
-          (x) => x.placement === placement && (!st || x.status === st),
-        ),
+        items: this.sortedBlocks(placement)
+          .filter((x) => (!st || x.status === st) && (!au || (x.audience ?? 'BOTH') === au))
+          .map((x) => this.blockView(x)),
       })
+    }
+    if (url.pathname === '/api/v1/admin/content/uploads' && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body) as { contentType: string; sizeBytes: number }
+      const ext = EXTENSIONS[b.contentType]
+      if (!ext || !(b.sizeBytes >= 1 && b.sizeBytes <= 5 * 1024 * 1024))
+        return json(422, { error: { code: 'INVALID_CONTENT', message: 'unsupported' } })
+      if (!this.storage.enabled)
+        return json(503, {
+          error: { code: 'MEDIA_STORAGE_NOT_CONFIGURED', message: 'internal detail: bucket none' },
+        })
+      return json(201, this.issue(`c/home/${randomUUID()}.${ext}`, b.contentType, b.sizeBytes))
+    }
+    if (url.pathname === '/api/v1/admin/content/blocks/reorder' && req.method === 'POST') {
+      if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
+      const b = JSON.parse(body) as {
+        placement?: string
+        order: { blockId: string; expectedVersion: number }[]
+      }
+      const placement = b.placement ?? 'HOME'
+      const current = this.sortedBlocks(placement).filter((x) => x.status !== 'ARCHIVED')
+      const want = new Set(b.order.map((o) => o.blockId))
+      if (want.size !== b.order.length)
+        return json(422, { error: { code: 'INVALID_CONTENT', message: 'dup' } })
+      if (current.length !== want.size || current.some((x) => !want.has(x.blockId)))
+        return json(409, { error: { code: 'STALE_VERSION', message: 'set changed' } })
+      if (b.order.some((o) => this.blocks.get(o.blockId)!.version !== o.expectedVersion))
+        return json(409, { error: { code: 'STALE_VERSION', message: 'version' } })
+      b.order.forEach((o, i) => {
+        const x = this.blocks.get(o.blockId)!
+        this.blocks.set(o.blockId, {
+          ...x,
+          sort: (i + 1) * 10,
+          version: x.version + 1,
+          updatedBy: actor,
+          updatedAt: nowIso(),
+        })
+      })
+      return json(200, {
+        items: this.sortedBlocks(placement)
+          .filter((x) => x.status !== 'ARCHIVED')
+          .map((x) => this.blockView(x)),
+      })
+    }
+    if (url.pathname === '/api/v1/admin/content/preview/home' && req.method === 'GET') {
+      const channel = url.searchParams.get('channel')
+      if (channel !== 'app' && channel !== 'web')
+        return json(422, { error: { code: 'INVALID_CONTENT', message: 'channel' } })
+      const drafts = url.searchParams.get('drafts') === 'true'
+      const atRaw = url.searchParams.get('at')
+      const at = atRaw ? Date.parse(atRaw) : Date.now()
+      if (Number.isNaN(at)) return json(422, { error: { code: 'INVALID_CONTENT', message: 'at' } })
+      const admits = (a: unknown) =>
+        (a ?? 'BOTH') === 'BOTH' || (channel === 'app' ? a === 'APP_ONLY' : a === 'WEB_ONLY')
+      const blocks = this.sortedBlocks('HOME')
+        .filter((x) => x.status === 'PUBLISHED' || (drafts && x.status === 'DRAFT'))
+        .filter((x) => admits(x.audience))
+        .filter(
+          (x) =>
+            (!x.startsAt || at >= Date.parse(String(x.startsAt))) &&
+            (!x.endsAt || at < Date.parse(String(x.endsAt))),
+        )
+        .filter((x) => x.type !== 'BANNER' || this.storage.publicBase)
+        .map((x) => {
+          const v = this.blockView(x, at)
+          const p = (x.payload ?? {}) as Record<string, unknown>
+          return {
+            blockId: x.blockId,
+            type: x.type,
+            title: x.title,
+            subtitle: p.subtitle,
+            altText: x.type === 'BANNER' ? (p.altText ?? x.title) : undefined,
+            imageUrl: v.imageUrl,
+            desktopImageUrl: v.desktopImageUrl,
+            link: p.link,
+            ids: p.ids,
+            status: x.status,
+            effectiveStatus: v.effectiveStatus,
+            audience: x.audience ?? 'BOTH',
+          }
+        })
+      return json(200, { channel, at: new Date(at).toISOString(), includeDrafts: drafts, blocks })
     }
     if (url.pathname === '/api/v1/admin/content/blocks' && req.method === 'POST') {
       if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
-      const b = JSON.parse(body) as Record<string, unknown>
+      const b = JSON.parse(body) as Record<string, unknown> & { payload?: Record<string, unknown> }
+      const bad = this.verifyContentImages(b.payload, undefined)
+      if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
       const id = `CB_new${String(this.blocks.size).padStart(13, '0')}`
-      const created = { ...b, blockId: id, status: 'DRAFT', version: 1 }
+      const created = {
+        ...b,
+        audience: b.audience ?? 'BOTH',
+        blockId: id,
+        status: 'DRAFT',
+        version: 1,
+        createdBy: actor,
+        updatedBy: actor,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
       this.blocks.set(id, created as never)
-      return json(201, created)
+      return json(201, this.blockView(created as never))
     }
     const blk = url.pathname.match(
       /^\/api\/v1\/admin\/content\/blocks\/(CB_[A-Za-z0-9_-]+)(\/status)?$/,
@@ -674,32 +868,52 @@ export class FakeBackend {
     if (blk) {
       const cur = this.blocks.get(blk[1]!)
       if (!cur) return json(404, { error: { code: 'NOT_FOUND' } })
-      if (req.method === 'GET') return json(200, cur)
+      if (req.method === 'GET') return json(200, this.blockView(cur))
       if (!roles.includes('cms-writer')) return json(403, { error: { code: 'FORBIDDEN' } })
       const b = JSON.parse(body) as Record<string, unknown> & {
         expectedVersion: number
         to?: string
+        payload?: Record<string, unknown>
       }
-      if (b.expectedVersion !== cur.version) return json(409, { error: { code: 'STALE_VERSION' } })
       if (cur.status === 'ARCHIVED') return json(409, { error: { code: 'STATE_CONFLICT' } })
+      if (req.method === 'POST' && blk[2] && b.to === cur.status)
+        return json(409, { error: { code: 'STATE_CONFLICT' } })
+      if (b.expectedVersion !== cur.version) return json(409, { error: { code: 'STALE_VERSION' } })
       if (req.method === 'POST' && blk[2]) {
-        if (b.to === cur.status) return json(409, { error: { code: 'STATE_CONFLICT' } })
-        const next = { ...cur, status: String(b.to), version: cur.version + 1 }
+        const next = {
+          ...cur,
+          status: String(b.to),
+          version: cur.version + 1,
+          updatedBy: actor,
+          updatedAt: nowIso(),
+        }
         this.blocks.set(cur.blockId, next)
-        return json(200, next)
+        return json(200, this.blockView(next))
       }
       if (req.method === 'PUT') {
+        if ('type' in b || 'placement' in b)
+          return json(422, { error: { code: 'INVALID_CONTENT', message: 'fixed' } })
+        const bad = this.verifyContentImages(
+          b.payload,
+          cur.payload as Record<string, unknown> | undefined,
+        )
+        if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
         const { expectedVersion, ...rest } = b
         const next = {
           blockId: cur.blockId,
           placement: cur.placement,
           type: cur.type,
           status: cur.status,
+          createdBy: cur.createdBy,
+          createdAt: cur.createdAt,
           ...rest,
+          audience: rest.audience ?? cur.audience ?? 'BOTH',
           version: expectedVersion + 1,
+          updatedBy: actor,
+          updatedAt: nowIso(),
         }
         this.blocks.set(cur.blockId, next as never)
-        return json(200, next)
+        return json(200, this.blockView(next as never))
       }
     }
     const mediaM = url.pathname.match(/^\/api\/v1\/admin\/media\/(product|sku)\/([^/]+)$/)
@@ -1206,6 +1420,12 @@ export class FakeBackend {
         ...this.storage,
         ...(JSON.parse(body || '{}') as Partial<FakeBackend['storage']>),
       }
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/bump-block' && method === 'POST') {
+      const { id } = JSON.parse(body) as { id: string }
+      const x = this.blocks.get(id)
+      if (x) this.blocks.set(id, { ...x, version: x.version + 1, updatedBy: 'google:someone-else' })
       return json(200, { ok: true })
     }
     if (url.pathname === '/__control/bump-media' && method === 'POST') {
