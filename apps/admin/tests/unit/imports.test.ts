@@ -77,7 +77,7 @@ describe('mapping and row building', () => {
     const rows = buildRows(
       'prices',
       [
-        ['tzp-1', '129.5', '149'],
+        ['TZP-1', '129.5', '149'],
         ['TZP-2', '200', '100'],
         ['TZP-3', 'abc', '10'],
         ['TZP-1', '1', '2'],

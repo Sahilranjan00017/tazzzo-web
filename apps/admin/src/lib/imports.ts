@@ -268,7 +268,7 @@ export function buildRows(
     let candidate: Record<string, unknown> = {}
     let key = ''
     if (kind === 'prices') {
-      key = cell(r, 'skuId').toUpperCase()
+      key = cell(r, 'skuId')
       const s = parseRupees(cell(r, 'sellingPrice'))
       const m = parseRupees(cell(r, 'mrp'))
       if (!s.ok) errors.push(`Selling price: ${s.reason}`)
@@ -281,7 +281,7 @@ export function buildRows(
         ...(ev ? { expectedVersion: int(ev) ?? ev } : {}),
       }
     } else if (kind === 'inventory') {
-      key = `${cell(r, 'skuId').toUpperCase()}|${cell(r, 'locationId')}`
+      key = `${cell(r, 'skuId')}|${cell(r, 'locationId')}`
       const num = (k: string, label: string) => {
         const v = int(cell(r, k))
         if (v === undefined) errors.push(`${label} must be a whole number, 0 or more.`)
@@ -289,7 +289,7 @@ export function buildRows(
       }
       const ev = cell(r, 'expectedVersion')
       candidate = {
-        skuId: cell(r, 'skuId').toUpperCase(),
+        skuId: cell(r, 'skuId'),
         locationId: cell(r, 'locationId'),
         onHand: num('onHand', 'On-hand'),
         lowStockThreshold: num('lowStockThreshold', 'Low-stock threshold'),
@@ -297,7 +297,7 @@ export function buildRows(
         ...(ev ? { expectedVersion: int(ev) ?? ev } : {}),
       }
     } else {
-      key = cell(r, 'id').toUpperCase()
+      key = cell(r, 'id')
       const gtin = cell(r, 'gtin')
       const internalKey = cell(r, 'internalKey')
       candidate = {

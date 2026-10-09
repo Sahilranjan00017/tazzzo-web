@@ -19,7 +19,7 @@ export default async function MediaPage({
   const access = await requireAdmin()
   const roles = access.view === 'ok' ? access.me.roles : []
   const raw = await searchParams
-  const id = one(raw.id)?.toUpperCase()
+  const id = one(raw.id)
   const type = (one(raw.type) ?? 'product') as OwnerType
   if (!id) return <MediaView canWrite={canWrite(roles)} />
   if (!PRODUCT_ID.test(id) || !OWNER_TYPES.includes(type))

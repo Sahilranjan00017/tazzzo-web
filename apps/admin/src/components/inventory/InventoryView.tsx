@@ -53,7 +53,8 @@ export function InventoryView({
         {lookup}
         {invalidInput ? (
           <p className="notice" role="alert">
-            Enter a product id like TZP-1001 and a location id of letters, digits and . _ : - only.
+            Enter a product id like TZP-1001 (case matters) and a location id of letters, digits and
+            . _ : - only.
           </p>
         ) : (
           <p className="muted">

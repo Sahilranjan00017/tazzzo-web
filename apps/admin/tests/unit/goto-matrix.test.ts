@@ -7,7 +7,9 @@ const all = ['reader', 'cms-writer', 'audit-reader', 'order-ops', 'support-agent
 
 describe('go-to resolution', () => {
   it.each([
-    ['tzp-1001', '/catalogue/products/TZP-1001'],
+    ['TZP-1001', '/catalogue/products/TZP-1001'],
+    ['TZP-l001', '/catalogue/products/TZP-l001'],
+    ['TZP-Med-3', '/catalogue/products/TZP-Med-3'],
     ['ORD_abcdef12', '/orders/ORD_abcdef12'],
     ['SUP_abcdefghijklmnopqrst', '/support/SUP_abcdefghijklmnopqrst'],
     ['CB_abcdefghijklmnop', '/content/faqs/CB_abcdefghijklmnop'],
@@ -27,6 +29,7 @@ describe('go-to resolution', () => {
   it('never builds a path from path-shaped input', () => {
     for (const bad of [
       'TZP-1/../x',
+      'tzp-1001',
       '../../etc/passwd',
       'ORD_abc/def',
       '560047/../1',

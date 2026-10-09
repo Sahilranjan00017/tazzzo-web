@@ -375,7 +375,7 @@ describe('rail and grid editors', () => {
       .mockResolvedValue(ok({ blockId: 'CB_railrailrailrailra', status: 'DRAFT', version: 1 }))
     wrap(<HomeBlockEditor type="PRODUCT_RAIL" />)
     await user.type(screen.getByLabelText(/^Title/), 'Bestsellers')
-    await user.type(screen.getByLabelText(/Product ids/), 'tzp-1\nTZP-2')
+    await user.type(screen.getByLabelText(/Product ids/), 'TZP-1\nTZP-2')
     await user.click(screen.getByLabelText('Website'))
     await user.click(screen.getByRole('button', { name: 'Review new draft' }))
     await user.click(confirmIn('Save'))

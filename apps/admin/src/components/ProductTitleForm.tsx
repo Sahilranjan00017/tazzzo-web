@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
+import { PRODUCT_ID_PATTERN } from '@/lib/products'
 
 type Result = { kind: 'idle' } | { kind: 'busy' } | { kind: 'done'; message: string }
 
@@ -55,7 +56,7 @@ export function ProductTitleForm() {
     <form className="reference-form" onSubmit={submit}>
       <label>
         Product id
-        <input name="productId" required pattern="TZP-[A-Z0-9][A-Z0-9-]{0,39}" />
+        <input name="productId" required pattern={PRODUCT_ID_PATTERN} />
       </label>
       <label>
         Expected version

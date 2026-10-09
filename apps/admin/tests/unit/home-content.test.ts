@@ -57,7 +57,8 @@ describe('banner link grammar (backend ContentBlock.LINK, #102 db3623c)', () => 
   ])('refuses %j', (l) => expect(LINK.test(l)).toBe(false))
 
   it('builds and explains links from the link builder', () => {
-    expect(linkOf('product', ' tzp-1001 ')).toBe('product:TZP-1001')
+    expect(linkOf('product', ' TZP-1001 ')).toBe('product:TZP-1001')
+    expect(linkOf('product', ' TZP-Med-l3 ')).toBe('product:TZP-Med-l3')
     expect(linkOf('category', 'tzc-000123')).toBe('category:TZC-000123')
     expect(linkOf('search', '  ताज़ा आम ')).toBe('search:ताज़ा आम')
     expect(parseLink('search:basmati rice')).toEqual({ kind: 'search', value: 'basmati rice' })
@@ -96,7 +97,11 @@ describe('text rules', () => {
 
 describe('id lists', () => {
   it('splits, normalises and bounds rails (1..20 products) and grids (1..12 nodes)', () => {
-    expect(splitIds(' tzp-1, TZP-2\nTZP-3 ')).toEqual(['TZP-1', 'TZP-2', 'TZP-3'])
+    expect(splitIds(' TZP-1, TZP-2\nTZP-3 ', 'PRODUCT_RAIL')).toEqual(['TZP-1', 'TZP-2', 'TZP-3'])
+    expect(splitIds(' tzc-000001, tzs-000002 ', 'CATEGORY_GRID')).toEqual([
+      'TZC-000001',
+      'TZS-000002',
+    ])
     expect(idsIssue('PRODUCT_RAIL', ['TZP-1'])).toBeUndefined()
     expect(idsIssue('PRODUCT_RAIL', [])).toMatch(/at least one/)
     expect(
