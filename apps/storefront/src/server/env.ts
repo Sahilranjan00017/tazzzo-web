@@ -35,12 +35,13 @@ const serverEnvSchema = z
     /**
      * Trusted-caller identity for the backend's admission gate (its own bucket instead of this server's IP bucket).
      * Optional; set both or neither. Sent as `X-Tazzzo-Caller` / `X-Tazzzo-Caller-Secret` on every backend read.
-     * Same grammar as the backend's trusted-caller configuration (name `[a-z][a-z_]{0,19}`, secret 32-256 visible
-     * ASCII characters), so a value the backend would ignore fails here instead of silently using the IP bucket.
+     * Same grammar as the backend's trusted-caller configuration (`TrustedCallerResolver`: name `[a-z][a-z_]{0,19}`
+     * but not `unknown`, secret 32-256 visible ASCII characters), so a value the backend would ignore fails here
+     * instead of silently using the IP bucket.
      */
     TAZZZO_CALLER_NAME: z
       .string()
-      .regex(/^[a-z][a-z_]{0,19}$/)
+      .regex(/^(?!unknown$)[a-z][a-z_]{0,19}$/)
       .optional()
       .or(z.literal('')),
     TAZZZO_CALLER_SECRET: z

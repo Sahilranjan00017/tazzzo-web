@@ -90,7 +90,7 @@ function parseNodes(data: unknown): CategoryNode[] | null {
   return out
 }
 
-/** `GET /v1/categories`: consumer-visible super-categories. */
+/** `GET /v1/categories`: consumer-visible super-categories (the sitemap). */
 export const getRootCategories = cache(async (): Promise<CategoryNode[] | 'unavailable'> => {
   const result = await getJson('/v1/categories')
   if (!result.ok) return 'unavailable'
@@ -108,22 +108,33 @@ export const getChildCategories = cache(
 )
 
 /**
- * Names for category node ids. The public API has no "node by id" read, so names come from the super-category list
- * and, only when needed, from those super-categories' immediate children. Deeper nodes stay unnamed (a backend gap):
- * callers skip them or fall back to a generic label.
+ * `GET /v1/categories/{id}`: one consumer-visible node at any depth (`{id, name, resolvedReleaseId, requestId}`).
+ * Null when the node is not consumer-visible (unknown, hidden or consumer-empty: one flat 404, exactly when `children`
+ * would 404); `unavailable` on a failure or a body that does not name the node that was asked for.
+ */
+export const getCategory = cache(
+  async (id: string): Promise<CategoryNode | null | 'unavailable'> => {
+    if (!isNodeId(id)) return null
+    const result = await getJson(`/v1/categories/${encodeURIComponent(id)}`)
+    if (!result.ok) return result.kind === 'unavailable' ? 'unavailable' : null
+    const body = result.data as { id?: unknown; name?: unknown } | null
+    if (!body || body.id !== id || typeof body.name !== 'string' || body.name.trim() === '') {
+      return 'unavailable'
+    }
+    return { id, name: body.name.trim() }
+  },
+)
+
+/**
+ * Names for category node ids, one cached `GET /v1/categories/{id}` per distinct id (a grid has at most 12). A node
+ * that is not visible, or whose read fails, is left out: callers skip it or fall back to a generic label.
  */
 export const resolveCategoryNames = cache(async (idsKey: string): Promise<Map<string, string>> => {
-  const wanted = new Set(idsKey.split(',').filter(isNodeId))
+  const wanted = [...new Set(idsKey.split(',').filter(isNodeId))]
+  const nodes = await Promise.all(wanted.map((id) => getCategory(id)))
   const names = new Map<string, string>()
-  const roots = await getRootCategories()
-  if (roots === 'unavailable') return names
-  for (const node of roots) if (wanted.has(node.id)) names.set(node.id, node.name)
-  if ([...wanted].every((id) => names.has(id))) return names
-  const levels = await Promise.all(roots.map((root) => getChildCategories(root.id)))
-  for (const level of levels) {
-    if (!Array.isArray(level)) continue
-    for (const node of level) if (wanted.has(node.id)) names.set(node.id, node.name)
-  }
+  for (const node of nodes)
+    if (node !== null && node !== 'unavailable') names.set(node.id, node.name)
   return names
 })
 

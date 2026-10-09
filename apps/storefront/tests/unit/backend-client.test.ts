@@ -172,22 +172,56 @@ describe('catalog reads', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('resolves category names from super-categories, then their children only when needed', async () => {
+  const node = (id: string, name: string) => ({ id, name, resolvedReleaseId: 'R1', requestId: 'r' })
+
+  it('reads one category by id, cached, at any depth; 404 is null; a body naming another node is unavailable', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/v1/categories'))
-        return reply({ status: 200, body: { items: [{ id: 'TZS-000001', name: 'Staples' }] } })
-      if (url.endsWith('/TZS-000001/children'))
-        return reply({ status: 200, body: { items: [{ id: 'TZC-000002', name: 'Rice' }] } })
+      if (url.endsWith('/TZG-000004'))
+        return reply({ status: 200, body: node('TZG-000004', ' Basmati ') })
+      if (url.endsWith('/TZG-000005'))
+        return reply({ status: 200, body: node('TZG-000006', 'Other') })
+      if (url.endsWith('/TZG-000007')) return reply({ status: 200, body: node('TZG-000007', '  ') })
+      if (url.endsWith('/TZG-000008')) return reply({ status: 503, body: {} })
       return reply({ status: 404, body: {} })
     })
-    const names = await catalog.resolveCategoryNames('TZS-000001,TZC-000002,TZG-000003')
+    expect(await catalog.getCategory('TZG-000004')).toEqual({ id: 'TZG-000004', name: 'Basmati' })
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe(`${API}/v1/categories/TZG-000004`)
+    expect(init).toMatchObject({ next: { revalidate: 60 } })
+    expect(await catalog.getCategory('TZG-000003')).toBeNull()
+    expect(await catalog.getCategory('TZG-000005')).toBe('unavailable')
+    expect(await catalog.getCategory('TZG-000007')).toBe('unavailable')
+    expect(await catalog.getCategory('TZG-000008')).toBe('unavailable')
+    fetchMock.mockClear()
+    expect(await catalog.getCategory('TZG-12')).toBeNull()
+    expect(await catalog.getCategory('TZP-000001')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('resolves category names with one by-id read per distinct id, never walking the tree', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/TZS-000001'))
+        return reply({ status: 200, body: node('TZS-000001', 'Staples') })
+      if (url.endsWith('/TZG-000004'))
+        return reply({ status: 200, body: node('TZG-000004', 'Basmati') })
+      if (url.endsWith('/TZC-000009')) return reply({ status: 429, body: {} })
+      return reply({ status: 404, body: {} })
+    })
+    const names = await catalog.resolveCategoryNames(
+      'TZS-000001,TZG-000004,TZG-000003,TZC-000009,TZS-000001,nope',
+    )
     expect([...names]).toEqual([
       ['TZS-000001', 'Staples'],
-      ['TZC-000002', 'Rice'],
+      ['TZG-000004', 'Basmati'],
     ])
-    fetchMock.mockClear()
-    await catalog.resolveCategoryNames('TZS-000001')
-    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([`${API}/v1/categories`])
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      `${API}/v1/categories/TZS-000001`,
+      `${API}/v1/categories/TZG-000004`,
+      `${API}/v1/categories/TZG-000003`,
+      `${API}/v1/categories/TZC-000009`,
+    ])
   })
 
   it('search: rejected query is "rejected", paging cursor passed back untouched, never cached', async () => {

@@ -44,6 +44,8 @@ describe('parseServerEnv', () => {
     [{ TAZZZO_CALLER_NAME: 'Store Front', TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
     [{ TAZZZO_CALLER_NAME: 'store-front', TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
     [{ TAZZZO_CALLER_NAME: 'a'.repeat(21), TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
+    // The backend reserves `unknown` (its log label for unconfigured names) and refuses to configure it.
+    [{ TAZZZO_CALLER_NAME: 'unknown', TAZZZO_CALLER_SECRET: SECRET }, 'TAZZZO_CALLER_NAME'],
     [
       { TAZZZO_CALLER_NAME: 'storefront', TAZZZO_CALLER_SECRET: 'b'.repeat(257) },
       'TAZZZO_CALLER_SECRET',

@@ -5,18 +5,20 @@ import { ProductGrid } from '@/components/ProductGrid'
 import { Unavailable } from '@/components/Unavailable'
 import { isNodeId } from '@/lib/ids'
 import {
+  getCategory,
   getCategoryProducts,
   getChildCategories,
   isCursor,
-  resolveCategoryNames,
 } from '@/server/backend/catalog'
 
 function firstString(value: string | string[] | undefined): string | null {
   return typeof value === 'string' ? value : null
 }
 
+/** The node's own name from `GET /v1/categories/{id}` (any depth); null when it cannot be read. */
 async function categoryName(id: string): Promise<string | null> {
-  return (await resolveCategoryNames(id)).get(id) ?? null
+  const node = await getCategory(id)
+  return node !== null && node !== 'unavailable' ? node.name : null
 }
 
 export async function generateMetadata({
@@ -36,8 +38,9 @@ export async function generateMetadata({
 }
 
 /**
- * Category browse: `GET /v1/categories/{id}/children` (sub-category links) and `GET /v1/categories/{id}/products`
- * (cursor-paged cards). A node the backend does not show (404 on both) is a 404 here.
+ * Category browse: `GET /v1/categories/{id}` (title), `GET /v1/categories/{id}/children` (sub-category links) and
+ * `GET /v1/categories/{id}/products` (cursor-paged cards). A node the backend does not show (404 on children and
+ * products) is a 404 here.
  */
 export default async function CategoryPage({ params, searchParams }: PageProps<'/c/[node]'>) {
   const { node } = await params
