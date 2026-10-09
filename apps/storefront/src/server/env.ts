@@ -99,6 +99,19 @@ const serverEnvSchema = z
         message: 'needs STOREFRONT_SESSION_SECRET',
       })
     }
+    // Fail closed: the backend's per-IP OTP buckets cannot tell visitors apart (the visitor address is not forwarded),
+    // so the per-visitor limit in proxy.ts is what bounds code requests. Without a trusted proxy it is inactive.
+    if (
+      env.NODE_ENV === 'production' &&
+      env.STOREFRONT_SESSION_SECRET &&
+      env.STOREFRONT_TRUST_PROXY?.trim() !== 'true'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STOREFRONT_TRUST_PROXY'],
+        message: 'must be true in production when customer sessions are enabled',
+      })
+    }
     // Fail closed: with the trusted-caller credential, every backend read is admitted on the storefront's own (large)
     // bucket, so the per-visitor limit in proxy.ts is the only thing between visitors and the backend. Without a
     // trusted proxy that limit is inactive, so production refuses this combination outright.

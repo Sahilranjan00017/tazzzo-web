@@ -159,6 +159,20 @@ test('next: a same-origin path is honoured; an absolute or protocol-relative one
   await expect(page).toHaveURL(/\/account$/)
 })
 
+test('next: dot-segment tricks that collapse to //host are ignored', async ({ page }) => {
+  for (const next of [
+    '/.//evil.com',
+    '/..//evil.com',
+    '/%2e//evil.com',
+    '/x/..//evil.com',
+    '/%252f/evil.com',
+  ]) {
+    await page.context().clearCookies()
+    await signIn(page, next)
+    await expect(page, next).toHaveURL(/^http:\/\/localhost:3989\/account$/)
+  }
+})
+
 test('a signed-in visitor on /login is sent straight on', async ({ page }) => {
   await signIn(page)
   await expect(page).toHaveURL(/\/account$/)
@@ -186,16 +200,18 @@ test('an expired access token is rotated server-side, transparently, and the coo
   page,
   context,
 }) => {
-  await control('accessTtl=33') // usable for 3 s after the 30 s safety margin
-  await signIn(page)
-  await expect(page).toHaveURL(/\/account$/)
+  // Deterministic: a 1 s lifetime is already inside the 30 s safety margin, so the access token in the cookie is
+  // expired the moment it is issued. Sign in to a page that does not need the profile, then let the backend hand out
+  // normal tokens again; /account must refresh before reading the profile.
+  await control('accessTtl=1')
+  await signIn(page, '/search')
+  await expect(page).toHaveURL(/\/search$/)
   const first = (await context.cookies()).find((c) => c.name === SESSION_COOKIE)!.value
-  const refreshes = (await control('accessTtl=33')).refreshCount
-  await page.waitForTimeout(3500)
-  await page.reload()
+  const refreshes = (await control('accessTtl=900')).refreshCount
+  await page.goto('/account')
   await expect(page.getByText('Asha Verma')).toBeVisible()
   await expect(page).toHaveURL(/\/account$/)
-  expect((await control('accessTtl=33')).refreshCount).toBeGreaterThan(refreshes)
+  expect((await control('accessTtl=900')).refreshCount).toBe(refreshes + 1)
   expect((await context.cookies()).find((c) => c.name === SESSION_COOKIE)!.value).not.toBe(first)
 })
 

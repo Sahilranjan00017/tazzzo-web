@@ -39,6 +39,7 @@ async function routes() {
   vi.stubEnv('TAZZZO_API_BASE_URL', 'https://api.tazzzo.test')
   vi.stubEnv('TAZZZO_SITE_URL', SITE)
   vi.stubEnv('STOREFRONT_SESSION_SECRET', KEY)
+  vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true')
   return {
     request: await import('@/app/api/auth/otp/request/route'),
     verify: await import('@/app/api/auth/otp/verify/route'),
@@ -121,7 +122,6 @@ describe('POST /api/auth/otp/request', () => {
     const cases: Array<[string, Record<string, string>]> = [
       ['{"phone":"9876543210"}', good({ 'content-type': 'text/plain' })],
       ['{"phone":"9876543210"}', good({ 'content-type': 'application/x-www-form-urlencoded' })],
-      [JSON.stringify({ phone: '9'.repeat(5000) }), good()],
       ['{not json', good()],
       ['[]', good()],
       ['"9876543210"', good()],
@@ -130,6 +130,33 @@ describe('POST /api/auth/otp/request', () => {
       const response = await r.request.POST(post('/api/auth/otp/request', body, headers))
       expect(response.status, body.slice(0, 20)).toBe(400)
     }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('caps the body by streaming: 413 for a chunked oversize body and for a lying Content-Length', async () => {
+    const r = await routes()
+    const chunk = new TextEncoder().encode('x'.repeat(1_000))
+    let pulled = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1
+        if (pulled > 50) return controller.close()
+        controller.enqueue(chunk)
+      },
+    })
+    const chunked = new Request(`${SITE}/api/auth/otp/request`, {
+      method: 'POST',
+      headers: good(),
+      body: stream,
+      duplex: 'half',
+    } as RequestInit)
+    const response = await r.request.POST(chunked)
+    expect(response.status).toBe(413)
+    expect(pulled).toBeLessThan(10) // stopped reading near the cap, did not buffer all 50 KB
+    const lying = await r.request.POST(
+      post('/api/auth/otp/request', '{}', good({ 'content-length': '999999' })),
+    )
+    expect(lying.status).toBe(413)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

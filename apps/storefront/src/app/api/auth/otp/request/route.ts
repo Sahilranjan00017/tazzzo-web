@@ -1,7 +1,7 @@
 import { customerSessionsEnabled } from '@/server/session/cookies'
 import { isSameOriginMutation } from '@/server/session/csrf'
 import {
-  badRequest,
+  rejectBody,
   disabled,
   failure,
   forbidden,
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (!isSameOriginMutation(request.headers)) return forbidden()
   if (!customerSessionsEnabled()) return disabled()
   const body = await readJsonObject(request)
-  if (!body.ok) return badRequest()
+  if (!body.ok) return rejectBody(body.status)
   const result = await startSignIn(body.value.phone)
   if (!result.ok) return failure(result.error, result.retryAfterSeconds)
   return json(200, { ok: true, ...result.data })

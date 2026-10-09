@@ -66,6 +66,9 @@ describe('safeNext (no open redirect)', () => {
     expect(safeNext('/account')).toBe('/account')
     expect(safeNext('/p/TZP-1001?x=1#top')).toBe('/p/TZP-1001?x=1#top')
     expect(safeNext('/search?q=rice%20dal')).toBe('/search?q=rice%20dal')
+    expect(safeNext('/search?q=a//b/../c#x')).toBe('/search?q=a//b/../c#x') // query is not a path
+    expect(safeNext('/c/TZS-000001?cursor=a.b')).toBe('/c/TZS-000001?cursor=a.b')
+    expect(safeNext('/a.b/c..d')).toBe('/a.b/c..d')
   })
 
   it('falls back to /account for anything that could leave the site', () => {
@@ -90,6 +93,32 @@ describe('safeNext (no open redirect)', () => {
       '/%',
       '/api/auth/logout',
       '/api/auth/refresh?next=/',
+      '/.//evil.com',
+      '/..//evil.com',
+      '/%2e//evil.com',
+      '/%2E%2E//evil.com',
+      '/x/..//evil.com',
+      '/x/%2e%2e//evil.com',
+      '/./evil.com',
+      '/a/./b',
+      '/a/../b',
+      '/..',
+      '/.',
+      '/%252f/evil.com',
+      '/%252e%252e//evil.com',
+      '/%25252f/evil.com',
+      '/a%2fb',
+      '/a%5cb',
+      '/%5Cevil.com',
+      '/\\evil.com',
+      '/a\\b',
+      '/\tevil.com',
+      '/a\tb',
+      '/a\nb',
+      '/a%09b',
+      '/a%0ab',
+      '/////evil.com',
+      '/.\\/evil.com',
       '/login',
       '/login?next=/account',
       '/' + 'a'.repeat(600),
@@ -100,6 +129,26 @@ describe('safeNext (no open redirect)', () => {
       ['/a'],
     ]) {
       expect(safeNext(bad), String(bad)).toBe('/account')
+    }
+  })
+})
+
+describe('safeNext result invariant', () => {
+  it('whatever it returns is a single-slash path that resolves on the same origin', () => {
+    const attempts = [
+      '/.//evil.com',
+      '/x/..//evil.com',
+      '//evil.com',
+      '/a/b?c=//d',
+      '/%2e//e',
+      '/ok',
+      '/p/TZP-1?x=1#y',
+      '/\\e',
+    ]
+    for (const attempt of attempts) {
+      const out = safeNext(attempt)
+      expect(out.startsWith('/') && !out.startsWith('//') && !out.includes('\\'), out).toBe(true)
+      expect(new URL(out, 'https://site.test').origin).toBe('https://site.test')
     }
   })
 })
