@@ -5,14 +5,14 @@ The customer website: home merchandising, product detail, category browse and se
 
 ## Routes
 
-| Route          | Backend reads (all from the Next server, never the browser)                                              |
-| -------------- | -------------------------------------------------------------------------------------------------------- |
-| `/`            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: category names (below) |
-| `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                    |
-| `/c/[node]`    | `GET /v1/categories/{id}/children`, `GET /v1/categories/{id}/products` (cursor paged)                    |
-| `/search?q=`   | `GET /v1/search` (never cached)                                                                          |
-| `/robots.txt`  | none                                                                                                     |
-| `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                           |
+| Route          | Backend reads (all from the Next server, never the browser)                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `/`            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile |
+| `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                                |
+| `/c/[node]`    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                           |
+| `/search?q=`   | `GET /v1/search` (never cached)                                                                                      |
+| `/robots.txt`  | none                                                                                                                 |
+| `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                                       |
 
 ### Home content contract
 
@@ -28,8 +28,8 @@ no hardcoded banners. `channel=web` is the only query parameter sent (anything e
   not clickable. A banner whose image is not under the media base (or with no media base configured) is kept with
   the branded placeholder, like every other image that cannot be shown.
 - `PRODUCT_RAIL`: each id is read with `GET /v1/products/{id}`; missing/hidden/failing products are skipped silently.
-- `CATEGORY_GRID`: tiles link to `/c/<node>`; names come from `GET /v1/categories` and, only if needed, those
-  super-categories' `children`. A node not found there is skipped (see backend gaps).
+- `CATEGORY_GRID`: tiles link to `/c/<node>`; each tile is named by `GET /v1/categories/{id}` (any depth, cached like
+  every read). A node that is not visible (404) or whose read fails is skipped; the rest keep grid order.
 - Unknown block types and malformed blocks are skipped; the rest of the page still renders.
 - Anything skipped or degraded is logged server-side as one counts-only line (no ids, titles or URLs), at most once a
   minute unless the counts change: `storefront_home_blocks_degraded unknown_type=.. malformed=.. invalid_ids=..
@@ -51,7 +51,7 @@ The backend admits every public read through a token bucket keyed by **client IP
   (or the last cached copy, which Next keeps serving when a revalidation fails).
 - **Trusted caller (optional):** with `TAZZZO_CALLER_NAME` and `TAZZZO_CALLER_SECRET` set, every backend read carries
   `X-Tazzzo-Caller` / `X-Tazzzo-Caller-Secret` so the backend can admit this site through its own bucket (backend
-  feature in progress; header names to be confirmed against it). Server-only: never sent to the browser, never
+  `TrustedCallerResolver`, merged in tazzzo-backend #108; same header names and name/secret grammar). Server-only: never sent to the browser, never
   logged, only to `TAZZZO_API_BASE_URL` (no redirects followed). CI fails if either name appears in the client bundle.
 
 ### Per-visitor rate limit (`src/proxy.ts`, `src/lib/security/rate-limit.ts`)
@@ -138,15 +138,16 @@ pnpm --filter storefront build          # standalone output
 ## Backend gaps (found while building against the contract)
 
 1. **No batch product read.** Rails need one `GET /v1/products/{id}` per id (up to 20, admission cost 1 each).
-2. **No category node read by id** (`GET /v1/categories/{id}`). Grid tiles and the `/c/[node]` title can only be
-   named for super-categories and their immediate children; deeper nodes are skipped / titled "Category".
+2. ~~No category node read by id~~: resolved by `GET /v1/categories/{id}` (tazzzo-backend #109); grid tiles and
+   `/c/[node]` titles now use it at any depth.
 3. **No category imagery** in the public `Node` (`id`, `name` only): grid tiles are text.
-4. **One rate-limit identity for the whole website (backend/infra decision, open).** The storefront server's egress IP
+4. **Rate-limit identity (decided; deployment gate open).** Without `TAZZZO_CALLER_*` the storefront server's egress IP
    shares one bucket. The storefront caches (60 s), remembers 404s, backs off after a 429 and limits each visitor
-   (above, per instance); it can send a trusted-caller credential once the backend accepts one. Still open: the
-   backend side of that identity and a batch product read. `GET /v1/categories` costs `1 + sum(scope sizes)` units per call.
-5. **Product id shape mismatch:** OpenAPI `ProductId` is `^TZP-[0-9]+$`, content rails/links accept
-   `TZP-[A-Za-z0-9-]{1,40}`, the cart accepts `^TZP-[0-9]{1,18}$`. The site accepts the content grammar.
+   (above, per instance); with the trusted-caller credential (backend #108) it is admitted on its own bucket. Still
+   open: sizing that bucket by load test, and a batch product read. `GET /v1/categories` (sitemap only) costs
+   `1 + sum(scope sizes)` units per call.
+5. ~~Product id shape mismatch~~: resolved by tazzzo-backend #110; OpenAPI, cart and content all use
+   `TZP-[A-Za-z0-9-]{1,40}`, as this site does.
 6. **Banner search grammar vs search:** `search:[\p{L}\p{M}\p{N} ]{2,64}` (combining marks since backend db3623c, so
    Devanagari search banners work) still allows texts `/v1/search` rejects (more than 5 words, 1-letter words only).
    The site shows a hint on a 400.

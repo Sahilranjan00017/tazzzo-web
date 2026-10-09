@@ -234,12 +234,40 @@ test.describe('deep links', () => {
   }) => {
     await page.goto('/')
     const grid = page.getByRole('region', { name: 'Shop by category' })
-    await expect(grid.getByRole('link')).toHaveText(['Staples', 'Rice'])
+    await expect(grid.getByRole('link')).toHaveText(['Staples', 'Rice', 'Basmati'])
+    // Every tile is named by its own GET /v1/categories/{id}, the unknown TZG-000003 included (a 404: skipped).
+    const byId = (await backendRequests())
+      .map((r) => r.path)
+      .filter((p) => /^\/v1\/categories\/[^/]+$/.test(p))
+    for (const id of ['TZS-000001', 'TZC-000002', 'TZG-000003', 'TZG-000004'])
+      expect(byId).toContain(`/v1/categories/${id}`)
     await grid.getByRole('link', { name: 'Staples' }).click()
     await expect(page).toHaveURL(/\/c\/TZS-000001$/)
     await expect(
       page.getByRole('navigation', { name: 'Sub-categories' }).getByRole('link'),
     ).toHaveText(['Rice'])
+  })
+
+  test('a deep category (two levels down) is titled by its own name, from the grid tile', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page
+      .getByRole('region', { name: 'Shop by category' })
+      .getByRole('link', { name: 'Basmati' })
+      .click()
+    await expect(page).toHaveURL(/\/c\/TZG-000004$/)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Basmati')
+    await expect(page).toHaveTitle('Basmati · Tazzzo')
+    await expect(
+      page.getByRole('list', { name: 'Products in Basmati' }).getByRole('article'),
+    ).toHaveCount(2)
+  })
+
+  test('an unknown category is a 404 page', async ({ page }) => {
+    const response = await page.goto('/c/TZG-000003')
+    expect(response?.status()).toBe(404)
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
   })
 
   test('header search form and unknown product', async ({ page }) => {
