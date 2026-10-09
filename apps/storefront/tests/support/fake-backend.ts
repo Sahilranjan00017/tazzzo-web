@@ -11,8 +11,8 @@ import { deflateSync } from 'node:zlib'
  * - `GET /v1/content/home`: `channel` is the ONLY accepted parameter (app|web, once); anything else is 400. Blocks are
  *   stored with an audience and filtered here like the backend does (web: WEB_ONLY+BOTH, app: APP_ONLY+BOTH, absent:
  *   BOTH only), in stored order, with `Cache-Control: public, max-age=60`;
- * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}/children`, `/v1/categories/{id}/products`,
- *   `/v1/search` with the documented shapes; unknown ids are a flat 404.
+ * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}`, `/v1/categories/{id}/children`,
+ *   `/v1/categories/{id}/products`, `/v1/search` with the documented shapes; unknown ids are a flat 404.
  * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
@@ -116,7 +116,7 @@ export class FakeBackend {
         blockId: 'CB_grid1',
         type: 'CATEGORY_GRID',
         title: 'Shop by category',
-        ids: ['TZS-000001', 'TZC-000002', 'TZG-000003'],
+        ids: ['TZS-000001', 'TZC-000002', 'TZG-000003', 'TZG-000004'],
       },
       { audience: 'BOTH', blockId: 'CB_video', type: 'VIDEO', title: 'Future block type' },
       {
@@ -202,10 +202,12 @@ export class FakeBackend {
     }
   }
 
+  /** Visible nodes; TZG-000004 is two levels deep (only `GET /v1/categories/{id}` can name it). */
   private nodes: Record<string, { name: string; children: string[] }> = {
     'TZS-000001': { name: 'Staples', children: ['TZC-000002'] },
     'TZS-000002': { name: 'Fruits', children: [] },
-    'TZC-000002': { name: 'Rice', children: [] },
+    'TZC-000002': { name: 'Rice', children: ['TZG-000004'] },
+    'TZG-000004': { name: 'Basmati', children: [] },
   }
 
   private async handleApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -280,6 +282,20 @@ export class FakeBackend {
     if (url.pathname === '/v1/categories') {
       const items = ['TZS-000001', 'TZS-000002'].map((id) => ({ id, name: this.nodes[id]!.name }))
       return send(200, { resolvedReleaseId: 'R1', items, requestId: 'req_cat' })
+    }
+    // GET /v1/categories/{id} (CommerceReadController.category): a malformed id is 400, an invisible node a flat 404,
+    // otherwise the node unwrapped next to the envelope fields.
+    const byId = /^\/v1\/categories\/([^/]+)$/.exec(url.pathname)
+    if (byId) {
+      const id = byId[1] ?? ''
+      if (!/^TZ[SCGV]-[0-9]{6}$/.test(id)) return error(400, 'INVALID_REQUEST')
+      const node = this.nodes[id]
+      if (!node) return error(404, 'NOT_FOUND')
+      return send(
+        200,
+        { id, name: node.name, resolvedReleaseId: 'R1', requestId: 'req_node' },
+        { 'cache-control': 'public, max-age=300, stale-while-revalidate=60' },
+      )
     }
     const children = /^\/v1\/categories\/([^/]+)\/children$/.exec(url.pathname)
     if (children) {

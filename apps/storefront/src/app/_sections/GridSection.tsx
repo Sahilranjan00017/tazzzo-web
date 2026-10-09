@@ -4,8 +4,8 @@ import type { CategoryGridBlock } from '@/lib/content/blocks'
 import { resolveCategoryNames } from '@/server/backend/catalog'
 
 /**
- * Server side of a CATEGORY_GRID block. Tiles need a name and the public API has no node-by-id read, so a node whose
- * name cannot be resolved (not visible, or deeper than a super-category's children) is skipped, in grid order.
+ * Server side of a CATEGORY_GRID block. Each tile is named by `GET /v1/categories/{id}` (any depth); a node that is
+ * not visible, or whose read fails, is skipped, and the rest keep grid order.
  */
 export async function GridSection({ block }: { block: CategoryGridBlock }) {
   const names = await resolveCategoryNames(block.ids.join(','))
