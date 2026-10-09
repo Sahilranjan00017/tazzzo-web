@@ -54,7 +54,7 @@ export function MediaView({
         {lookup}
         {invalidInput ? (
           <p className="notice" role="alert">
-            Enter a product id like TZP-1001.
+            Enter a product id like TZP-1001 (case matters).
           </p>
         ) : (
           <p className="muted">

@@ -5,7 +5,13 @@ import type { Tone } from '@/components/ui/primitives'
  * Product contract (backend main c3306b6, `ProductController`). Client-safe: schemas, lifecycle rules and list-query
  * parsing only. The backend remains the authority for every rule mirrored here.
  */
-export const PRODUCT_ID = /^TZP-[A-Z0-9][A-Z0-9-]{0,39}$/
+/**
+ * The ONE canonical product-id grammar (full match, no case normalisation: lowercase and mixed case are valid and must
+ * be preserved exactly; backend enforces the same on writes). Every product-id check in the admin app uses this.
+ */
+export const PRODUCT_ID = /^TZP-[A-Za-z0-9-]{1,40}$/
+/** Regex source of {@link PRODUCT_ID} without anchors, for HTML `pattern` attributes (which are implicitly anchored). */
+export const PRODUCT_ID_PATTERN = 'TZP-[A-Za-z0-9\\-]{1,40}'
 /** Backend list-filter value grammar (`AdminListParams`). */
 export const FILTER_VALUE = /^[A-Za-z0-9_.:-]{1,64}$/
 

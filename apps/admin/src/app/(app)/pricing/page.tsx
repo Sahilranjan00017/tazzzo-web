@@ -17,7 +17,7 @@ export default async function PricingPage({
   const access = await requireAdmin()
   const roles = access.view === 'ok' ? access.me.roles : []
   const raw = (await searchParams).sku
-  const sku = (Array.isArray(raw) ? raw[0] : raw)?.trim().toUpperCase()
+  const sku = (Array.isArray(raw) ? raw[0] : raw)?.trim()
   if (!sku) return <PricingView canWrite={canWrite(roles)} />
   if (!PRODUCT_ID.test(sku)) {
     return <PricingView canWrite={canWrite(roles)} invalidInput />

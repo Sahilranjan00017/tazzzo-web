@@ -1,4 +1,5 @@
 import { canSee, NAV } from './nav'
+import { PRODUCT_ID } from './products'
 
 /**
  * "Go to" resolution for the top-bar box. The backend has NO text search for products, orders, support cases or content,
@@ -19,9 +20,8 @@ const RULES: {
   upper?: boolean
 }[] = [
   {
-    test: /^TZP-[A-Z0-9][A-Z0-9-]{0,39}$/,
+    test: PRODUCT_ID,
     module: 'products',
-    upper: true,
     build: (id) => ({
       href: `/catalogue/products/${encodeURIComponent(id)}`,
       label: `Product ${id}`,

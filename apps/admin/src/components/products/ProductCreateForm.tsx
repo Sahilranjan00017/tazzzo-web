@@ -23,7 +23,7 @@ export function ProductCreateForm() {
     const f = new FormData(event.currentTarget)
     const text = (k: string) => String(f.get(k) ?? '').trim()
     const candidate = {
-      id: text('id').toUpperCase(),
+      id: text('id'),
       productType: 'single',
       identityType: identity,
       ...(identity === 'internal' ? { internalKey: text('internalKey') } : {}),

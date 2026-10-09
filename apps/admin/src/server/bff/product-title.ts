@@ -1,9 +1,10 @@
 import 'server-only'
 import { z } from 'zod'
+import { PRODUCT_ID } from '@/lib/products'
 import type { BffMutationSpec } from './mutation'
 
-/** Catalog product ids (backend `products._id` pattern `^TZP-`). Validated before they become part of a path. */
-export const PRODUCT_ID = /^TZP-[A-Z0-9][A-Z0-9-]{0,39}$/
+/** Catalog product ids: the shared canonical grammar, validated before they become part of a path. */
+export { PRODUCT_ID }
 
 const input = z
   .object({

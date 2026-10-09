@@ -194,7 +194,7 @@ export function HomeBlockEditor({
         ...(a ? { altText: a } : {}),
       }
     } else {
-      const ids = splitIds(idsText)
+      const ids = splitIds(idsText, type)
       const ii = idsIssue(type, ids)
       if (ii) msgs.push(ii)
       payload = { ids }
@@ -388,7 +388,7 @@ export function HomeBlockEditor({
               onChange={(e) => touch(setIdsText)(e.target.value)}
             />
             <span className="muted">
-              {splitIds(idsText).length} of {type === 'PRODUCT_RAIL' ? MAX_RAIL : MAX_GRID}
+              {splitIds(idsText, type).length} of {type === 'PRODUCT_RAIL' ? MAX_RAIL : MAX_GRID}
             </span>
           </label>
         )}

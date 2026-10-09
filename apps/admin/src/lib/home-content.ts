@@ -6,6 +6,7 @@ import { bffErrorMessage } from './bff-client'
 import { BLOCK_ID } from './content'
 import { formatShortIst } from './format'
 import { UPLOAD_CODE_COPY } from './media'
+import { PRODUCT_ID } from './products'
 import { rememberMaxBytes, sizeLimitCopy, sizeLimitOf } from './upload'
 
 /**
@@ -59,7 +60,7 @@ export const MAX_SORT = 10_000
  * Backend grammars (`ContentBlock.PRODUCT_ID`, `NODE_ID`, `LINK`, #102 head db3623c), full-match, Unicode-aware like Java's
  * \p{L}/\p{M}/\p{N}: combining marks are allowed so Devanagari search text (e.g. "ताज़ा आम") is valid.
  */
-export const CONTENT_PRODUCT_ID = /^TZP-[A-Za-z0-9-]{1,40}$/
+export const CONTENT_PRODUCT_ID = PRODUCT_ID
 export const CONTENT_NODE_ID = /^TZ[SCGV]-[0-9]{6}$/
 export const SEARCH_TEXT = /^[\p{L}\p{M}\p{N} ]{2,64}$/u
 export const LINK =
@@ -145,7 +146,8 @@ export function displayTextIssue(v: string, max: number): TextIssue | undefined 
 }
 
 export function linkOf(kind: LinkKind, value: string): string {
-  return `${kind}:${kind === 'search' ? value.trim() : value.trim().toUpperCase()}`
+  const v = value.trim()
+  return `${kind}:${kind === 'category' ? v.toUpperCase() : v}`
 }
 
 export function parseLink(link: string | null | undefined): { kind: LinkKind; value: string } {
@@ -156,8 +158,8 @@ export function parseLink(link: string | null | undefined): { kind: LinkKind; va
 export function linkIssue(kind: LinkKind, value: string): string | undefined {
   const v = value.trim()
   if (!v) return 'Enter where the banner leads.'
-  if (kind === 'product' && !CONTENT_PRODUCT_ID.test(v.toUpperCase()))
-    return 'A product link needs a product id like TZP-1001.'
+  if (kind === 'product' && !CONTENT_PRODUCT_ID.test(v))
+    return 'A product link needs a product id like TZP-1001 (TZP- then 1 to 40 letters, digits or hyphens; case matters).'
   if (kind === 'category' && !CONTENT_NODE_ID.test(v.toUpperCase()))
     return 'A category link needs a taxonomy node id like TZC-000123 (TZS, TZC, TZG or TZV and 6 digits).'
   if (kind === 'search' && !SEARCH_TEXT.test(v))
@@ -165,11 +167,14 @@ export function linkIssue(kind: LinkKind, value: string): string | undefined {
   return undefined
 }
 
-/** Ids typed one per line or comma-separated; blanks dropped, case normalised. */
-export const splitIds = (raw: string): string[] =>
+/**
+ * Ids typed one per line or comma-separated; blanks dropped. Product ids are case-significant and kept exactly as typed;
+ * only taxonomy node ids (`TZ[SCGV]-######`, CATEGORY_GRID) are upper-cased.
+ */
+export const splitIds = (raw: string, type: 'PRODUCT_RAIL' | 'CATEGORY_GRID'): string[] =>
   raw
     .split(/[\s,]+/)
-    .map((s) => s.trim().toUpperCase())
+    .map((s) => (type === 'CATEGORY_GRID' ? s.trim().toUpperCase() : s.trim()))
     .filter(Boolean)
 
 export function idsIssue(

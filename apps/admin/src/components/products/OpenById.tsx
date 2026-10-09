@@ -11,9 +11,11 @@ export function OpenById() {
   const [error, setError] = useState<string>()
   function submit(event: FormEvent) {
     event.preventDefault()
-    const id = value.trim().toUpperCase()
+    const id = value.trim()
     if (!PRODUCT_ID.test(id)) {
-      setError('Enter a product id such as TZP-1001.')
+      setError(
+        'Enter a product id such as TZP-1001 (TZP- then 1 to 40 letters, digits or hyphens; case matters).',
+      )
       return
     }
     setError(undefined)

@@ -68,6 +68,7 @@ describe('product helpers', () => {
   it('validates ids', () => {
     expect(PRODUCT_ID.test('TZP-1001')).toBe(true)
     expect(PRODUCT_ID.test('tzp-1')).toBe(false)
+    expect(PRODUCT_ID.test('TZP-l001')).toBe(true)
     expect(PRODUCT_ID.test('TZP-1/../x')).toBe(false)
   })
 })

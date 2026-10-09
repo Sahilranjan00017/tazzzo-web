@@ -48,7 +48,7 @@ export function PricingView({
         {lookup}
         {invalidInput ? (
           <p className="notice" role="alert">
-            Enter a product id like TZP-1001.
+            Enter a product id like TZP-1001 (case matters).
           </p>
         ) : null}
         <p className="muted">

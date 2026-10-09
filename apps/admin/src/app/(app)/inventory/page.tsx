@@ -20,7 +20,7 @@ export default async function InventoryPage({
   const access = await requireAdmin()
   const roles = access.view === 'ok' ? access.me.roles : []
   const raw = await searchParams
-  const sku = one(raw.sku)?.toUpperCase()
+  const sku = one(raw.sku)
   const location = one(raw.location)
   const writer = canWrite(roles)
   if (!sku && !location) return <InventoryView canWrite={writer} />
