@@ -5,7 +5,7 @@ import { recordOutcome, visitorLimiter } from '@/lib/security/rate-limit'
 
 /**
  * Per-request CSP nonce (Next.js 16 `proxy.ts`) and the per-visitor rate limit (`src/lib/security/rate-limit.ts`;
- * per instance, in memory). The storefront has no authentication. `img-src` admits the configured media origin
+ * per instance, in memory). The `/api/auth/*` customer routes pass through it as well (the OTP ones in the stricter bucket). `img-src` admits the configured media origin
  * (`TAZZZO_MEDIA_BASE_URL`), validated exactly like the server env. A refused request gets a plain-text 429 with
  * `Retry-After` and the same CSP; nothing is rendered and the backend is not called.
  */
@@ -56,7 +56,7 @@ export function proxy(request: NextRequest): NextResponse {
  * while no route has a `loading` boundary and PPR/`cacheComponents` is off; tests/unit/prefetch-exemption-policy.test.ts
  * fails if either changes.
  *
- * `source` (both entries): every page path; only build assets and the favicon are never seen (no API routes). It is
+ * `source` (both entries): every page path; only build assets and the favicon are never seen (the `/api/auth/*` routes are). It is
  * written out twice because Next reads this object statically (no references).
  */
 export const config = {

@@ -122,7 +122,9 @@ export async function getJson(
 export const CALLER_HEADER = 'X-Tazzzo-Caller'
 export const CALLER_SECRET_HEADER = 'X-Tazzzo-Caller-Secret'
 
-function requestHeaders(caller: { name: string; secret: string } | null): Record<string, string> {
+export function requestHeaders(
+  caller: { name: string; secret: string } | null,
+): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (caller) {
     headers[CALLER_HEADER] = caller.name
@@ -139,4 +141,92 @@ function routeLabel(pathAndQuery: string): string {
 function requestId(response: Response): string {
   const id = response.headers.get('x-request-id') ?? ''
   return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'none'
+}
+
+/**
+ * Outcome of a customer call (`sendJson`). Only a closed vocabulary leaves this module; the backend's message text is
+ * never read. `code` is the backend's public error code (`OTP_INVALID`, ...) when it sent a well-formed one.
+ */
+export type SendResult =
+  | { ok: true; status: number; data: unknown }
+  | {
+      ok: false
+      kind: 'unauthenticated' | 'rejected' | 'rate_limited' | 'unavailable'
+      code: string | null
+      retryAfterSeconds: number | null
+    }
+
+const SEND_RETRY_AFTER_MAX_S = 3_600
+const ERROR_CODE = /^[A-Z][A-Z_]{0,39}$/
+
+/**
+ * Customer-session calls: `/v1/auth/**` and `/v1/customer/**`, never cached, never retried. Same transport rules as
+ * `getJson` (timeout, redirects refused, trusted-caller headers, only `TAZZZO_API_BASE_URL`), plus an optional bearer
+ * access token. No client address or any incoming header is forwarded: the backend takes the visitor address only from
+ * its own trusted proxy's `X-Forwarded-For` and ignores it from this server (`ClientIpResolver`), and the trusted-caller
+ * credential carries nothing about the visitor. The body and the response body are never logged.
+ */
+export async function sendJson(
+  method: 'GET' | 'POST',
+  path: string,
+  options: { body?: unknown; bearer?: string } = {},
+): Promise<SendResult> {
+  if (!/^\/v1\/(auth|customer)\//.test(path)) throw new Error('customer API paths only')
+  const env = serverEnv()
+  const headers = requestHeaders(env.caller)
+  if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+  let response: Response
+  try {
+    response = await fetch(`${env.apiBaseUrl}${path}`, {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      redirect: 'error',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+  } catch {
+    console.warn(`storefront_backend_unreachable path=${routeLabel(path)}`)
+    return { ok: false, kind: 'unavailable', code: null, retryAfterSeconds: null }
+  }
+  if (response.ok) {
+    if (response.status === 204) return { ok: true, status: 204, data: undefined }
+    try {
+      return { ok: true, status: response.status, data: (await response.json()) as unknown }
+    } catch {
+      console.warn(`storefront_backend_malformed path=${routeLabel(path)}`)
+      return { ok: false, kind: 'unavailable', code: null, retryAfterSeconds: null }
+    }
+  }
+  console.warn(
+    `storefront_backend_error path=${routeLabel(path)} status=${response.status} request_id=${requestId(response)}`,
+  )
+  const code = await errorCode(response)
+  const retry = Number(response.headers.get('retry-after'))
+  const retryAfterSeconds =
+    Number.isFinite(retry) && retry > 0 ? Math.min(Math.ceil(retry), SEND_RETRY_AFTER_MAX_S) : null
+  if (response.status === 401)
+    return { ok: false, kind: 'unauthenticated', code, retryAfterSeconds: null }
+  if (response.status === 429) {
+    return {
+      ok: false,
+      kind: 'rate_limited',
+      code,
+      retryAfterSeconds: retryAfterSeconds ?? BACKOFF_DEFAULT_S,
+    }
+  }
+  if (response.status === 400 || response.status === 422) {
+    return { ok: false, kind: 'rejected', code, retryAfterSeconds: null }
+  }
+  return { ok: false, kind: 'unavailable', code, retryAfterSeconds }
+}
+
+async function errorCode(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { code?: unknown }
+    return typeof body.code === 'string' && ERROR_CODE.test(body.code) ? body.code : null
+  } catch {
+    return null
+  }
 }

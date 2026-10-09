@@ -77,6 +77,10 @@ describe('isExpensivePath', () => {
     ['/', '', false],
     ['/p/TZP-1', '?cursor=abc', false],
     ['/searching', '', false],
+    ['/api/auth/otp/request', '', true],
+    ['/api/auth/otp/verify', '', true],
+    ['/api/auth/logout', '', false],
+    ['/login', '', false],
   ])('%s%s -> %s', (path, query, expected) => {
     expect(isExpensivePath(path, new URLSearchParams(query))).toBe(expected)
   })

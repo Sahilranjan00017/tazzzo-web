@@ -5,7 +5,8 @@ import { isLoopbackHost, parseMediaBase, type MediaBase } from '@/lib/media-base
 /**
  * Server environment, validated at first use and cached. The public `/v1` API needs no credential; the one optional
  * secret is the trusted-caller credential (`TAZZZO_CALLER_*`), which only `src/server/backend/client.ts` sends and
- * which never reaches the browser. Hosts are configuration only, never hardcoded. Nothing here is exposed through
+ * which never reaches the browser. The other secret is the customer-session sealing key (`STOREFRONT_SESSION_SECRET`),
+ * required in production (see `src/server/session/seal.ts`). Hosts are configuration only, never hardcoded. Nothing here is exposed through
  * `NEXT_PUBLIC_*`, and a validation error names only the field, never a value.
  */
 const absoluteHttpUrl = z
@@ -16,6 +17,17 @@ const absoluteHttpUrl = z
     const url = new URL(value)
     return !url.username && !url.password && !url.search && !url.hash
   }, 'must not carry credentials, query or fragment')
+
+const MIN_SESSION_KEY_BYTES = 32
+
+function decodeSessionKey(value: string): Buffer {
+  return Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+}
+
+const sessionKey = z
+  .string()
+  .regex(/^[A-Za-z0-9+/_-]+={0,2}$/)
+  .refine((value) => decodeSessionKey(value).length >= MIN_SESSION_KEY_BYTES, 'too short')
 
 const serverEnvSchema = z
   .object({
@@ -50,6 +62,14 @@ const serverEnvSchema = z
       .optional()
       .or(z.literal('')),
     /**
+     * Key that seals the customer-session cookie (AES-256-GCM): base64 or base64url of at least 32 random bytes.
+     * Required in production (fail closed). Outside production it may be unset, which disables customer sign-in
+     * (the sign-in routes answer 503) instead of falling back to a built-in key. `..._PREVIOUS` is the key being
+     * rotated out: it still opens cookies but never seals one.
+     */
+    STOREFRONT_SESSION_SECRET: sessionKey.optional().or(z.literal('')),
+    STOREFRONT_SESSION_SECRET_PREVIOUS: sessionKey.optional().or(z.literal('')),
+    /**
      * Read here only for the fail-closed rule below; its values are validated with the rate limit settings
      * (`src/lib/security/rate-limit.ts`).
      */
@@ -63,6 +83,20 @@ const serverEnvSchema = z
         code: 'custom',
         path: [hasName ? 'TAZZZO_CALLER_SECRET' : 'TAZZZO_CALLER_NAME'],
         message: 'TAZZZO_CALLER_NAME and TAZZZO_CALLER_SECRET are set together or not at all',
+      })
+    }
+    if (env.NODE_ENV === 'production' && !env.STOREFRONT_SESSION_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STOREFRONT_SESSION_SECRET'],
+        message: 'is required in production',
+      })
+    }
+    if (env.STOREFRONT_SESSION_SECRET_PREVIOUS && !env.STOREFRONT_SESSION_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STOREFRONT_SESSION_SECRET_PREVIOUS'],
+        message: 'needs STOREFRONT_SESSION_SECRET',
       })
     }
     // Fail closed: with the trusted-caller credential, every backend read is admitted on the storefront's own (large)
@@ -118,6 +152,8 @@ export interface ServerEnv {
   media: MediaBase | null
   /** The trusted-caller credential, or null when not configured. Server-only; never logged. */
   caller: { name: string; secret: string } | null
+  /** Customer-session sealing keys, current first; null when unset (non-production only). Server-only; never logged. */
+  sessionKeys: Buffer[] | null
 }
 
 export function parseServerEnv(env: Record<string, string | undefined>): ServerEnv {
@@ -135,6 +171,11 @@ export function parseServerEnv(env: Record<string, string | undefined>): ServerE
       data.TAZZZO_CALLER_NAME && data.TAZZZO_CALLER_SECRET
         ? { name: data.TAZZZO_CALLER_NAME, secret: data.TAZZZO_CALLER_SECRET }
         : null,
+    sessionKeys: data.STOREFRONT_SESSION_SECRET
+      ? [data.STOREFRONT_SESSION_SECRET, data.STOREFRONT_SESSION_SECRET_PREVIOUS]
+          .filter((value): value is string => Boolean(value))
+          .map(decodeSessionKey)
+      : null,
   }
 }
 

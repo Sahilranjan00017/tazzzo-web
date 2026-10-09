@@ -110,6 +110,7 @@ main,
 .search-form {
   display: flex;
   flex: 1 1 260px;
+  min-width: 0;
   gap: 8px;
 }
 
@@ -451,4 +452,125 @@ h2 {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* Sign in and account. */
+.account-nav {
+  margin-left: auto;
+}
+
+.account-nav a {
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+
+.auth {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px var(--gutter);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.auth-card h1 {
+  margin-top: 0;
+  font-size: 1.4rem;
+}
+
+.auth-card label {
+  display: block;
+  margin: 16px 0 6px;
+  font-weight: 600;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.auth-card input[aria-invalid='true'] {
+  border-color: #b3261e;
+}
+
+.auth-card input:focus-visible,
+.auth-card button:focus-visible,
+.account-nav a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.auth-phone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-hint,
+.auth-status,
+.auth-notice {
+  color: var(--muted);
+}
+
+.auth-notice {
+  padding: 8px 12px;
+  background: var(--placeholder);
+  border-radius: 8px;
+}
+
+.auth-live {
+  min-height: 1.5em;
+  margin: 8px 0;
+}
+
+.auth-error {
+  margin: 0;
+  color: #b3261e;
+}
+
+.auth-card form > button[type='submit'],
+.auth-card > div > button {
+  width: 100%;
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-color: var(--brand);
+}
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.account-details dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.account-details dd {
+  margin: 0 0 12px;
+  font-weight: 600;
 }
