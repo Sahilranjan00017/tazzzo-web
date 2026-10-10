@@ -10,7 +10,7 @@ import { clientKey, UNRESOLVED_CLIENT, type ClientIpOptions } from '@/lib/securi
  * Two token buckets per visitor key (see `client-ip.ts` for the key):
  * - `page`: every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets never reach it);
  * - `expensive`: additionally, the uncached paths that always cost a backend call: `/search`, paged category lists
- *   (`/c/<node>?cursor=...`) the sign-in code routes (`/api/auth/otp/*`), `POST /api/location` (a serviceability check) and `POST /api/checkout/delivery`. Checked first, so a refused expensive
+ *   (`/c/<node>?cursor=...`) the sign-in code routes (`/api/auth/otp/*`), `POST /api/location` (a serviceability check), `POST /api/checkout/*` and `POST /api/orders*`. Checked first, so a refused expensive
  *   request does not also spend a page token.
  * The store is bounded: least recently used keys are evicted beyond `maxClients`, and keys idle long enough to have
  * refilled completely (indistinguishable from a new visitor) are dropped as they reach the old end.
@@ -143,6 +143,11 @@ export function isExpensivePath(pathname: string, searchParams: URLSearchParams)
   if (pathname === '/api/location' || pathname === '/api/checkout/delivery') return true
   // Address create/update/delete/default: each is a customer-scoped backend write.
   if (pathname.startsWith('/api/addresses')) return true
+  // Placing and cancelling an order each cost several backend calls (cart check, reservation transaction): every
+  // mutating order and checkout route (`/api/orders*`, `/api/checkout/*`) is in the stricter bucket.
+  if (pathname.startsWith('/api/orders') || pathname.startsWith('/api/checkout/')) return true
+  // The review page itself: every render reads the cart, address and slots and writes (or replays) a quote.
+  if (pathname === '/checkout') return true
   return pathname.startsWith('/c/') && searchParams.has('cursor')
 }
 

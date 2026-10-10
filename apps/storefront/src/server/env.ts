@@ -1,5 +1,6 @@
 import 'server-only'
 import { z } from 'zod'
+import { MAX_CANCEL_WINDOW_SECONDS } from '@/lib/orders/model'
 import { isLoopbackHost, parseMediaBase, type MediaBase } from '@/lib/media-base'
 
 /**
@@ -74,6 +75,17 @@ const serverEnvSchema = z
      * (`src/lib/security/rate-limit.ts`).
      */
     STOREFRONT_TRUST_PROXY: z.string().optional(),
+    /**
+     * Mirror of the backend's `tazzzo.orders.customer-cancel-window-seconds` (0..604800; 0 = customer cancellation is
+     * closed, which is the backend's default and this site's). Only decides whether a Cancel control is OFFERED on a
+     * confirmed order; the backend decides every cancel request regardless. Unset = 0.
+     */
+    STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS: z
+      .string()
+      .regex(/^[0-9]{1,6}$/)
+      .refine((v) => Number(v) <= MAX_CANCEL_WINDOW_SECONDS, 'too long')
+      .optional()
+      .or(z.literal('')),
   })
   .superRefine((env, ctx) => {
     const hasName = Boolean(env.TAZZZO_CALLER_NAME)
@@ -167,6 +179,8 @@ export interface ServerEnv {
   caller: { name: string; secret: string } | null
   /** Customer-session sealing keys, current first; null when unset (non-production only). Server-only; never logged. */
   sessionKeys: Buffer[] | null
+  /** The customer cancellation window the backend is configured with (seconds); 0 = no Cancel control is offered. */
+  orderCancelWindowSeconds: number
 }
 
 export function parseServerEnv(env: Record<string, string | undefined>): ServerEnv {
@@ -189,6 +203,7 @@ export function parseServerEnv(env: Record<string, string | undefined>): ServerE
           .filter((value): value is string => Boolean(value))
           .map(decodeSessionKey)
       : null,
+    orderCancelWindowSeconds: Number(data.STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS || '0'),
   }
 }
 

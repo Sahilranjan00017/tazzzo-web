@@ -20,6 +20,7 @@ export function DeliveryChoice({
   slots,
   slotsError,
   savedSlotId,
+  notice,
   csrfToken,
 }: {
   addresses: Address[]
@@ -30,6 +31,8 @@ export function DeliveryChoice({
   slotsError: boolean
   /** The slot kept earlier for this address, if still offered. */
   savedSlotId: string | null
+  /** Why the order step sent the customer back here, if it did. */
+  notice?: string | null
   csrfToken: string
 }) {
   const router = useRouter()
@@ -71,6 +74,11 @@ export function DeliveryChoice({
     return (
       <section className="panel">
         <h1>Delivery</h1>
+        {notice && (
+          <p className="notice" role="status" data-testid="delivery-notice">
+            {notice}
+          </p>
+        )}
         <p data-testid="delivery-no-address">
           Add a delivery address to see the available delivery slots.
         </p>
@@ -83,6 +91,11 @@ export function DeliveryChoice({
   return (
     <section className="panel" aria-labelledby="delivery-title">
       <h1 id="delivery-title">Delivery</h1>
+      {notice && (
+        <p className="notice" role="status" data-testid="delivery-notice">
+          {notice}
+        </p>
+      )}
       <fieldset>
         <legend>Deliver to</legend>
         {addresses.map((a) => (
@@ -118,6 +131,18 @@ export function DeliveryChoice({
       <p role="status" aria-live="polite" data-testid="delivery-saved">
         {saved ? 'Your delivery address and slot are saved for the next step.' : ''}
       </p>
+      {saved && (
+        <p>
+          <Link
+            href="/checkout"
+            prefetch={false}
+            className="button-link"
+            data-testid="delivery-continue"
+          >
+            Continue to review your order
+          </Link>
+        </p>
+      )}
       <div className="actions">
         <button
           type="button"

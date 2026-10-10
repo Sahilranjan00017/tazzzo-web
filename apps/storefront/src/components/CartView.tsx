@@ -270,13 +270,23 @@ export function CartView({ initial, csrfToken }: { initial: Cart; csrfToken: str
                 {unpriced === 1 ? 'is' : 'are'} not included.
               </p>
             )}
+            <p>
+              <Link
+                href="/checkout"
+                prefetch={false}
+                className="button-link"
+                data-testid="cart-checkout-link"
+              >
+                Proceed to checkout
+              </Link>
+            </p>
             <p className="cart-summary__hint">
               <Link href="/checkout/delivery" data-testid="cart-delivery-link">
                 Choose delivery address and slot
               </Link>
             </p>
             <p className="cart-summary__hint">
-              Delivery, fees and taxes are added at checkout. Prices can change until you pay.
+              Prices can change until you place your order; checkout shows your total.
             </p>
             {confirming ? (
               <div

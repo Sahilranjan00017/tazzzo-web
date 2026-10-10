@@ -17,6 +17,8 @@ export default async function globalSetup(): Promise<void> {
       TAZZZO_MEDIA_BASE_URL: `${backend.mediaUrl}/media`,
       // Throwaway sealing key for the customer session cookie (test only).
       STOREFRONT_SESSION_SECRET: 'ZTJlLXRocm93YXdheS1zZXNzaW9uLWtleS0wMDAxLW5vdC1yZWFs',
+      // The deployment says the backend has a 10 minute customer cancellation window, so the Cancel control is offered.
+      STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS: '600',
       NEXT_TELEMETRY_DISABLED: '1',
     },
     detached: true,

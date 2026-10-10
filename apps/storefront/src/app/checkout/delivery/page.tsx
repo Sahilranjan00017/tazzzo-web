@@ -10,6 +10,12 @@ import { accessTokenUsable } from '@/server/session/service'
 
 export const metadata: Metadata = { title: 'Delivery', robots: { index: false, follow: false } }
 
+const NOTICES: Record<string, string> = {
+  slot: 'The delivery slot you chose is no longer available. Please choose another.',
+  address: 'Your delivery address is no longer available. Please choose another.',
+  unserviceable: 'We do not deliver to that address any more. Please choose another.',
+}
+
 function firstString(value: string | string[] | undefined): string | null {
   return typeof value === 'string' ? value : null
 }
@@ -71,6 +77,7 @@ export default async function DeliveryPage({ searchParams }: PageProps<'/checkou
         slots={view}
         slotsError={slots !== null && !slots.ok}
         savedSlotId={savedSlotId}
+        notice={NOTICES[firstString(params.reason) ?? ''] ?? null}
         csrfToken={session.csrf}
       />
     </div>

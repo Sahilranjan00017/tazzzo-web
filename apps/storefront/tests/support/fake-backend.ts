@@ -28,6 +28,15 @@ import { deflateSync } from 'node:zlib'
  *   unknown or malformed id -> 404), `/v1/customer/addresses**` (per customer; 201 create with optional `Idempotency-Key`,
  *   `If-Match: "address-<n>"` on PATCH/DELETE, 10 max, first becomes default, strict field validation) and
  *   `GET /v1/customer/delivery/slots` (AVAILABLE / FULL / CLOSED, no capacity). `+919123456780` signs in as a second customer.
+ * - checkout quote and orders (S4; compared with the controller sources, differences listed in the PR):
+ *   `POST /v1/customer/checkout/quote` (`If-Match: "cart-<n>"` 428/400/412, `Idempotency-Key` 428/400, body `{addressId}` only; the same
+ *   key replays the ORIGINAL quote, another cart version/address under it is 409 IDEMPOTENCY_CONFLICT, an expired one 410 QUOTE_EXPIRED;
+ *   409 CHECKOUT_CART_EMPTY / CHECKOUT_UNSERVICEABLE / CHECKOUT_ITEM_UNAVAILABLE with `items`), `GET /v1/customer/checkout/quotes/{id}`,
+ *   `POST /v1/customer/orders` (`{quoteId, paymentMethod:"COD", deliverySlotId?}`; NO `Idempotency-Key`: `(customer, quoteId)` is
+ *   unique and a replay returns the same order; 404/410/409 PRICE_CHANGED, STOCK_UNAVAILABLE, ADDRESS_CHANGED,
+ *   CART_VERSION_ALREADY_PURCHASED, DELIVERY_SLOT_UNAVAILABLE ...), `GET /v1/customer/orders` (`page_size`/`cursor` only, keyset,
+ *   newest first), `GET .../{orderId}` (owned, else 404), `POST .../{orderId}/cancel` (`{reason}`; 409 CANCELLATION_WINDOW_CLOSED by
+ *   default). `POST /__control/orders` shapes it (ttl, cancel window, benefit, one-shot failures, outage, seeded history).
  * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
@@ -73,6 +82,43 @@ interface FakeCart {
   freshness: 'FRESH' | 'REVALIDATE'
 }
 
+interface FakeQuote {
+  quoteId: string
+  customerId: string
+  fingerprint: string
+  cartVersion: number
+  addressId: string
+  addressVersion: number
+  lines: Array<{ sku: string; quantity: number; unit: number; total: number }>
+  subtotal: number
+  createdAt: number
+  expiresAt: number
+  discount: number
+  bps: number
+}
+
+interface FakeOrder {
+  orderId: string
+  customerId: string
+  quoteId: string
+  status: 'CONFIRMED' | 'CANCELLED'
+  createdAt: number
+  confirmedAt: number
+  cancelledAt: number | null
+  lines: Array<{
+    sku: string
+    title: string
+    brandCode: string | null
+    quantity: number
+    unit: number
+    total: number
+  }>
+  subtotal: number
+  discount: number
+  address: Record<string, unknown>
+  slot: { slotId: string; label: string; startsAt: string; endsAt: string } | null
+}
+
 interface FakeAddress {
   addressId: string
   customerId: string
@@ -112,6 +158,18 @@ export class FakeBackend {
   private readonly addresses = new Map<string, FakeAddress[]>()
   private readonly addressKeys = new Map<string, { hash: string; id: string }>()
   private defaultByCustomer = new Map<string, string>()
+  private readonly quotes = new Map<string, FakeQuote>()
+  private readonly quoteKeys = new Map<string, string>()
+  private orders: FakeOrder[] = []
+  private purchasedThrough = -1
+  private quoteTtlMs = 300_000
+  private cancelWindowSeconds = 0
+  private benefitBps = 0
+  private fault: { when: 'before' | 'after'; status: number } | null = null
+  private placementUnserviceable = false
+  private ordersDown = false
+  /** What the order endpoint received (bodies are not part of `requests`). */
+  readonly placements: Array<{ body: unknown }> = []
   private paged = false
   private slotsFull = false
   private addressDown = false
@@ -606,6 +664,50 @@ export class FakeBackend {
         if (wipe) this.addresses.delete(wipe)
         return send(200, { ok: true })
       }
+      if (url.pathname === '/__control/orders') {
+        if (req.method === 'POST') {
+          const q = url.searchParams
+          if (q.get('reset') === '1') {
+            this.quotes.clear()
+            this.quoteKeys.clear()
+            this.orders = []
+            this.purchasedThrough = -1
+            this.quoteTtlMs = 300_000
+            this.cancelWindowSeconds = 0
+            this.benefitBps = 0
+            this.fault = null
+            this.placementUnserviceable = false
+            this.ordersDown = false
+            this.placements.length = 0
+          }
+          if (q.get('ttl')) this.quoteTtlMs = Number(q.get('ttl'))
+          if (q.get('cancelWindow')) this.cancelWindowSeconds = Number(q.get('cancelWindow'))
+          if (q.get('benefit')) this.benefitBps = Number(q.get('benefit'))
+          // `fault=before:503` fails the NEXT placement before it does anything; `after:503` commits it and then fails.
+          const fault = q.get('fault')
+          if (fault) {
+            const m = /^(before|after):([0-9]{3})$/.exec(fault)
+            this.fault = m ? { when: m[1] as 'before' | 'after', status: Number(m[2]) } : null
+          }
+          if (q.get('unserviceable')) this.placementUnserviceable = q.get('unserviceable') === '1'
+          if (q.get('down')) this.ordersDown = q.get('down') === '1'
+          // Order history of a customer: `seed=25` adds that many CONFIRMED orders, one minute apart, newest last created.
+          const seed = Number(q.get('seed') ?? '0')
+          const owner = q.get('customer') ?? 'CUS_e2e0001'
+          for (let i = 0; i < seed; i++) this.seedOrder(owner, i)
+        }
+        return send(200, {
+          orders: this.orders.map((o) => ({
+            orderId: o.orderId,
+            customerId: o.customerId,
+            quoteId: o.quoteId,
+            status: o.status,
+          })),
+          quotes: this.quotes.size,
+          purchasedThrough: this.purchasedThrough,
+          placements: this.placements,
+        })
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -867,6 +969,16 @@ export class FakeBackend {
         url.searchParams,
       )
     }
+    if (path.startsWith('/v1/customer/checkout/')) {
+      const session = sessionFor(bearer)
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      return this.handleCheckout(req, path, body, out, code, session.customerId)
+    }
+    if (path === '/v1/customer/orders' || path.startsWith('/v1/customer/orders/')) {
+      const session = sessionFor(bearer)
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      return this.handleOrders(req, url, body, out, code, session.customerId)
+    }
     if (path === '/v1/customer/addresses' || path.startsWith('/v1/customer/addresses/')) {
       const session = sessionFor(bearer)
       if (!session) return code(401, 'UNAUTHENTICATED')
@@ -1063,28 +1175,33 @@ export class FakeBackend {
     return fail(405, 'INVALID_REQUEST')
   }
 
-  /** `GET /v1/customer/delivery/slots` (DeliverySlotController): `pin` required, `days` 1..3 (the default horizon). */
-  private handleSlots(
-    req: IncomingMessage,
-    url: URL,
-    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
-    fail: (status: number, code: string) => void,
-  ): void {
-    if (req.method !== 'GET') return fail(405, 'INVALID_REQUEST')
-    const pin = url.searchParams.get('pin')
-    if (pin === null || !PIN_RE.test(pin.trim())) return fail(400, 'INVALID_REQUEST')
-    const days = url.searchParams.get('days')
-    if (days !== null && (!/^[1-9][0-9]?$/.test(days) || Number(days) > 3))
-      return fail(400, 'INVALID_REQUEST')
-    const serviceable = SERVICEABLE_PINS.has(pin.trim())
-    const slots: unknown[] = []
-    if (serviceable && pin.trim() !== '560002') {
+  /** The delivery windows for a PIN (none for an unserviceable PIN or 560002), as `DeliverySlotController` answers them. */
+  private slotList(
+    pin: string,
+    days: number,
+  ): Array<{
+    slotId: string
+    date: string
+    startsAt: string
+    endsAt: string
+    label: string
+    status: string
+  }> {
+    const slots: Array<{
+      slotId: string
+      date: string
+      startsAt: string
+      endsAt: string
+      label: string
+      status: string
+    }> = []
+    if (SERVICEABLE_PINS.has(pin) && pin !== '560002') {
       const windows = [
         { id: 'morning', label: 'Morning', from: 9, to: 11 },
         { id: 'afternoon', label: 'Afternoon', from: 13, to: 15 },
         { id: 'evening', label: 'Evening', from: 18, to: 20 },
       ]
-      for (let d = 0; d < Number(days ?? 3); d++) {
+      for (let d = 0; d < days; d++) {
         const date = new Date(Date.now() + d * 86_400_000 + 5.5 * 3_600_000)
           .toISOString()
           .slice(0, 10)
@@ -1109,7 +1226,461 @@ export class FakeBackend {
         }
       }
     }
+    return slots
+  }
+
+  /** `GET /v1/customer/delivery/slots` (DeliverySlotController): `pin` required, `days` 1..3 (the default horizon). */
+  private handleSlots(
+    req: IncomingMessage,
+    url: URL,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+  ): void {
+    if (req.method !== 'GET') return fail(405, 'INVALID_REQUEST')
+    const pin = url.searchParams.get('pin')
+    if (pin === null || !PIN_RE.test(pin.trim())) return fail(400, 'INVALID_REQUEST')
+    const days = url.searchParams.get('days')
+    if (days !== null && (!/^[1-9][0-9]?$/.test(days) || Number(days) > 3))
+      return fail(400, 'INVALID_REQUEST')
+    const serviceable = SERVICEABLE_PINS.has(pin.trim())
+    const slots = this.slotList(pin.trim(), Number(days ?? 3))
     return out(200, { serviceable, timezone: 'Asia/Kolkata', slots, requestId: 'req_slots' })
+  }
+
+  /** `/v1/customer/checkout/**` (CheckoutController + CheckoutService + CheckoutExceptionHandler). */
+  private handleCheckout(
+    req: IncomingMessage,
+    path: string,
+    body: Record<string, unknown>,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+    customerId: string,
+  ): void {
+    const dto = (q: FakeQuote) => ({
+      quoteId: q.quoteId,
+      cartVersion: q.cartVersion,
+      addressId: q.addressId,
+      items: q.lines.map((l) => ({
+        skuId: l.sku,
+        quantity: l.quantity,
+        unitPricePaise: l.unit,
+        lineTotalPaise: l.total,
+      })),
+      itemCount: q.lines.reduce((n, l) => n + l.quantity, 0),
+      distinctItemCount: q.lines.length,
+      subtotalPaise: q.subtotal,
+      currency: 'INR',
+      createdAt: new Date(q.createdAt).toISOString(),
+      expiresAt: new Date(q.expiresAt).toISOString(),
+      benefitPreview:
+        q.discount > 0
+          ? { applied: true, discountPaise: q.discount, discountBps: q.bps }
+          : { applied: false },
+      moneyPreview: {
+        merchandiseSubtotalPaise: q.subtotal,
+        benefitDiscountPaise: q.discount,
+        payablePaise: q.subtotal - q.discount,
+      },
+      requestId: 'req_chk',
+    })
+    const read = /^\/v1\/customer\/checkout\/quotes\/([^/]+)$/.exec(path)
+    if (read) {
+      if (req.method !== 'GET') return fail(405, 'INVALID_REQUEST')
+      const quote = this.quotes.get(decodeURIComponent(read[1] ?? ''))
+      if (!quote || quote.customerId !== customerId) return fail(404, 'NOT_FOUND')
+      if (Date.now() >= quote.expiresAt) return fail(410, 'QUOTE_EXPIRED')
+      return out(200, dto(quote))
+    }
+    if (path !== '/v1/customer/checkout/quote') return fail(404, 'NOT_FOUND')
+    if (req.method !== 'POST') return fail(405, 'INVALID_REQUEST')
+
+    // CheckoutController: If-Match, then Idempotency-Key, then the body.
+    const match = req.headers['if-match']
+    if (typeof match !== 'string' || match.trim() === '') return fail(428, 'PRECONDITION_REQUIRED')
+    const m = match.trim().length > 40 ? null : /^"?cart-([0-9]{1,15})"?$/.exec(match.trim())
+    if (!m) return fail(400, 'INVALID_REQUEST')
+    const expected = Number(m[1])
+    const keyHeader = req.headers['idempotency-key']
+    if (typeof keyHeader !== 'string' || keyHeader.trim() === '') {
+      return fail(428, 'IDEMPOTENCY_REQUIRED')
+    }
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(keyHeader)) return fail(400, 'INVALID_REQUEST')
+    if (typeof body.addressId !== 'string') return fail(400, 'INVALID_REQUEST')
+    const addressId = body.addressId
+    // CheckoutService: a malformed address id is "unknown" (404) before anything else.
+    if (!ADDRESS_ID_RE.test(addressId)) return fail(404, 'NOT_FOUND')
+
+    // 1. idempotent replay: the ORIGINAL quote while it is active, 409 for another request under the key, 410 once expired.
+    const fingerprint = `${expected}|${addressId}`
+    const prior = this.quoteKeys.get(`${customerId}:${keyHeader}`)
+    if (prior !== undefined) {
+      const quote = this.quotes.get(prior)!
+      if (quote.fingerprint !== fingerprint) return fail(409, 'IDEMPOTENCY_CONFLICT')
+      if (Date.now() >= quote.expiresAt) return fail(410, 'QUOTE_EXPIRED')
+      return out(200, dto(quote))
+    }
+    // 2. the cart the client reviewed.
+    if (this.cartDown) return fail(503, 'SERVICE_UNAVAILABLE')
+    if (this.cart.version !== expected) return fail(412, 'PRECONDITION_FAILED')
+    if (this.cart.lines.length === 0) return fail(409, 'CHECKOUT_CART_EMPTY')
+    // 3. the OWNED address, with the version it is validated at.
+    const address = (this.addresses.get(customerId) ?? []).find((a) => a.addressId === addressId)
+    if (!address) return fail(404, 'NOT_FOUND')
+    // 4. authoritative commerce validation, all-or-nothing.
+    const presented = this.presentCart(address.postalCode) as {
+      items: Array<{
+        skuId: string
+        quantity: number
+        price: { unitPricePaise: number } | null
+        availability: { serviceable: boolean | null }
+        lineTotalPaise: number | null
+        buyable: boolean
+        issues: string[]
+      }>
+    }
+    if (presented.items.some((i) => i.availability.serviceable === false)) {
+      return fail(409, 'CHECKOUT_UNSERVICEABLE')
+    }
+    const mapped: Record<string, string> = {
+      PRODUCT_UNAVAILABLE: 'PRODUCT_UNAVAILABLE',
+      PRICE_UNAVAILABLE: 'PRICE_UNAVAILABLE',
+      OUT_OF_STOCK: 'OUT_OF_STOCK',
+      INSUFFICIENT_STOCK: 'INSUFFICIENT_STOCK',
+      STOCK_UNKNOWN: 'STOCK_UNKNOWN',
+    }
+    const rejections: Array<{ skuId: string; reason: string }> = []
+    for (const item of presented.items) {
+      const reasons = item.issues.filter((i) => mapped[i] !== undefined)
+      for (const issue of reasons) rejections.push({ skuId: item.skuId, reason: mapped[issue]! })
+      if (!item.buyable && reasons.length === 0 && item.issues.some((i) => i !== 'PRICE_CHANGED')) {
+        rejections.push({ skuId: item.skuId, reason: 'NOT_BUYABLE' })
+      }
+    }
+    if (rejections.length > 0) {
+      return out(409, {
+        code: 'CHECKOUT_ITEM_UNAVAILABLE',
+        message: 'one or more items cannot be checked out',
+        requestId: 'req_chk',
+        items: rejections,
+      })
+    }
+    const lines = presented.items.map((i) => ({
+      sku: i.skuId,
+      quantity: i.quantity,
+      unit: i.price!.unitPricePaise,
+      total: i.price!.unitPricePaise * i.quantity,
+    }))
+    const subtotal = lines.reduce((n, l) => n + l.total, 0)
+    const discount =
+      this.benefitBps > 0 ? Math.max(1, Math.floor((subtotal * this.benefitBps) / 10_000)) : 0
+    const now = Date.now()
+    const quote: FakeQuote = {
+      quoteId: `CHKQ_${randomBytes(20).toString('base64url')}`,
+      customerId,
+      fingerprint,
+      cartVersion: expected,
+      addressId,
+      addressVersion: address.version,
+      lines,
+      subtotal,
+      createdAt: now,
+      expiresAt: now + this.quoteTtlMs,
+      discount,
+      bps: this.benefitBps,
+    }
+    this.quotes.set(quote.quoteId, quote)
+    this.quoteKeys.set(`${customerId}:${keyHeader}`, quote.quoteId)
+    return out(200, dto(quote))
+  }
+
+  /** `/v1/customer/orders**` (OrderController + OrderService + OrderLifecycleService + OrderExceptionHandler). */
+  private handleOrders(
+    req: IncomingMessage,
+    url: URL,
+    body: Record<string, unknown>,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+    customerId: string,
+  ): void {
+    const path = url.pathname
+    const iso = (ms: number) => new Date(ms).toISOString()
+    const dto = (o: FakeOrder) => ({
+      orderId: o.orderId,
+      status: o.status,
+      paymentMethod: 'COD',
+      // Nothing is due on a cancelled order (NON_NULL: the field is absent).
+      ...(o.status === 'CANCELLED' ? {} : { paymentCondition: 'COD_DUE' }),
+      items: o.lines.map((l) => ({
+        skuId: l.sku,
+        title: l.title,
+        ...(l.brandCode ? { brandCode: l.brandCode } : {}),
+        quantity: l.quantity,
+        unitPricePaise: l.unit,
+        lineTotalPaise: l.total,
+      })),
+      itemCount: o.lines.reduce((n, l) => n + l.quantity, 0),
+      subtotalPaise: o.subtotal,
+      currency: 'INR',
+      deliveryAddress: o.address,
+      createdAt: iso(o.createdAt),
+      confirmedAt: iso(o.confirmedAt),
+      money: {
+        merchandiseSubtotalPaise: o.subtotal,
+        benefitDiscountPaise: o.discount,
+        payablePaise: o.subtotal - o.discount,
+      },
+      ...(o.slot ? { deliverySlot: o.slot } : {}),
+      ...(o.cancelledAt !== null ? { cancelledAt: iso(o.cancelledAt) } : {}),
+      requestId: 'req_ord',
+    })
+    const summary = (o: FakeOrder) => ({
+      orderId: o.orderId,
+      status: o.status,
+      paymentMethod: 'COD',
+      itemCount: o.lines.reduce((n, l) => n + l.quantity, 0),
+      subtotalPaise: o.subtotal,
+      payablePaise: o.subtotal - o.discount,
+      createdAt: iso(o.createdAt),
+      ...(o.slot ? { deliverySlot: o.slot } : {}),
+      ...(o.cancelledAt !== null ? { cancelledAt: iso(o.cancelledAt) } : {}),
+    })
+    const ORDER_ID_RE = /^ORD_[A-Za-z0-9_-]{6,64}$/
+    if (this.ordersDown) return fail(503, 'SERVICE_UNAVAILABLE')
+    const mine = () => this.orders.filter((o) => o.customerId === customerId)
+
+    if (path === '/v1/customer/orders' && req.method === 'POST') {
+      if (typeof body.quoteId !== 'string') return fail(400, 'INVALID_REQUEST')
+      if (typeof body.paymentMethod !== 'string') return fail(400, 'INVALID_REQUEST')
+      if (body.paymentMethod !== 'COD') return fail(400, 'PAYMENT_METHOD_UNSUPPORTED')
+      let slotId: string | null = null
+      if ('deliverySlotId' in body) {
+        const raw = body.deliverySlotId
+        if (
+          typeof raw !== 'string' ||
+          !/^[a-z0-9][a-z0-9-]{0,31}~[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(raw)
+        ) {
+          return fail(400, 'INVALID_REQUEST')
+        }
+        slotId = raw
+      }
+      this.placements.push({ body })
+      const fault = this.fault
+      if (fault?.when === 'before') {
+        this.fault = null
+        return fail(fault.status, fault.status === 500 ? 'INTERNAL' : 'SERVICE_UNAVAILABLE')
+      }
+      const outcome = this.place(customerId, body.quoteId, slotId)
+      if (!outcome.ok) return fail(outcome.status, outcome.code)
+      if (fault?.when === 'after') {
+        // The order COMMITTED, then the answer was lost: the storefront must not assume either way.
+        this.fault = null
+        return fail(fault.status, fault.status === 500 ? 'INTERNAL' : 'SERVICE_UNAVAILABLE')
+      }
+      return out(200, dto(outcome.order))
+    }
+    if (path === '/v1/customer/orders' && req.method === 'GET') {
+      for (const name of url.searchParams.keys()) {
+        if (name !== 'page_size' && name !== 'cursor') return fail(400, 'INVALID_REQUEST')
+      }
+      const sizeRaw = url.searchParams.get('page_size')
+      const cursor = url.searchParams.get('cursor')
+      if (
+        (sizeRaw !== null && !/^[1-9][0-9]{0,2}$/.test(sizeRaw)) ||
+        (cursor !== null && cursor.length > 128)
+      ) {
+        return fail(400, 'INVALID_REQUEST')
+      }
+      const size = sizeRaw === null ? 20 : Number(sizeRaw)
+      if (size < 1 || size > 50) return fail(400, 'INVALID_REQUEST')
+      let before: { at: number; id: string } | null = null
+      if (cursor !== null) {
+        const bytes = Buffer.from(cursor, 'base64url')
+        const decoded = bytes.toString('ascii')
+        const parsed = /^v1\|([0-9]{1,15})\|(ORD_[A-Za-z0-9_-]{6,64})$/.exec(decoded)
+        if (!parsed || bytes.toString('base64url') !== cursor) return fail(400, 'INVALID_REQUEST')
+        before = { at: Number(parsed[1]), id: parsed[2]! }
+      }
+      const sorted = mine().sort((a, b) =>
+        a.createdAt !== b.createdAt ? b.createdAt - a.createdAt : b.orderId < a.orderId ? -1 : 1,
+      )
+      const after = before
+        ? sorted.filter(
+            (o) => o.createdAt < before.at || (o.createdAt === before.at && o.orderId < before.id),
+          )
+        : sorted
+      const rows = after.slice(0, size)
+      const more = after.length > size
+      const last = rows[rows.length - 1]
+      return out(200, {
+        items: rows.map(summary),
+        ...(more && last
+          ? {
+              nextCursor: Buffer.from(`v1|${last.createdAt}|${last.orderId}`, 'ascii').toString(
+                'base64url',
+              ),
+            }
+          : {}),
+        requestId: 'req_ord',
+      })
+    }
+    const cancel = /^\/v1\/customer\/orders\/([^/]+)\/cancel$/.exec(path)
+    if (cancel && req.method === 'POST') {
+      const reason = body.reason
+      if (typeof reason !== 'string') return fail(400, 'INVALID_REQUEST')
+      if (!['CHANGED_MIND', 'ORDERED_BY_MISTAKE', 'OTHER'].includes(reason)) {
+        return fail(400, 'INVALID_REQUEST')
+      }
+      const id = decodeURIComponent(cancel[1] ?? '')
+      const order = ORDER_ID_RE.test(id) ? mine().find((o) => o.orderId === id) : undefined
+      if (!order) return fail(404, 'NOT_FOUND')
+      if (order.status === 'CANCELLED') return out(200, dto(order))
+      const deadline = order.confirmedAt + this.cancelWindowSeconds * 1000
+      if (this.cancelWindowSeconds === 0 || Date.now() > deadline) {
+        return fail(409, 'CANCELLATION_WINDOW_CLOSED')
+      }
+      order.status = 'CANCELLED'
+      order.cancelledAt = Date.now()
+      return out(200, dto(order))
+    }
+    const one = /^\/v1\/customer\/orders\/([^/]+)$/.exec(path)
+    if (one && req.method === 'GET') {
+      const id = decodeURIComponent(one[1] ?? '')
+      const order = ORDER_ID_RE.test(id) ? mine().find((o) => o.orderId === id) : undefined
+      return order ? out(200, dto(order)) : fail(404, 'NOT_FOUND')
+    }
+    return fail(path.startsWith('/v1/customer/orders/') ? 404 : 405, 'NOT_FOUND')
+  }
+
+  private seedOrder(customerId: string, index: number): void {
+    const at = Date.now() - (index + 1) * 60_000
+    this.orders.push({
+      orderId: `ORD_seed${customerId.slice(-4)}${String(index).padStart(4, '0')}${randomBytes(6).toString('hex')}`,
+      customerId,
+      quoteId: `CHKQ_seed${index}${randomBytes(8).toString('hex')}`,
+      status: 'CONFIRMED',
+      createdAt: at,
+      confirmedAt: at,
+      cancelledAt: null,
+      lines: [
+        {
+          sku: 'TZP-1002',
+          title: 'Toor Dal 1 kg',
+          brandCode: null,
+          quantity: 1,
+          unit: 15950,
+          total: 15950,
+        },
+      ],
+      subtotal: 15950,
+      discount: 0,
+      address: {
+        label: 'HOME',
+        recipientName: 'Asha Verma',
+        recipientPhone: '+919876543210',
+        addressLine1: '12 MG Road',
+        city: 'Bengaluru',
+        state: 'Karnataka',
+        postalCode: '560001',
+      },
+      slot: null,
+    })
+  }
+
+  /** `OrderService.placeCodOrder`: replay first, then the mutable checks, then one atomic commit. */
+  private place(
+    customerId: string,
+    quoteId: string,
+    slotId: string | null,
+  ): { ok: true; order: FakeOrder } | { ok: false; status: number; code: string } {
+    const err = (status: number, code: string) => ({ ok: false, status, code }) as const
+    const existing = this.orders.find((o) => o.customerId === customerId && o.quoteId === quoteId)
+    if (existing) return { ok: true, order: existing }
+    const quote = this.quotes.get(quoteId)
+    if (!quote || quote.customerId !== customerId) return err(404, 'NOT_FOUND')
+    if (Date.now() >= quote.expiresAt) return err(410, 'QUOTE_EXPIRED')
+    if (this.purchasedThrough >= quote.cartVersion) {
+      return err(409, 'CART_VERSION_ALREADY_PURCHASED')
+    }
+    const address = (this.addresses.get(customerId) ?? []).find(
+      (a) => a.addressId === quote.addressId,
+    )
+    if (!address || address.version !== quote.addressVersion) return err(409, 'ADDRESS_CHANGED')
+    if (this.placementUnserviceable || !SERVICEABLE_PINS.has(address.postalCode)) {
+      return err(409, 'NOT_SERVICEABLE')
+    }
+    const catalog = this.catalog()
+    for (const line of quote.lines) {
+      const current =
+        this.cartPrices.get(line.sku) ??
+        (catalog[line.sku]?.sellingPricePaise as number | undefined)
+      if (this.cartModes.get(line.sku) === 'unavailable' || current === undefined) {
+        return err(409, 'PRODUCT_UNAVAILABLE')
+      }
+      if (current !== line.unit) return err(409, 'PRICE_CHANGED')
+    }
+    for (const line of quote.lines) {
+      if (this.cartModes.get(line.sku) === 'out_of_stock') return err(409, 'STOCK_UNAVAILABLE')
+    }
+    let slot: FakeOrder['slot'] = null
+    if (slotId !== null) {
+      const offered = this.slotList(address.postalCode, 3).find((s) => s.slotId === slotId)
+      if (!offered || offered.status !== 'AVAILABLE') return err(409, 'DELIVERY_SLOT_UNAVAILABLE')
+      slot = {
+        slotId: offered.slotId,
+        label: offered.label,
+        startsAt: offered.startsAt,
+        endsAt: offered.endsAt,
+      }
+    }
+    const now = Date.now()
+    const order: FakeOrder = {
+      orderId: `ORD_${randomBytes(20).toString('base64url')}`,
+      customerId,
+      quoteId,
+      status: 'CONFIRMED',
+      createdAt: now,
+      confirmedAt: now,
+      cancelledAt: null,
+      lines: quote.lines.map((l) => {
+        const card = catalog[l.sku]
+        return {
+          sku: l.sku,
+          title: String(card?.name ?? l.sku),
+          brandCode: card?.brandName ? 'TZB-1' : null,
+          quantity: l.quantity,
+          unit: l.unit,
+          total: l.total,
+        }
+      }),
+      subtotal: quote.subtotal,
+      // Benefits are evaluated AGAIN at placement (OrderDraftAssembler) and the order keeps that result, even when it is not the
+      // quote's advisory preview: the backend does not refuse a different discount.
+      discount:
+        this.benefitBps > 0
+          ? Math.max(1, Math.floor((quote.subtotal * this.benefitBps) / 10_000))
+          : 0,
+      // DeliveryAddress is NON_NULL: absent optional parts are absent, not null.
+      address: {
+        label: address.label,
+        recipientName: address.recipientName,
+        recipientPhone: address.recipientPhone,
+        addressLine1: address.addressLine1,
+        ...(address.addressLine2 ? { addressLine2: address.addressLine2 } : {}),
+        ...(address.landmark ? { landmark: address.landmark } : {}),
+        city: address.city,
+        state: address.state,
+        postalCode: address.postalCode,
+      },
+      slot,
+    }
+    this.orders.push(order)
+    // CartPurchasePort.finalizePurchase: the cart is cleared only if it is still the purchased version; the marker always rises.
+    this.purchasedThrough = Math.max(this.purchasedThrough, quote.cartVersion)
+    if (this.cart.version === quote.cartVersion) {
+      this.cart.lines = []
+      this.cart.version += 1
+    }
+    return { ok: true, order }
   }
 
   private handleMedia(req: IncomingMessage, res: ServerResponse): void {

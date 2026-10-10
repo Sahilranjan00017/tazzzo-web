@@ -122,7 +122,8 @@ describe('CartView lines', () => {
     ).toHaveTextContent('₹998')
     expect(screen.getByTestId('cart-subtotal')).toHaveTextContent('₹998')
     expect(screen.getByText('Subtotal (2 items)')).toBeInTheDocument()
-    expect(screen.getByText(/Delivery, fees and taxes are added at checkout/)).toBeInTheDocument()
+    expect(screen.getByText(/Prices can change until you place your order/)).toBeInTheDocument()
+    expect(screen.getByTestId('cart-checkout-link')).toHaveAttribute('href', '/checkout')
   })
 
   it('encodes the id in the product link and keeps its case', () => {

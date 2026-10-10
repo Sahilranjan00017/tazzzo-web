@@ -3,24 +3,28 @@
 The customer website: home merchandising, product detail, category browse and search, rendered by Next.js from the
 **public** Tazzzo API (`/v1/**`, tazzzo-backend `docs/api/v1/openapi.yaml`), plus customer sign-in with a phone OTP and a
 server-side session (`/login`, `/account`), the customer cart (`/cart`, Add to cart on `/p/[id]`), the delivery location, saved addresses and
-delivery slots (`/location`, `/account/addresses`, `/checkout/delivery`). No payment or order placement yet.
+delivery slots (`/location`, `/account/addresses`, `/checkout/delivery`), and checkout: the order review, Cash on Delivery placement, the
+confirmation and the customer's orders (`/checkout`, `/orders`, `/orders/[id]`). COD is the only payment method the backend has.
 
 ## Routes
 
-| Route                          | Backend reads (all from the Next server, never the browser)                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `/`                            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile     |
-| `/p/[id]`                      | `GET /v1/products/{id}` (gallery, price, description)                                                                    |
-| `/c/[node]`                    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                               |
-| `/search?q=`                   | `GET /v1/search` (never cached)                                                                                          |
-| `/login`                       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                    |
-| `/account`                     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`       |
-| `/location`                    | `GET /v1/serviceability?pin=` (via `POST /api/location`); signed in: `GET /v1/customer/addresses`                        |
-| `/account/addresses[/new,/id]` | `GET /v1/customer/addresses[/{id}]`; mutations via `/api/addresses/*`                                                    |
-| `/checkout/delivery`           | `GET /v1/customer/addresses`, `GET /v1/customer/delivery/slots?pin=`                                                     |
-| `/cart`                        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]` |
-| `/robots.txt`                  | none                                                                                                                     |
-| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                           |
+| Route                          | Backend reads (all from the Next server, never the browser)                                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `/`                            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile       |
+| `/p/[id]`                      | `GET /v1/products/{id}` (gallery, price, description)                                                                      |
+| `/c/[node]`                    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                                 |
+| `/search?q=`                   | `GET /v1/search` (never cached)                                                                                            |
+| `/login`                       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                      |
+| `/account`                     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`         |
+| `/location`                    | `GET /v1/serviceability?pin=` (via `POST /api/location`); signed in: `GET /v1/customer/addresses`                          |
+| `/account/addresses[/new,/id]` | `GET /v1/customer/addresses[/{id}]`; mutations via `/api/addresses/*`                                                      |
+| `/checkout/delivery`           | `GET /v1/customer/addresses`, `GET /v1/customer/delivery/slots?pin=`                                                       |
+| `/cart`                        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]`   |
+| `/checkout`                    | `GET` cart, address, slots, then `POST /v1/customer/checkout/quote`; the page calls `/api/orders`, `/api/checkout/refresh` |
+| `/orders`                      | `GET /v1/customer/orders?page_size=&cursor=` (bearer; cursor paged)                                                        |
+| `/orders/[id]`                 | `GET /v1/customer/orders/{id}` (`?placed=1` = the confirmation); `/api/orders/cancel` calls `POST .../{id}/cancel`         |
+| `/robots.txt`                  | none                                                                                                                       |
+| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                             |
 
 ### Home content contract
 
@@ -72,7 +76,7 @@ The backend admits every public read through a token bucket keyed by **client IP
 
 A token bucket per visitor on every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets
 never reach it): **60/min, burst 20** by default, plus a stricter **12/min, burst 6** for the uncached paths that always
-cost a backend call (`/search`, `/c/<node>?cursor=...`). A refused request gets `429` with `Retry-After`, a one-line
+cost a backend call (`/search`, `/c/<node>?cursor=...`, the sign-in code, PIN, delivery-choice, and `POST /api/orders{,/cancel}` routes). A refused request gets `429` with `Retry-After`, a one-line
 `text/plain` body and the usual security headers; it is not rendered and never reaches the backend. Settings:
 `STOREFRONT_RATE_LIMIT_*` (see `.env.example`; `0` per minute switches a bucket off; an invalid value fails every
 request with a 500 and logs only the variable name). Logs are counts only, at most once a minute:
@@ -259,8 +263,83 @@ What belongs to a customer (the saved-address id, bound to the customer id) is i
 
 **Limits / not done.** The shared 60 s cache holds `lowStockRemaining` (and stock) per serviceable PIN, so a low-stock count can be up to ~60 s old and is
 shared by every visitor of that PIN. Client-side checks use JS `trim()`, the backend Java `strip()`/`trim()`: they differ for exotic whitespace (the server and
-the backend validate again, so the worst case is a refused save). No payment or order placement (S4). The cart uses a saved address only if one was chosen (no automatic "use the default address" yet). No
+the backend validate again, so the worst case is a refused save). Payment methods other than Cash on Delivery do not exist in the backend. The cart uses a saved address only if one was chosen (no automatic "use the default address" yet). No
 map or lat/lng. Slot horizon is the backend default; `days` is not sent. A PIN's serviceability is checked when it is set (not re-checked per page).
+
+## Checkout, Cash on Delivery orders and Orders (`src/server/checkout/*`, `src/server/orders/*`, `src/server/backend/{checkout,orders}.ts`)
+
+Built only on what the backend serves (controllers read at tazzzo-backend `origin/main` bc0e655: `CheckoutController`, `CheckoutService`, `OrderController`,
+`OrderService`, `OrderLifecycleService`, `CustomerOrderDto`, and their exception handlers). The OpenAPI file types these bodies as `JsonNode`, so the
+controllers are the source of truth.
+
+**The review (`/checkout`).** Rendered on the server on every request from backend answers only: the cart (located by the chosen address), the saved
+address, the slot, and a **checkout quote** (`POST /v1/customer/checkout/quote`, body `{addressId}`, `If-Match: "cart-<version>"` = the cart version just read,
+`Idempotency-Key`). The quote carries lines (quantity, unit and line paise), the subtotal, an advisory `benefitPreview` and `moneyPreview`
+(`payable = subtotal - discount`); titles, images and MRP come from the cart read. **The backend adds no delivery fee, tax or tip**, so none is shown;
+the screen says "Cash on delivery" and the amount to pay. Nothing on the page comes from the browser. A cart the backend will not quote is shown as it is:
+`CHECKOUT_ITEM_UNAVAILABLE` (the lines and their closed reasons: out of stock, not enough stock, no longer available, no price...) blocks placement and offers
+the cart; `CHECKOUT_UNSERVICEABLE`, a deleted address or a slot that is no longer `AVAILABLE` go back to `/checkout/delivery` with a notice; an empty cart goes to
+`/cart`; no session goes to `/login?next=/checkout`; no delivery choice goes to the delivery step. A quote that expired (410) offers "Refresh my review".
+
+**Placing (`POST /api/orders`).** Body, exactly: `{quoteId, cartVersion, addressId, slotId}` (the quote the page showed, and the cart version, address and slot of
+that review). No price, total, quantity, payment method or customer id is accepted. Order of checks: CSRF (as the cart), session, bounded strict body, then
+the **server-held choice** in the sealed checkout cookie must equal the reviewed address and slot (else `choice_changed`, nothing sent), then the cart's current
+version must equal the reviewed one (else `cart_changed`, nothing sent), then `POST /v1/customer/orders` `{quoteId, paymentMethod:"COD", deliverySlotId}`
+with the slot from the cookie. The answer is `{ok:true,data:{orderId}}` or a closed error code; the client then does a full navigation to
+`/orders/{id}?placed=1`. On success the backend has emptied the cart (only if it is still the purchased version) and the checkout cookie is cleared.
+
+**Idempotency (how a double click, refresh or retry can never make a second order).** The backend has **no `Idempotency-Key` on order placement**:
+`(customer, quoteId)` is unique, so placing the same quote again returns the same `CONFIRMED` order (200), and a _different_ quote of an already-ordered cart
+is 409 `CART_VERSION_ALREADY_PURCHASED`. The attempt's identity is therefore the **quote**, whose creation is keyed by `Idempotency-Key`:
+
+- The sealed checkout cookie holds a random 32-byte seed (`quoteKey`), minted when the delivery choice is saved. The key sent with the quote is
+  `base64url(HMAC-SHA256(seed, "checkout-quote|v1|<cartVersion>|<addressId>"))` (43 characters; `server/checkout/key.ts`). It is derived, not stored, because a
+  page render cannot set cookies. The backend fingerprints a quote by cart version + address, so: the same attempt (refresh, second tab, double click) sends the
+  same key and gets the **same quote and `quoteId`** back; a changed cart or address changes the key by itself (the old key would be a 409 conflict).
+- The seed is **replaced only when the current quote ended definitively**: `QUOTE_EXPIRED` / unknown quote, `PRICE_CHANGED`, or stock / product unavailable at
+  placement (the route rotates it before answering, so the re-rendered review gets a new quote), or when the customer presses "Refresh my review", or saves the
+  delivery choice again. It is **never** changed by an unknown outcome, a 5xx, a timeout, a rate limit or a slot/address problem.
+- **Unknown outcome** (any 5xx including the internal-defect 500, a timeout, a network failure, a 200 that is not a valid order): the screen says the order may
+  exist, links to Orders, and "Place order" stays enabled; pressing it sends the SAME `quoteId`, which can only return the order that exists or place the one that
+  does not. The cookie also remembers that quote as pending (`placing`): a retry of exactly that quote skips the
+  "cart still as reviewed" check (an order that went through has already emptied the cart, which would otherwise read as "cart changed") and asks the backend; any
+  other quote is still refused if the cart moved. The marker is dropped by any definite outcome. The client also ignores presses while a request is in flight and after a success.
+- Two simultaneous requests for one quote are serialised by the backend (duplicate-key recovery returns the winner), so both get the same order.
+
+**Closed error vocabulary** (`src/lib/checkout/messages.ts`; the backend's text, ids and detail never reach the page or the logs): `unauthenticated` (sign in),
+`forbidden`, `bad_request`, `choice_changed`, `cart_changed`, `quote_expired`, `price_changed` (the review shows the old and new total and the button reads "Confirm
+<new total> and place order": the customer must press again; the old quote is never placed), `items_unavailable` (the re-rendered review lists the lines),
+`slot_unavailable` / `address_changed` / `unserviceable` (back to the delivery step, nothing to press), `already_ordered` (see Orders),
+`hold_expired` (retry), `rate_limited` (with `Retry-After`), `unavailable` (nothing was placed: the cart pre-check failed), `unknown` (above).
+
+**Orders.** `/orders` lists the caller's orders newest first, 10 per page, following the backend cursor (`nextCursor`, strict base64url, at most 128 characters; a
+cursor outside that shape is dropped and the first page shown). `/orders/[id]` shows one order entirely from the order's own stored snapshot: status
+(CONFIRMED / OUT_FOR_DELIVERY / DELIVERED / CANCELLED; a newer status reads "In progress"), items, the money it settled on (`money`: subtotal, discount, payable;
+an order without `money` shows no payable, never zero), the address snapshot, the delivery slot, the milestone times (shown in Asia/Kolkata). The order id must match
+the backend grammar `^ORD_[A-Za-z0-9_-]{6,64}$` before it is used in a path (otherwise a 404 page with no backend call); the customer is only ever the bearer token,
+so another customer's order is the backend's 404 and is shown exactly like an unknown id. All these pages and APIs are `Cache-Control: no-store`.
+
+**Cancel.** `POST /api/orders/cancel` `{orderId, reason}` (reason: `CHANGED_MIND` / `ORDERED_BY_MISTAKE` / `OTHER`) calls `POST /v1/customer/orders/{id}/cancel`. The backend
+allows customer cancellation only inside `tazzzo.orders.customer-cancel-window-seconds` after confirmation and **defaults to 0 = closed** (409
+`CANCELLATION_WINDOW_CLOSED`), and does not publish that setting. So the Cancel control is offered only when this deployment mirrors the window in
+`STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS` (unset or 0 = no control) and the order is CONFIRMED and inside it; the backend still decides every request, and a refusal is
+shown as "Cancelling is not available for this order" (not an error code).
+
+**Unknown outcomes and the lost response.** Only a closed error code from this site's own route is a definite answer. A browser-to-Next failure, a proxy's HTML
+error page, a truncated or unrecognised body or a 5xx is **status unknown** ("check your orders"), never "no order was placed". Defences, in layers: (1) the route marks the
+attempt `placing` in the sealed cookie BEFORE it calls the backend (kept on unknown, cleared on any definite answer); (2) the browser keeps its own mark in this tab's
+`sessionStorage` (`PendingOrderNotice` in the layout shows "An order you just tried to place may have gone through" on every page until `/orders` has been visited or the
+customer says they checked), because a lost response also loses the server's Set-Cookie; (3) while a mark exists, a "cart changed" / "choice changed" answer (an order
+that went through has emptied the cart) is shown as unknown and points to Orders instead of refreshing into an empty cart. Re-placing the same quote can only return that
+one order.
+
+**Known limits (reviewed).** (a) The backend re-evaluates Benefits at placement and keeps the result even when it differs from the quote's advisory preview (it does not
+answer `PRICE_CHANGED` for it) and offers no pre-commit check, so a total that moves because of a benefit cannot be refused. The review says benefits are re-checked; the
+placing screen compares the order's payable with the reviewed one and the confirmation shows "Your total changed from X to Y" (the reviewed amount travels in `?was=`,
+display only). (b) A retry after an unknown outcome places the quote the customer saw, even if the cart changed since (the pre-check is skipped for exactly that quote).
+(c) `?placed=1` says "your order is placed" only for a CONFIRMED order confirmed in the last 10 minutes.
+
+**Not built (not in the brief's contract).** Support cases (`/v1/customer/support/*` exist; no screen yet), account deletion, reorder, invoices, payment methods other than COD.
 
 ## Images
 
@@ -286,7 +365,7 @@ See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL` (https in production; 
 `TAZZZO_SITE_URL` (canonical/OG origin; https in production), `TAZZZO_MEDIA_BASE_URL` (the backend's media public base
 URL; unset = every image is the placeholder), `STOREFRONT_SESSION_SECRET` (base64/base64url of 32+ random bytes, e.g. `openssl rand -base64 32`; **required in production**, unset elsewhere
 switches sign-in off with 503; `STOREFRONT_SESSION_SECRET_PREVIOUS` is the key being rotated out and only opens cookies), optionally
-`TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, and the rate
+`TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, `STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS` (mirror of the backend's customer cancellation window, 0..604800, default 0 = no Cancel control), and the rate
 limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. In production, `STOREFRONT_SESSION_SECRET` also requires `STOREFRONT_TRUST_PROXY=true` (the per-visitor limit is what bounds sign-in code
 requests, since the backend cannot tell visitors apart). Invalid
 configuration fails the first render (500) and logs only the field name.
@@ -333,3 +412,10 @@ pnpm --filter storefront build          # standalone output
     The per-phone/per-challenge buckets and this site's per-visitor limiter bound abuse meanwhile.
 12. **Refresh-token rotation across instances.** The cookie holds the only copy of the refresh token; two instances refreshing the same
     cookie at the same instant can lose the race (the loser signs in again). Single-flight per process removes the common case.
+13. **Order placement has no `Idempotency-Key`** and the OpenAPI types the quote and order bodies as `JsonNode` with no error codes; idempotency is the quote id (see Checkout).
+    A client cannot tell a lost answer from a failed placement except by retrying the same quote or reading Orders.
+14. **The customer cancellation window is not discoverable.** The backend answers 409 `CANCELLATION_WINDOW_CLOSED` (its default) but publishes neither the window nor a per-order
+    "cancellable until"; the site mirrors it in configuration.
+15. **No delivery fee, tax or tip in the quote or order** (V1 money is `subtotal - discount`), so the review shows none; a future fee would need a contract change and a UI row.
+16. **A quote is a snapshot, not a read of the live cart:** `GET /v1/customer/checkout/quotes/{id}` returns the stored quote (or 410), so "current prices" are obtained by
+    creating a quote; the review therefore creates one per cart version per attempt.

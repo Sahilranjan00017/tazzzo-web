@@ -7,6 +7,8 @@ import { locationChipText } from '@/lib/location/model'
 import { headerCartCount } from '@/server/cart/service'
 import { currentLocation } from '@/server/location/service'
 import { readSession } from '@/server/session/cookies'
+import { Hydrated } from '@/components/Hydrated'
+import { PendingOrderNotice } from '@/components/PendingOrderNotice'
 import './globals.css'
 
 const DESCRIPTION = 'Groceries and daily essentials from Tazzzo.'
@@ -83,6 +85,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   </span>
                 )}
               </Link>
+              {signedIn && (
+                <Link href="/orders" data-testid="orders-link">
+                  Orders
+                </Link>
+              )}
               {signedIn ? (
                 <Link href="/account" data-testid="account-link">
                   Your account
@@ -95,6 +102,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </nav>
           </div>
         </header>
+        <Hydrated />
+        {signedIn && <PendingOrderNotice />}
         <main id="main" tabIndex={-1}>
           {children}
         </main>
