@@ -13,6 +13,9 @@ import { deflateSync } from 'node:zlib'
  *   BOTH only), in stored order, with `Cache-Control: public, max-age=60`;
  * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}`, `/v1/categories/{id}/children`,
  *   `/v1/categories/{id}/products`, `/v1/search` with the documented shapes; unknown ids are a flat 404.
+ * - the customer auth contract (OtpController, SessionController, CustomerProfileController): OTP request/verify,
+ *   session establish, refresh with rotation (the old refresh token dies), logout (bearer) and `GET /v1/customer/profile`,
+ *   with the backend's public error codes. Test phones/codes: see `handleAuth`. Test tokens only, never real values.
  * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
@@ -23,6 +26,17 @@ export interface RecordedRequest {
   /** The trusted-caller headers as received (test values only), or null when absent. */
   caller: string | null
   callerSecret: string | null
+  /** Whether an `Authorization` header arrived (its value is a throwaway test token and is not kept). */
+  bearer: boolean
+  /** `X-Forwarded-For` as received: the storefront must never send one. */
+  forwardedFor: string | null
+}
+
+interface FakeSession {
+  customerId: string
+  refreshToken: string
+  accessTokens: Set<string>
+  revoked: boolean
 }
 
 type Audience = 'APP_ONLY' | 'WEB_ONLY' | 'BOTH'
@@ -32,6 +46,13 @@ export class FakeBackend {
   mediaUrl = ''
   mediaDown = false
   readonly requests: RecordedRequest[] = []
+  /** Access token lifetime handed out by `/v1/auth/session` and `/v1/auth/refresh` (seconds). */
+  accessTtlSeconds = 900
+  refreshCount = 0
+  logoutCount = 0
+  private readonly challenges = new Map<string, { phone: string; wrong: number }>()
+  private readonly grants = new Set<string>()
+  private readonly sessions = new Map<string, FakeSession>()
   private api?: Server
   private media?: Server | HttpsServer
 
@@ -229,6 +250,19 @@ export class FakeBackend {
 
     if (url.pathname.startsWith('/__control/')) {
       if (url.pathname === '/__control/requests') return send(200, this.requests)
+      if (url.pathname === '/__control/auth') {
+        if (req.method === 'POST') {
+          this.accessTtlSeconds = Number(url.searchParams.get('accessTtl') ?? '900')
+          if (url.searchParams.get('revokeAll') === '1') {
+            for (const session of this.sessions.values()) session.revoked = true
+          }
+        }
+        return send(200, {
+          accessTtlSeconds: this.accessTtlSeconds,
+          refreshCount: this.refreshCount,
+          logoutCount: this.logoutCount,
+        })
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -245,7 +279,12 @@ export class FakeBackend {
       query: url.search,
       caller: header('x-tazzzo-caller'),
       callerSecret: header('x-tazzzo-caller-secret'),
+      bearer: header('authorization') !== null,
+      forwardedFor: header('x-forwarded-for'),
     })
+    if (url.pathname.startsWith('/v1/auth/') || url.pathname.startsWith('/v1/customer/')) {
+      return this.handleAuth(req, res, url, send)
+    }
     if (req.method !== 'GET') return error(405, 'INVALID_REQUEST')
 
     if (url.pathname === '/v1/content/home') {
@@ -327,6 +366,144 @@ export class FakeBackend {
       return send(200, { resolvedReleaseId: 'R1', items, hasMore: false, requestId: 'req_search' })
     }
     return error(404, 'NOT_FOUND')
+  }
+
+  /**
+   * Customer auth, with the backend's behaviour and public error codes.
+   * Phones: `+919999999999` is rate limited (429 + Retry-After 42), `+919888888888` fails delivery (503); any other
+   * `+91[6-9]xxxxxxxxx` gets a challenge. Codes: `123456` is right; `654321` is expired; `999999` is rate limited;
+   * anything else is wrong, and the fifth wrong code locks the challenge (still `OTP_INVALID`).
+   */
+  private async handleAuth(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    send: (status: number, body: unknown, headers?: Record<string, string>) => void,
+  ): Promise<void> {
+    const out = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+      send(status, body, { 'cache-control': 'no-store', ...headers })
+    const code = (status: number, value: string, headers: Record<string, string> = {}) =>
+      out(status, { code: value, message: 'error', requestId: 'req_auth' }, headers)
+    const rand = (n: number) => randomBytes(n).toString('base64url')
+    const chunks: Buffer[] = []
+    for await (const chunk of req) chunks.push(chunk as Buffer)
+    let body: Record<string, unknown> = {}
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>
+    } catch {
+      return code(400, 'INVALID_REQUEST')
+    }
+    const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
+    const sessionFor = (token: string | undefined) => {
+      for (const session of this.sessions.values()) {
+        if (token && session.accessTokens.has(token) && !session.revoked) return session
+      }
+      return undefined
+    }
+    const issue = (session: FakeSession) => {
+      const accessToken = `AT.${rand(48)}`
+      session.accessTokens.add(accessToken)
+      session.refreshToken = `SES_${rand(9)}.${rand(24)}`
+      return {
+        accessToken,
+        accessTokenExpiresIn: this.accessTtlSeconds,
+        refreshToken: session.refreshToken,
+      }
+    }
+    const path = url.pathname
+
+    if (req.method === 'POST' && path === '/v1/auth/otp/request') {
+      const phone = body.phone
+      if (typeof phone !== 'string' || !/^\+91[6-9][0-9]{9}$/.test(phone)) {
+        return code(400, 'OTP_INVALID_REQUEST')
+      }
+      if (phone === '+919999999999') {
+        return out(
+          429,
+          { code: 'OTP_RATE_LIMITED', message: 'x', requestId: 'req_auth', retryAfterSeconds: 42 },
+          { 'retry-after': '42' },
+        )
+      }
+      if (phone === '+919888888888') return code(503, 'SERVICE_UNAVAILABLE')
+      const challengeId = `OTP_${rand(18)}`
+      this.challenges.set(challengeId, { phone, wrong: 0 })
+      return out(202, {
+        challengeId,
+        expiresInSeconds: 300,
+        resendAfterSeconds: 2,
+        requestId: 'req_auth',
+      })
+    }
+    if (req.method === 'POST' && path === '/v1/auth/otp/verify') {
+      const challenge = this.challenges.get(String(body.challengeId))
+      const otp = body.otp
+      if (typeof otp !== 'string' || !/^[0-9]{6}$/.test(otp))
+        return code(400, 'OTP_INVALID_REQUEST')
+      if (!challenge) return code(400, 'OTP_INVALID')
+      if (otp === '999999') {
+        return out(
+          429,
+          { code: 'OTP_RATE_LIMITED', message: 'x', requestId: 'req_auth', retryAfterSeconds: 120 },
+          { 'retry-after': '120' },
+        )
+      }
+      if (otp === '654321') return code(400, 'OTP_EXPIRED')
+      if (otp !== '123456' || challenge.wrong >= 5) {
+        challenge.wrong += 1
+        return code(400, 'OTP_INVALID')
+      }
+      this.challenges.delete(String(body.challengeId))
+      const grantId = `GRANT_${rand(18)}`
+      this.grants.add(grantId)
+      return out(200, {
+        challengeId: body.challengeId,
+        verified: true,
+        grantId,
+        requestId: 'req_auth',
+      })
+    }
+    if (req.method === 'POST' && path === '/v1/auth/session') {
+      const grantId = String(body.grantId)
+      if (!this.grants.delete(grantId)) return code(401, 'UNAUTHENTICATED')
+      const session: FakeSession = {
+        customerId: 'CUS_e2e0001',
+        refreshToken: '',
+        accessTokens: new Set(),
+        revoked: false,
+      }
+      this.sessions.set(`SES_${rand(6)}`, session)
+      return out(200, { customerId: session.customerId, ...issue(session), requestId: 'req_auth' })
+    }
+    if (req.method === 'POST' && path === '/v1/auth/refresh') {
+      const presented = String(body.refreshToken)
+      const session = [...this.sessions.values()].find(
+        (s) => s.refreshToken === presented && !s.revoked,
+      )
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      this.refreshCount += 1
+      return out(200, { ...issue(session), requestId: 'req_auth' })
+    }
+    if (req.method === 'POST' && path === '/v1/auth/logout') {
+      const session = sessionFor(bearer)
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      session.revoked = true
+      this.logoutCount += 1
+      res.writeHead(204, { 'cache-control': 'no-store' })
+      res.end()
+      return
+    }
+    if (req.method === 'GET' && path === '/v1/customer/profile') {
+      const session = sessionFor(bearer)
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      return out(200, {
+        customerId: session.customerId,
+        displayName: 'Asha Verma',
+        email: 'asha@example.test',
+        version: 3,
+        requestId: 'req_auth',
+      })
+    }
+    return code(404, 'NOT_FOUND')
   }
 
   private handleMedia(req: IncomingMessage, res: ServerResponse): void {

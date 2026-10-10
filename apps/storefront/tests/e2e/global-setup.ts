@@ -15,6 +15,8 @@ export default async function globalSetup(): Promise<void> {
       TAZZZO_API_BASE_URL: backend.url,
       TAZZZO_SITE_URL: base,
       TAZZZO_MEDIA_BASE_URL: `${backend.mediaUrl}/media`,
+      // Throwaway sealing key for the customer session cookie (test only).
+      STOREFRONT_SESSION_SECRET: 'ZTJlLXRocm93YXdheS1zZXNzaW9uLWtleS0wMDAxLW5vdC1yZWFs',
       NEXT_TELEMETRY_DISABLED: '1',
     },
     detached: true,

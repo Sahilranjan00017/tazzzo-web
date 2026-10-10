@@ -7,6 +7,8 @@ beforeAll(() => {
   vi.stubEnv('NODE_ENV', 'production')
   vi.stubEnv('TAZZZO_API_BASE_URL', API)
   vi.stubEnv('TAZZZO_SITE_URL', 'https://www.tazzzo.test')
+  vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // production with sessions requires it
+  vi.stubEnv('STOREFRONT_SESSION_SECRET', 'q'.repeat(43)) // production requires the session sealing key
   vi.stubEnv('TAZZZO_MEDIA_BASE_URL', MEDIA)
 })
 

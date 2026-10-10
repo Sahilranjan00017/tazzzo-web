@@ -13,6 +13,7 @@ async function clientWith(env: Record<string, string>) {
   vi.stubEnv('NODE_ENV', 'production')
   vi.stubEnv('TAZZZO_API_BASE_URL', 'https://api.tazzzo.test')
   vi.stubEnv('TAZZZO_SITE_URL', 'https://www.tazzzo.test')
+  vi.stubEnv('STOREFRONT_SESSION_SECRET', 'q'.repeat(43)) // production requires the session sealing key
   vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // production requires it with a caller credential
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
   return import('@/server/backend/client')

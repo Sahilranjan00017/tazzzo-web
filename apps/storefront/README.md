@@ -1,7 +1,8 @@
 # Tazzzo storefront (`apps/storefront`)
 
 The customer website: home merchandising, product detail, category browse and search, rendered by Next.js from the
-**public** Tazzzo API (`/v1/**`, tazzzo-backend `docs/api/v1/openapi.yaml`). No sign-in, cart or checkout yet.
+**public** Tazzzo API (`/v1/**`, tazzzo-backend `docs/api/v1/openapi.yaml`), plus customer sign-in with a phone OTP and a
+server-side session (`/login`, `/account`). No cart or checkout yet.
 
 ## Routes
 
@@ -11,6 +12,8 @@ The customer website: home merchandising, product detail, category browse and se
 | `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                                |
 | `/c/[node]`    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                           |
 | `/search?q=`   | `GET /v1/search` (never cached)                                                                                      |
+| `/login`       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                |
+| `/account`     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`   |
 | `/robots.txt`  | none                                                                                                                 |
 | `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                                       |
 
@@ -98,6 +101,48 @@ time until the next visit**, i.e. typically about a minute and at most ~2 minute
 honouring the backend's `Cache-Control: public, max-age=60` is placed between this server and the API, add up to
 another 60 s.
 
+## Customer sign-in and session (`src/server/session/*`, `src/app/api/auth/*`)
+
+A backend-for-frontend: the browser never talks to the backend and never holds a backend token.
+
+**Flow.** `/login` takes an Indian mobile number (`+91` / ten digits / leading `0`, the backend `Phone` grammar), then the
+6-digit code. `POST /api/auth/otp/request` -> `POST /v1/auth/otp/request`; the challenge id stays in a sealed cookie
+(so it is bound to that browser) and the page only learns the masked number. `POST /api/auth/otp/verify` -> `/v1/auth/otp/verify`
+(grant) -> `/v1/auth/session` (access + refresh token) -> the session cookie. `/account` reads `GET /v1/customer/profile`.
+`POST /api/auth/logout` -> `POST /v1/auth/logout` (revokes the backend session), then clears the cookie; if the backend cannot be
+reached the cookie is still cleared and the session simply ages out there.
+
+**Cookies.** `__Host-tz_session` and `__Host-tz_otp` (`tz_session_dev` / `tz_otp_dev` without `Secure` only when
+`TAZZZO_SITE_URL` is plain http, i.e. local development). Attributes: `HttpOnly; Secure; SameSite=Lax; Path=/`, no `Domain`,
+`Max-Age` = remaining lifetime. Values are sealed with AES-256-GCM (key derived by HKDF from `STOREFRONT_SESSION_SECRET`, random IV,
+the cookie's purpose bound in as additional data, expiry inside the sealed payload), so a tampered, expired, re-purposed or
+wrong-key value is simply "signed out". The session payload is the access token, refresh token, a per-session CSRF token and
+timestamps (sealing refuses anything above 3.8 KB, under the 4 KB cookie limit). Absolute lifetime 30 days (the backend default; it may end a session sooner).
+`SameSite=Strict` is not used: it would drop the session on every link in from outside the site.
+
+**Refresh.** The access token (15 min) is treated as expired 30 s early. A page cannot set cookies, so `/account` sends the browser
+to `GET /api/auth/refresh?next=...`, which rotates the tokens (`/v1/auth/refresh`; the old refresh token dies), rewrites the cookie
+and redirects. Concurrent requests with the same token in one process share one backend call. Backend 401 on refresh ends the session
+(`/login?reason=expired`); an outage keeps it and says so. Two instances refreshing one cookie at the same instant can race and the loser signs in again (known limit, gap 11). Tokens refused right after being issued end the session instead of looping.
+
+**CSRF.** Every state-changing route is `POST` + JSON only (body streamed with a hard 2 KiB cap, 413 beyond it) and requires: header `X-Tazzzo-CSRF` (the literal `1`
+before sign-in, the per-session token for logout), `Sec-Fetch-Site: same-origin` when sent, and an `Origin` whose host equals the request's
+`Host` (the load balancer preserves it). The cookie is `SameSite=Lax` as a second layer. The refresh `GET` serves only same-origin or
+direct navigations and redirects only to a same-origin path.
+
+**`next`.** `safeNext` accepts only a path with one leading slash, no backslash or control character, no `.`/`..` segment and no encoded
+slash/backslash (checked as given and after each round of percent-decoding, before URL parsing), a result that still resolves on the same
+origin, and not `/api/*` or `/login`; anything else becomes `/account`.
+
+**Errors and limits.** The server sends the browser a closed set of codes (`invalid_phone`, `invalid_code`, `expired`, `rate_limited`,
+`unavailable`); backend text, ids and tokens never reach the page or logs (only path, status and the backend request id are logged).
+Backend 429 is shown as "Too many attempts. Please wait N seconds" from `Retry-After`. The code routes also pass the per-visitor limiter in
+the stricter `expensive` bucket (`/api/auth/otp/*`).
+
+**Visitor address.** None is forwarded. The backend takes a client address only from `X-Forwarded-For` of its own trusted proxy and ignores
+it from this server (`ClientIpResolver`), and the trusted-caller credential carries nothing about the visitor, so the OTP per-IP buckets see
+this server's egress address; the per-phone and per-challenge buckets and the storefront's own per-visitor limit still apply.
+
 ## Images
 
 Plain `<img>`/`<picture>` straight from the media CDN (no Next image optimizer, so no image-proxy endpoint). An image is
@@ -112,15 +157,19 @@ media metadata or the product name; thumbnails are buttons (Tab, Enter/Space, ar
 Nonce-based CSP per request (`src/proxy.ts`; no `'unsafe-inline'`/`'unsafe-eval'` in production), static headers in
 `next.config.ts` (`nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, COOP, Permissions-Policy). Backend text
 is always rendered as React text (`react/no-danger` is an error). The public API takes no credential; the optional
-trusted-caller secret (`TAZZZO_CALLER_SECRET`) lives only in the server environment. `src/server/*` is server-only
+trusted-caller secret (`TAZZZO_CALLER_SECRET`) and the session sealing key (`STOREFRONT_SESSION_SECRET`) live only in the server
+environment. `src/server/*` is server-only
 (ESLint import ban + `server-only`).
 
 ## Configuration
 
 See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL` (https in production; plain http only for a loopback host),
 `TAZZZO_SITE_URL` (canonical/OG origin; https in production), `TAZZZO_MEDIA_BASE_URL` (the backend's media public base
-URL; unset = every image is the placeholder), optionally `TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, and the rate
-limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. Invalid
+URL; unset = every image is the placeholder), `STOREFRONT_SESSION_SECRET` (base64/base64url of 32+ random bytes, e.g. `openssl rand -base64 32`; **required in production**, unset elsewhere
+switches sign-in off with 503; `STOREFRONT_SESSION_SECRET_PREVIOUS` is the key being rotated out and only opens cookies), optionally
+`TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, and the rate
+limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. In production, `STOREFRONT_SESSION_SECRET` also requires `STOREFRONT_TRUST_PROXY=true` (the per-visitor limit is what bounds sign-in code
+requests, since the backend cannot tell visitors apart). Invalid
 configuration fails the first render (500) and logs only the field name.
 
 ## Commands (from the repository root)
@@ -156,3 +205,9 @@ pnpm --filter storefront build          # standalone output
 8. **PDP / category products are `private, no-store`.** The site caches them 60 s server-side because it never sends a
    location, so the answers are the same for everyone; price/stock shown can be up to ~60 s old.
 9. **No product enumeration** for the sitemap.
+10. **Visitor IP for OTP buckets.** `/v1/auth/otp/*` rate-limits by client IP, which the backend derives only from a trusted proxy's
+    `X-Forwarded-For`; the storefront server is not such a proxy and the trusted-caller credential does not carry the visitor, so all
+    sign-ins share this server's IP bucket until the backend offers a trusted way to pass the visitor address (or exempts the caller).
+    The per-phone/per-challenge buckets and this site's per-visitor limiter bound abuse meanwhile.
+11. **Refresh-token rotation across instances.** The cookie holds the only copy of the refresh token; two instances refreshing the same
+    cookie at the same instant can lose the race (the loser signs in again). Single-flight per process removes the common case.

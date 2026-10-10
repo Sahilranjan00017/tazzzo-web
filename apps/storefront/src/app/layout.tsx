@@ -3,6 +3,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { connection } from 'next/server'
 import { serverEnv } from '@/server/env'
+import { readSession } from '@/server/session/cookies'
 import './globals.css'
 
 const DESCRIPTION = 'Groceries and daily essentials from Tazzzo.'
@@ -25,6 +26,7 @@ export function generateMetadata(): Metadata {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection()
   serverEnv()
+  const signedIn = (await readSession()) !== null
   return (
     <html lang="en">
       <body>
@@ -52,6 +54,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               />
               <button type="submit">Search</button>
             </form>
+            <nav aria-label="Account" className="account-nav">
+              {signedIn ? (
+                <Link href="/account" data-testid="account-link">
+                  Your account
+                </Link>
+              ) : (
+                <Link href="/login" data-testid="signin-link">
+                  Sign in
+                </Link>
+              )}
+            </nav>
           </div>
         </header>
         <main id="main" tabIndex={-1}>

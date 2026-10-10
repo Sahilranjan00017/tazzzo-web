@@ -60,6 +60,8 @@ export default async function globalSetup(): Promise<void> {
       // Throwaway test credential (the fake backend only records it). Never a real value.
       TAZZZO_CALLER_NAME: E2E_CALLER_NAME,
       TAZZZO_CALLER_SECRET: E2E_CALLER_SECRET,
+      // Throwaway sealing key for the customer session cookie (test only).
+      STOREFRONT_SESSION_SECRET: 'ZTJlLXRocm93YXdheS1zZXNzaW9uLWtleS0wMDAyLW5vdC1yZWFs',
       // As behind the ALB: X-Forwarded-For's rightmost entry is trusted. The rate limits are the DEFAULTS.
       STOREFRONT_TRUST_PROXY: 'true',
       NEXT_TELEMETRY_DISABLED: '1',

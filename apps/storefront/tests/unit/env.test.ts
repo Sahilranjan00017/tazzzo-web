@@ -6,6 +6,8 @@ const valid = {
   TAZZZO_API_BASE_URL: 'https://api.tazzzo.test/',
   TAZZZO_SITE_URL: 'https://www.tazzzo.test',
   TAZZZO_MEDIA_BASE_URL: 'https://cdn.tazzzo.test/assets',
+  STOREFRONT_SESSION_SECRET: 'q'.repeat(43), // 32 bytes of base64
+  STOREFRONT_TRUST_PROXY: 'true', // required in production while customer sessions are enabled
 }
 
 describe('parseServerEnv', () => {
@@ -15,6 +17,7 @@ describe('parseServerEnv', () => {
       siteUrl: 'https://www.tazzzo.test',
       media: { base: 'https://cdn.tazzzo.test/assets', origin: 'https://cdn.tazzzo.test' },
       caller: null,
+      sessionKeys: [Buffer.from('q'.repeat(43) + '=', 'base64')],
     })
   })
 
@@ -100,15 +103,26 @@ describe('parseServerEnv', () => {
       }
     })
 
-    it('does not require a trusted proxy without the credential, or outside production', () => {
-      expect(parseServerEnv(valid).caller).toBeNull() // the untrusted default stays valid
-      expect(parseServerEnv({ ...valid, STOREFRONT_TRUST_PROXY: 'false' }).caller).toBeNull()
+    it('does not require a trusted proxy outside production', () => {
+      const dev = {
+        ...valid,
+        STOREFRONT_TRUST_PROXY: undefined,
+        STOREFRONT_SESSION_SECRET: undefined,
+      }
       for (const NODE_ENV of ['development', 'test']) {
-        expect(parseServerEnv({ ...valid, ...credential, NODE_ENV }).caller?.name).toBe(
-          'storefront',
-        )
+        expect(parseServerEnv({ ...dev, ...credential, NODE_ENV }).caller?.name).toBe('storefront')
+        expect(parseServerEnv({ ...dev, NODE_ENV }).caller).toBeNull()
       }
     })
+  })
+
+  it('production with customer sessions requires STOREFRONT_TRUST_PROXY=true (the OTP routes lean on the per-visitor limit)', () => {
+    for (const trust of [undefined, '', 'false']) {
+      expect(() => parseServerEnv({ ...valid, STOREFRONT_TRUST_PROXY: trust })).toThrow(
+        'invalid server environment: STOREFRONT_TRUST_PROXY',
+      )
+    }
+    expect(parseServerEnv(valid).sessionKeys).toHaveLength(1)
   })
 
   it.each([
@@ -123,6 +137,12 @@ describe('parseServerEnv', () => {
     [{ TAZZZO_MEDIA_BASE_URL: 'http://127.0.0.1:9000' }, 'TAZZZO_MEDIA_BASE_URL'],
     [{ TAZZZO_MEDIA_BASE_URL: 'http://cdn.tazzzo.test' }, 'TAZZZO_MEDIA_BASE_URL'],
     [{ NODE_ENV: 'staging' }, 'NODE_ENV'],
+    [{ STOREFRONT_SESSION_SECRET: undefined }, 'STOREFRONT_SESSION_SECRET'],
+    [{ STOREFRONT_SESSION_SECRET: '' }, 'STOREFRONT_SESSION_SECRET'],
+    [{ STOREFRONT_SESSION_SECRET: 'short' }, 'STOREFRONT_SESSION_SECRET'],
+    [{ STOREFRONT_SESSION_SECRET: 'q'.repeat(42) }, 'STOREFRONT_SESSION_SECRET'], // 31 bytes
+    [{ STOREFRONT_SESSION_SECRET: 'not base64 !'.repeat(5) }, 'STOREFRONT_SESSION_SECRET'],
+    [{ STOREFRONT_SESSION_SECRET_PREVIOUS: 'short' }, 'STOREFRONT_SESSION_SECRET_PREVIOUS'],
   ])('rejects %j, naming only the field', (override, field) => {
     expect(() => parseServerEnv({ ...valid, ...override })).toThrow(
       `invalid server environment: ${field}`,
@@ -153,5 +173,43 @@ describe('parseServerEnv', () => {
       TAZZZO_MEDIA_BASE_URL: 'http://127.0.0.1:9000/media',
     })
     expect(env.media?.origin).toBe('http://127.0.0.1:9000')
+  })
+})
+
+describe('customer session key', () => {
+  const key = (fill: string) => fill.repeat(43)
+
+  it('takes base64 or base64url and keeps the previous key for opening only (current first)', () => {
+    const env = parseServerEnv({
+      ...valid,
+      STOREFRONT_SESSION_SECRET: 'A-_'.repeat(15),
+      STOREFRONT_SESSION_SECRET_PREVIOUS: key('b'),
+    })
+    expect(env.sessionKeys).toHaveLength(2)
+    expect(env.sessionKeys?.every((k) => k.length >= 32)).toBe(true)
+  })
+
+  it('is optional outside production, where unset means sign-in is switched off', () => {
+    const rest = { ...valid, STOREFRONT_SESSION_SECRET: undefined }
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(parseServerEnv({ ...rest, NODE_ENV }).sessionKeys).toBeNull()
+    }
+  })
+
+  it('refuses a previous key without a current one, naming only the variable', () => {
+    const rest = { ...valid, STOREFRONT_SESSION_SECRET: undefined }
+    expect(() =>
+      parseServerEnv({
+        ...rest,
+        NODE_ENV: 'development',
+        STOREFRONT_SESSION_SECRET_PREVIOUS: key('b'),
+      }),
+    ).toThrow('invalid server environment: STOREFRONT_SESSION_SECRET_PREVIOUS')
+  })
+
+  it('never puts the value in the error', () => {
+    expect(() => parseServerEnv({ ...valid, STOREFRONT_SESSION_SECRET: 'hunter2-leak' })).toThrow(
+      /^invalid server environment: STOREFRONT_SESSION_SECRET$/,
+    )
   })
 })

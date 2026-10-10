@@ -145,7 +145,7 @@ jobs:
         run: test -f apps/storefront/.next/standalone/apps/storefront/server.js
       - name: Storefront client bundle carries no server configuration names
         run: |
-          if grep -rEl 'TAZZZO_API_BASE_URL|TAZZZO_SITE_URL|TAZZZO_MEDIA_BASE_URL|TAZZZO_CALLER_NAME|TAZZZO_CALLER_SECRET|STOREFRONT_RATE_LIMIT|STOREFRONT_TRUST' apps/storefront/.next/static; then
+          if grep -rEl 'TAZZZO_API_BASE_URL|TAZZZO_SITE_URL|TAZZZO_MEDIA_BASE_URL|TAZZZO_CALLER_NAME|TAZZZO_CALLER_SECRET|STOREFRONT_RATE_LIMIT|STOREFRONT_TRUST|STOREFRONT_SESSION' apps/storefront/.next/static; then
             echo 'server configuration referenced from the storefront client bundle' && exit 1
           fi
 

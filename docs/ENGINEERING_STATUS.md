@@ -1,14 +1,14 @@
 # Engineering status
 
-| Area                                                | State       | Record                                                                                                  |
-| --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28             |
-| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97      |
-| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716 |
-| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                   |
-| CMS business modules                                | NOT STARTED |                                                                                                         |
-| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                 |
-| Customer website (`apps/storefront`)                | IN REVIEW   | Home (`/v1/content/home?channel=web`), PDP, category, search on the public `/v1` API; see app README    |
+| Area                                                | State       | Record                                                                                                        |
+| --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28                   |
+| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97            |
+| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716       |
+| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                         |
+| CMS business modules                                | NOT STARTED |                                                                                                               |
+| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                       |
+| Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; see README |
 
 **W3 (merged, PR #3):** a narrow BFF mutation layer (`src/server/bff/mutation.ts`). There is no generic proxy: every route
 declares its one backend path, method, strict request schema, response schema and header allowlist. Each mutation
