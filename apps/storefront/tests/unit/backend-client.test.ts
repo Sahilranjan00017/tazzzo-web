@@ -153,18 +153,135 @@ describe('catalog reads', () => {
     expect(await catalog.getHomeBlocks()).toEqual({ ok: false, reason: 'unavailable' })
   })
 
-  it('rail products: one read per id, order kept, missing/failing/malformed ones skipped silently', async () => {
+  const batchBody = (items: unknown[], missing: string[] = []) => ({
+    resolvedReleaseId: 'R1',
+    items,
+    missing,
+    requestId: 'r',
+  })
+
+  it('rail products: ONE batch read, order kept, missing/malformed/foreign cards skipped silently', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/TZP-1')) return reply({ status: 200, body: card('TZP-1', 'Rice') })
-      if (url.endsWith('/TZP-2')) return reply({ status: 404, body: {} })
-      if (url.endsWith('/TZP-3')) return reply({ status: 503, body: {} })
-      if (url.endsWith('/TZP-4')) return reply({ status: 200, body: { productId: 'TZP-4' } })
-      return reply({ status: 200, body: card('TZP-5', 'Dal') })
-    })
-    const products = await catalog.getRailProducts(['TZP-5', 'TZP-2', 'TZP-1', 'TZP-3', 'TZP-4'])
+    fetchMock.mockImplementation(async () =>
+      reply({
+        status: 200,
+        body: batchBody(
+          [
+            card('TZP-5', 'Dal'),
+            card('TZP-1', 'Rice'),
+            { productId: 'TZP-4' }, // malformed card (no name): skipped
+            card('TZP-77', 'Never asked for'), // not requested: never shown
+            card('TZP-5', 'Dal again'), // repeated: once
+            card('TZP-6', 'Contradiction'), // also listed missing: not shown
+          ],
+          ['TZP-2', 'TZP-6'],
+        ),
+      }),
+    )
+    const products = await catalog.getRailProducts([
+      'TZP-5',
+      'TZP-2',
+      'TZP-1',
+      'TZP-3',
+      'TZP-4',
+      'TZP-6',
+    ])
     expect(products.map((p) => p.productId)).toEqual(['TZP-5', 'TZP-1'])
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(products[0]!.name).toBe('Dal')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe(`${API}/v1/products:batch?ids=TZP-5,TZP-2,TZP-1,TZP-3,TZP-4,TZP-6`)
+    expect(init).toMatchObject({
+      method: 'GET',
+      redirect: 'error',
+      next: { revalidate: REVALIDATE_SECONDS },
+    })
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('batch: dedupes, validates the canonical grammar without folding, sends a serviceable PIN only', async () => {
+    fetchMock.mockImplementation(async () =>
+      reply({ status: 200, body: batchBody([card('TZP-1', 'Rice')]) }),
+    )
+    const r = await catalog.getProductsBatch(
+      ['TZP-1', 'TZP-1', 'tzp-1', 'TZP-', 'TZP-a b', 'TZP-' + 'x'.repeat(41), '../x'],
+      { pin: '560001' },
+    )
+    expect(fetchMock.mock.calls.map(([u]) => u)).toEqual([
+      `${API}/v1/products:batch?ids=TZP-1&pin=560001`,
+    ])
+    expect(r).toMatchObject({
+      ok: true,
+      missing: ['tzp-1', 'TZP-', 'TZP-a b', 'TZP-' + 'x'.repeat(41), '../x'],
+    })
+    fetchMock.mockClear()
+    await catalog.getProductsBatch(['TZP-1'], { pin: '560001&x=1' })
+    await catalog.getProductsBatch(['TZP-1'], { pin: null })
+    expect(fetchMock.mock.calls.map(([u]) => u)).toEqual([
+      `${API}/v1/products:batch?ids=TZP-1`,
+      `${API}/v1/products:batch?ids=TZP-1`,
+    ])
+    fetchMock.mockClear()
+    expect(await catalog.getProductsBatch(['tzp-1', 'TZP-'])).toEqual({
+      ok: true,
+      items: [],
+      missing: ['tzp-1', 'TZP-'],
+    })
+    expect(await catalog.getProductsBatch([])).toEqual({ ok: true, items: [], missing: [] })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('batch: chunks at the backend cap of 50 distinct ids', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const ids = new URL(url).searchParams.get('ids')!.split(',')
+      return reply({ status: 200, body: batchBody(ids.map((id) => card(id, id))) })
+    })
+    const ids = Array.from({ length: 120 }, (_, i) => `TZP-${i}`)
+    const r = await catalog.getProductsBatch([...ids, ...ids.slice(0, 10)]) // 10 duplicates do not count
+    const sizes = fetchMock.mock.calls.map(
+      ([u]) => new URL(u).searchParams.get('ids')!.split(',').length,
+    )
+    expect(sizes).toEqual([50, 50, 20])
+    expect(r.ok && r.items.map((p) => p.productId)).toEqual(ids)
+    fetchMock.mockClear()
+    await catalog.getProductsBatch(ids.slice(0, 50))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // The longest allowed query stays under the backend's 2866 character bound.
+    const longest = Array.from(
+      { length: 50 },
+      (_, i) => `TZP-${String(i).padStart(2, '0')}${'z'.repeat(36)}`,
+    )
+    fetchMock.mockClear()
+    await catalog.getProductsBatch(longest, { pin: '560001' })
+    expect(new URL(fetchMock.mock.calls[0]![0]).search.length - 1).toBeLessThanOrEqual(2866)
+  })
+
+  it.each([
+    ['503', { status: 503, body: {} }],
+    ['400', { status: 400, body: { code: 'INVALID_REQUEST' } }],
+    ['429', { status: 429, body: {}, headers: { 'retry-after': '3' } }],
+    ['non-JSON 200', { status: 200, raw: '<html>' }],
+    ['malformed envelope', { status: 200, body: { items: 'x', missing: [] } }],
+    [
+      'missing is not an id list',
+      { status: 200, body: { resolvedReleaseId: 'R1', items: [], missing: ['x'] } },
+    ],
+  ])('batch %s: unavailable, one call, never N single reads', async (_name, r) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockImplementation(async () => reply(r as Reply))
+    expect(await catalog.getProductsBatch(['TZP-1', 'TZP-2'])).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    })
+    expect(await catalog.getRailProducts(['TZP-1', 'TZP-2'])).toEqual([])
+    expect(fetchMock.mock.calls.every(([u]) => u.includes('/v1/products:batch'))).toBe(true)
+  })
+
+  it('batch: a network error or timeout degrades the same way', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'))
+    expect(await catalog.getRailProducts(['TZP-1', 'TZP-2'])).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('never calls the backend for a malformed product or node id', async () => {
@@ -243,7 +360,9 @@ describe('catalog reads', () => {
   })
 
   it('category first page is cached, cursor pages are not', async () => {
-    fetchMock.mockResolvedValue(reply({ status: 200, body: { items: [], hasMore: false } }))
+    fetchMock.mockImplementation(async () =>
+      reply({ status: 200, body: { items: [], hasMore: false } }),
+    )
     await catalog.getCategoryProducts('TZC-000002', null)
     await catalog.getCategoryProducts('TZC-000002', 'next1')
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ next: { revalidate: 60 } })

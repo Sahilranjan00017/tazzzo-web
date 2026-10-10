@@ -98,6 +98,27 @@ test.describe('home', () => {
     )
   })
 
+  test('the rail is hydrated by batch reads only: no single read, merged and unknown ids omitted', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    const rail = page.getByRole('region', { name: 'Bestsellers' })
+    await expect(rail.getByRole('article')).toHaveCount(2)
+    // TZP-Merged-1 is merged into TZP-1002: the single read would follow it (two identical cards); the batch does not.
+    await expect(rail.locator('[data-product-id="TZP-1002"]')).toHaveCount(1)
+    const calls = await backendRequests()
+    const batch = calls.filter((r) => r.path === '/v1/products:batch')
+    expect(batch.length).toBeGreaterThan(0)
+    for (const call of batch) {
+      expect(new URLSearchParams(call.query).get('ids')).toBe(
+        'TZP-1001,TZP-9999,TZP-Merged-1,TZP-1002',
+      )
+    }
+    expect(calls.filter((r) => /^\/v1\/products\/(TZP-9999|TZP-Merged-1)$/.test(r.path))).toEqual(
+      [],
+    )
+  })
+
   test('a failing banner image becomes the branded placeholder; an out-of-grammar link is not clickable', async ({
     page,
   }) => {

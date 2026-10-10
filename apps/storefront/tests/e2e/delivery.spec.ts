@@ -87,6 +87,24 @@ test.describe('delivery location, signed out', () => {
     expect(await page.evaluate(() => document.cookie)).toBe('')
   })
 
+  test('the home rail is one batch read carrying the serviceable PIN, with located stock on its cards', async ({
+    page,
+  }) => {
+    await setPin(page, '560001')
+    await expect(page.getByTestId('location-status')).toContainText('we deliver')
+    const before = (await requests()).length
+    await page.goto('/')
+    await expect(
+      page.getByRole('region', { name: 'Bestsellers' }).getByRole('article'),
+    ).toHaveCount(2)
+    const reads = (await requests()).slice(before).filter((r) => r.path === '/v1/products:batch')
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.every((r) => r.query.endsWith('&pin=560001'))).toBe(true)
+    expect(
+      (await requests()).slice(before).filter((r) => /^\/v1\/products\/[^/]+$/.test(r.path)),
+    ).toEqual([])
+  })
+
   test('stock becomes real on low stock and out of stock products', async ({ page }) => {
     await setPin(page, '560001')
     await expect(page.getByTestId('location-status')).toContainText('we deliver')
