@@ -30,8 +30,18 @@ describe('proxy: CSP nonce plumbing', () => {
   })
 
   it('skips API routes, static assets and prefetches', () => {
-    const [matcher] = config.matcher
-    expect(matcher?.source).toBe('/((?!api|_next/static|_next/image|favicon.ico).*)')
+    for (const matcher of config.matcher) {
+      expect(matcher.source).toBe('/((?!api|_next/static|_next/image|favicon.ico).*)')
+    }
+  })
+
+  it('skips only a genuine prefetch (rsc=1 AND next-router-prefetch=1); a lone header still gets the CSP', () => {
+    expect(config.matcher).toEqual([
+      expect.objectContaining({ missing: [{ type: 'header', key: 'rsc', value: '1' }] }),
+      expect.objectContaining({
+        missing: [{ type: 'header', key: 'next-router-prefetch', value: '1' }],
+      }),
+    ])
   })
 })
 

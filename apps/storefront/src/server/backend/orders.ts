@@ -16,7 +16,7 @@ import {
   type OrderSlot,
   type OrderSummary,
 } from '@/lib/orders/model'
-import { sendJson, type SendResult } from '@/server/backend/client'
+import { routeLabel, sendJson, type SendResult } from '@/server/backend/client'
 
 /**
  * Typed calls over the customer order contract (tazzzo-backend `OrderController`, all bearer-authenticated; the
@@ -200,7 +200,7 @@ function parseOrder(data: unknown, path: string): OrderCallResult<Order> {
   const parsed = orderBody.safeParse(data)
   const order = parsed.success ? toOrder(parsed.data) : null
   if (order === null) {
-    console.warn(`storefront_backend_malformed path=${path}`)
+    console.warn(`storefront_backend_malformed path=${routeLabel(path)}`)
     return { ok: false, reason: 'unavailable', retryAfterSeconds: null }
   }
   return { ok: true, data: order }

@@ -49,14 +49,21 @@ export function proxy(request: NextRequest): NextResponse {
   return response
 }
 
+/**
+ * Runs for every page request except a genuine Next router prefetch: `rsc` exactly `1` AND `next-router-prefetch`
+ * exactly `1` (same rule as the storefront). The two entries are alternatives, so the proxy is skipped only when BOTH
+ * headers are present; a request with a lone prefetch header (or `purpose: prefetch`) is a full render and gets the CSP.
+ * Written out twice because Next reads this object statically.
+ */
 export const config = {
   matcher: [
     {
       source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
-      missing: [
-        { type: 'header', key: 'next-router-prefetch' },
-        { type: 'header', key: 'purpose', value: 'prefetch' },
-      ],
+      missing: [{ type: 'header', key: 'rsc', value: '1' }],
+    },
+    {
+      source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
+      missing: [{ type: 'header', key: 'next-router-prefetch', value: '1' }],
     },
   ],
 }

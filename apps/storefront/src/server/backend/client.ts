@@ -135,7 +135,7 @@ export function requestHeaders(
 }
 
 /** A log label without the query string (search text is customer input and is never logged). */
-function routeLabel(pathAndQuery: string): string {
+export function routeLabel(pathAndQuery: string): string {
   // A saved-address id is customer data: the label names the route, not the address.
   return (pathAndQuery.split('?')[0] ?? '')
     .replace(/\/addresses\/[^/]+/, '/addresses/{id}')
