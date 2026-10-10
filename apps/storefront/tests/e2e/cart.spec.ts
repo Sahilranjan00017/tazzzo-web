@@ -339,16 +339,9 @@ test.describe('signed in', () => {
     const over = await send('/api/cart/add', { productId: 'TZP-1001', quantity: 1 })
     expect(over.status()).toBe(422)
     expect(await over.json()).toMatchObject({ ok: false, error: 'quantity_limit' })
-    expect((await cartControl('x=1')).lines).toEqual(
-      [
-        {
-          sku: 'TZP-1001',
-          quantity: 20,
-          addedAt: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-      ].map((l) => ({ sku: l.sku, quantity: l.quantity })),
-    )
+    expect((await cartControl('x=1')).lines.map((l) => [l.sku, l.quantity])).toEqual([
+      ['TZP-1001', 20],
+    ])
   })
 
   test('CSRF: a forged cross-origin mutation is refused and changes nothing', async ({ page }) => {

@@ -11,6 +11,7 @@ const MEDIA = 'https://cdn.tazzzo.test/media'
 async function client() {
   vi.resetModules()
   vi.stubEnv('NODE_ENV', 'production')
+  vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // required in production
   vi.stubEnv('TAZZZO_API_BASE_URL', 'https://api.tazzzo.test')
   vi.stubEnv('TAZZZO_SITE_URL', 'https://www.tazzzo.test')
   vi.stubEnv('TAZZZO_MEDIA_BASE_URL', MEDIA)

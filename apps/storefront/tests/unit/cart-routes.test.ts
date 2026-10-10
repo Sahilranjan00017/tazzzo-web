@@ -41,6 +41,7 @@ const backendError = (status: number, code: string) =>
 async function routes(options: { accessExpiresInMs?: number } = {}) {
   vi.resetModules()
   vi.stubEnv('NODE_ENV', 'production')
+  vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // required in production
   vi.stubEnv('TAZZZO_API_BASE_URL', 'https://api.tazzzo.test')
   vi.stubEnv('TAZZZO_SITE_URL', SITE)
   vi.stubEnv('STOREFRONT_SESSION_SECRET', KEY)
@@ -154,20 +155,27 @@ describe('CSRF and session guard on every mutation', () => {
 })
 
 describe('input validation', () => {
-  it('refuses malformed JSON, wrong content types, oversized bodies and non-objects with 400', async () => {
+  it('refuses malformed JSON, wrong content types, non-objects with 400 and oversized bodies with 413', async () => {
     const r = await routes()
     const cases: Array<[unknown, Record<string, string>]> = [
       ['{not json', headers(r.csrf)],
       ['[]', headers(r.csrf)],
       ['"TZP-1"', headers(r.csrf)],
       [{ productId: 'TZP-1001', quantity: 1 }, headers(r.csrf, { 'content-type': 'text/plain' })],
-      [{ productId: 'TZP-1001', quantity: 1, pad: 'x'.repeat(5000) }, headers(r.csrf)],
     ]
     for (const [body, h] of cases) {
       const response = await r.add.POST(post('/api/cart/add', body as string, h))
       expect(response.status).toBe(400)
       expect(await response.json()).toEqual({ ok: false, error: 'bad_request' })
     }
+    const big = await r.add.POST(
+      post(
+        '/api/cart/add',
+        { productId: 'TZP-1001', quantity: 1, pad: 'x'.repeat(5000) },
+        headers(r.csrf),
+      ),
+    )
+    expect(big.status).toBe(413)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

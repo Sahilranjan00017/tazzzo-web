@@ -4,7 +4,7 @@ import type { CartError } from '@/lib/cart/messages'
 import type { CartOutcome } from '@/server/cart/service'
 import { readSession, type CustomerSession } from '@/server/session/cookies'
 import { isSameOriginMutation } from '@/server/session/csrf'
-import { badRequest, forbidden, json, readJsonObject } from '@/server/session/route'
+import { forbidden, json, readJsonObject, rejectBody } from '@/server/session/route'
 
 /** Shared plumbing of the `/api/cart/*` route handlers, on top of the session routes' (`server/session/route.ts`). */
 const STATUS: Record<CartError, number> = {
@@ -51,8 +51,8 @@ export async function mutation<T>(
   if (session === null)
     return respond({ ok: false, error: 'unauthenticated', retryAfterSeconds: null })
   const body = await readJsonObject(request)
-  if (!body.ok) return badRequest()
+  if (!body.ok) return rejectBody(body.status)
   const input = parse(body.value)
-  if (input === null) return badRequest()
+  if (input === null) return rejectBody(400)
   return respond(await run(session, input))
 }
