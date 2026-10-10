@@ -12,6 +12,9 @@ export const POST = (request: Request) =>
   orderMutation(request, parsePlaceBody, async (session, input) => {
     const outcome = await placeOrder(session, input)
     return outcome.ok
-      ? json(200, { ok: true, data: { orderId: outcome.orderId } })
+      ? json(200, {
+          ok: true,
+          data: { orderId: outcome.orderId, payablePaise: outcome.payablePaise },
+        })
       : respondPlaceError(outcome.error, outcome.retryAfterSeconds)
   })

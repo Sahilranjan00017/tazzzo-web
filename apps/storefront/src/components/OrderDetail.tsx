@@ -13,11 +13,14 @@ import { STATUS_TEXT, formatInstant, slotDate, type Order } from '@/lib/orders/m
 export function OrderDetail({
   order,
   placed,
+  reviewedPayablePaise = null,
   cancelOffered,
   csrfToken,
 }: {
   order: Order
   placed: boolean
+  /** The total the review showed, when it differs from the order's (display only, from the confirmation URL). */
+  reviewedPayablePaise?: number | null
   cancelOffered: boolean
   csrfToken: string
 }) {
@@ -40,6 +43,16 @@ export function OrderDetail({
       ) : (
         <h1 id="order-title">Your order</h1>
       )}
+      {placed &&
+        payable !== null &&
+        reviewedPayablePaise !== null &&
+        reviewedPayablePaise !== payable && (
+          <p className="notice" role="note" data-testid="order-total-changed">
+            Your total changed from {formatPaise(reviewedPayablePaise) ?? ''} to{' '}
+            {formatPaise(payable) ?? ''}: your benefits and prices are checked again when an order
+            is placed, and this is the amount of your order.
+          </p>
+        )}
       <p className="order__meta">
         <span className="badge" data-testid="order-status" data-status={order.status}>
           {STATUS_TEXT[order.status]}

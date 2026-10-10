@@ -192,6 +192,7 @@ test('sign out: backend session revoked, cookie gone, header and /account signed
   await signIn(page)
   await expect(page).toHaveURL(/\/account$/)
   const before = (await control('accessTtl=900')).logoutCount
+  await page.locator('body[data-hydrated]').waitFor({ state: 'attached' }) // LogoutButton is onClick-only
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page).toHaveURL(/\/$/)
   await expect(page.getByTestId('signin-link')).toBeVisible()

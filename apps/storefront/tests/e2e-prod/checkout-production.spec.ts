@@ -56,6 +56,12 @@ test.beforeEach(async () => {
   await control('orders', 'reset=1')
 })
 
+/** A new visitor address for the rest of a test: the review page and the order routes are in the stricter bucket. */
+async function nextVisitor(page: Page) {
+  counter += 1
+  await page.setExtraHTTPHeaders({ 'x-forwarded-for': `203.0.113.${40 + counter}` })
+}
+
 async function toReview(page: Page) {
   await page.goto('/login?next=%2Faccount%2Faddresses%2Fnew')
   await page.getByLabel('Mobile number').fill('9876543210')
@@ -77,7 +83,7 @@ async function toReview(page: Page) {
   await page.waitForURL(/\/account\/addresses$/)
   await page.goto('/p/TZP-1001')
   await page.getByRole('button', { name: 'Add to cart' }).click()
-  await expect(page.getByTestId('add-status')).toContainText('to your cart')
+  await expect(page.getByTestId('add-status')).toHaveText(/^Added/)
   await page.goto('/checkout/delivery')
   await page
     .getByRole('radio', { name: /Morning/ })
@@ -87,7 +93,7 @@ async function toReview(page: Page) {
   await expect(page.getByTestId('delivery-saved')).toContainText('saved for the next step')
   await page.getByTestId('delivery-continue').click()
   await expect(page.getByRole('heading', { level: 1, name: 'Review your order' })).toBeVisible()
-  await page.waitForLoadState('networkidle') // the buttons only work once the page has hydrated
+  await page.locator('body[data-hydrated]').waitFor({ state: 'attached' }) // the buttons only work once the page has hydrated
 }
 
 test('review, place and confirmation under the strict CSP: Secure cookies, trusted-caller quote and order calls, no-store, no violations', async ({
@@ -102,6 +108,7 @@ test('review, place and confirmation under the strict CSP: Secure cookies, trust
   })
   page.on('pageerror', (e) => errors.push(String(e)))
   await toReview(page)
+  await nextVisitor(page)
   const review = await page.goto('/checkout')
   expect(review?.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-")
   expect(review?.headers()['cache-control']).toContain('no-store')
@@ -146,6 +153,7 @@ test('review, place and confirmation under the strict CSP: Secure cookies, trust
 test('a double click is one order and one placement request', async ({ page }) => {
   await visitor(page)
   await toReview(page)
+  await nextVisitor(page)
   await page.getByTestId('checkout-place').dblclick()
   await expect(page).toHaveURL(/placed=1$/)
   const s = await state()
@@ -159,6 +167,7 @@ test('the answer lost after the order committed: status unknown, then the retry 
 }) => {
   await visitor(page)
   await toReview(page)
+  await nextVisitor(page)
   await control('orders', 'fault=after:503')
   await page.getByTestId('checkout-place').click()
   await expect(page.getByTestId('checkout-error')).toContainText('could not confirm whether')
@@ -178,6 +187,7 @@ test('price change in production: the new total is shown and needs an explicit c
 }) => {
   await visitor(page)
   await toReview(page)
+  await nextVisitor(page)
   await control('cart', 'sku=TZP-1001&price=52900')
   await page.getByTestId('checkout-place').click()
   await expect(page.getByTestId('checkout-error')).toContainText('A price changed')
@@ -227,6 +237,7 @@ test('API guards: CSRF first, then the session; a different customer gets a 404 
 
   // The first customer places an order; no Cancel control is offered (no window configured), the API refuses gracefully.
   await toReview(page)
+  await nextVisitor(page)
   await page.getByTestId('checkout-place').click()
   await expect(page).toHaveURL(/placed=1$/)
   await expect(page.getByTestId('cancel-open')).toHaveCount(0)
@@ -291,6 +302,7 @@ test('phone width: review and confirmation fit, the place button is a full-width
   await visitor(page)
   await page.setViewportSize({ width: 375, height: 800 })
   await toReview(page)
+  await nextVisitor(page)
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
   ).toBeLessThanOrEqual(0)

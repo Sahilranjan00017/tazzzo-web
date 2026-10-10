@@ -3,6 +3,7 @@ import type { OrderError } from '@/lib/orders/messages'
 import {
   ORDER_PAGE_SIZE,
   cancelOffered,
+  justPlaced,
   isOrderCursor,
   isOrderId,
   type CancelReason,
@@ -71,6 +72,11 @@ export async function cancelMyOrder(
       isUnauthenticated: (o) => !o.ok && o.error === 'unauthenticated',
     },
   )
+}
+
+/** Whether `?placed=1` may say the order was just placed (see `justPlaced`). */
+export function justPlacedNow(order: Order, now = Date.now()): boolean {
+  return justPlaced(order, now)
 }
 
 /** Whether to OFFER a Cancel control on this order (see `cancelOffered`; the backend still decides every request). */

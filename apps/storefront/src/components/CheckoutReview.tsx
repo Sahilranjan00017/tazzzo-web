@@ -19,6 +19,7 @@ import type { ReviewView } from '@/lib/checkout/model'
 import { formatSlotDate } from '@/lib/delivery/slots'
 import { formatPaise } from '@/lib/format'
 import { hardNavigate } from '@/lib/navigate'
+import { clearPendingOrder, markPendingOrder, readPendingOrder } from '@/lib/pending-order'
 import { postJson } from '@/lib/post-json'
 
 /**
@@ -54,20 +55,47 @@ export function CheckoutReview({ view, csrfToken }: { view: ReviewView; csrfToke
     setPlacing(true)
     setError(null)
     setStatus('Placing your order…')
-    const reply = await postJson<{ orderId?: unknown }>('/api/orders', csrfToken, {
-      quoteId: view.quoteId,
-      cartVersion: view.cartVersion,
-      addressId: view.addressId,
-      slotId: view.slotId,
-    })
+    const reply = await postJson<{ orderId?: unknown; payablePaise?: unknown }>(
+      '/api/orders',
+      csrfToken,
+      {
+        quoteId: view.quoteId,
+        cartVersion: view.cartVersion,
+        addressId: view.addressId,
+        slotId: view.slotId,
+      },
+    )
     const orderId = reply.data?.orderId
     if (reply.ok && typeof orderId === 'string' && /^ORD_[A-Za-z0-9_-]{6,64}$/.test(orderId)) {
       setDone(true)
+      clearPendingOrder()
       setStatus('Your order is placed. Opening the confirmation…')
-      hardNavigate(`/orders/${encodeURIComponent(orderId)}?placed=1`)
+      // The backend checks benefits again when it places the order and does not refuse a different amount: if the
+      // order's total is not the one reviewed, the confirmation says so (the reviewed total is display only).
+      const placed = reply.data?.payablePaise
+      const reviewed = view.payablePaise
+      const differs =
+        typeof placed === 'number' &&
+        reviewed !== null &&
+        Number.isSafeInteger(reviewed) &&
+        placed !== reviewed
+      hardNavigate(
+        `/orders/${encodeURIComponent(orderId)}?placed=1${differs ? `&was=${reviewed}` : ''}`,
+      )
       return
     }
-    const code: PlaceError = isPlaceError(reply.error) ? reply.error : 'unavailable'
+    // Only a closed code from OUR server is a definite answer. Anything else (the network failing, a proxy's HTML
+    // error page, a truncated body, an unknown code) may have come after the backend committed: status unknown.
+    let code: PlaceError = !reply.transport && isPlaceError(reply.error) ? reply.error : 'unknown'
+    // With an earlier attempt unresolved, a cart or choice that "changed" is most likely that order emptying them.
+    if (
+      readPendingOrder() !== null &&
+      (code === 'cart_changed' || code === 'choice_changed' || code === 'quote_expired')
+    ) {
+      code = 'unknown'
+    }
+    if (code === 'unknown') markPendingOrder(view.quoteId)
+    else if (readPendingOrder()?.quoteId === view.quoteId) clearPendingOrder()
     setStatus('')
     if (code === 'unauthenticated') {
       hardNavigate(signInUrl('/checkout'))
@@ -220,8 +248,9 @@ export function CheckoutReview({ view, csrfToken }: { view: ReviewView; csrfToke
           <strong data-testid="checkout-total">{totalText || '—'}</strong>
         </p>
         <p className="cart-summary__hint">
-          This is your total for these items. It can change if a price changes before you place the
-          order; you will see the new total and be asked to confirm it.
+          This is your total for these items. If a price changes before you place the order, you
+          will see the new total and be asked to confirm it. Benefits are checked again when the
+          order is placed, so the confirmation shows the final amount.
         </p>
         <button
           type="button"

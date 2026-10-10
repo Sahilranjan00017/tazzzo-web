@@ -1653,7 +1653,12 @@ export class FakeBackend {
         }
       }),
       subtotal: quote.subtotal,
-      discount: quote.discount,
+      // Benefits are evaluated AGAIN at placement (OrderDraftAssembler) and the order keeps that result, even when it is not the
+      // quote's advisory preview: the backend does not refuse a different discount.
+      discount:
+        this.benefitBps > 0
+          ? Math.max(1, Math.floor((quote.subtotal * this.benefitBps) / 10_000))
+          : 0,
       // DeliveryAddress is NON_NULL: absent optional parts are absent, not null.
       address: {
         label: address.label,

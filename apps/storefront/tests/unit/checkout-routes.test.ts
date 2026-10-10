@@ -170,7 +170,7 @@ describe('POST /api/orders: placing', () => {
     const res = await m.orders.POST(post('/api/orders', PLACE, headers(r.csrf)))
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
-    expect(await res.json()).toEqual({ ok: true, data: { orderId: ORDER } })
+    expect(await res.json()).toEqual({ ok: true, data: { orderId: ORDER, payablePaise: 99800 } })
     expect(calls()).toEqual([`GET /v1/customer/cart?addressId=${ADDR}`, 'POST /v1/customer/orders'])
     // Exactly the backend contract: the quote, COD, the slot. No customer id, no price, no total, no idempotency header
     // (placement is idempotent by (customer, quote); the backend has no such header on this route).
@@ -178,6 +178,25 @@ describe('POST /api/orders: placing', () => {
     expect(sentHeaders(1)).toMatchObject({ Authorization: expect.stringMatching(/^Bearer AT\./) })
     expect(Object.keys(sentHeaders(1)).map((k) => k.toLowerCase())).not.toContain('idempotency-key')
     expect(Object.keys(sentHeaders(1)).map((k) => k.toLowerCase())).not.toContain('if-match')
+  })
+
+  it('marks the attempt as pending BEFORE the placement request is sent, so a lost answer leaves the mark', async () => {
+    const r = await loadEnv()
+    const m = await routes()
+    await choose(r)
+    let atSend: string | undefined
+    routeBackend({
+      [`GET /v1/customer/cart?addressId=${ADDR}`]: () => reply(200, cartBody(3)),
+      'POST /v1/customer/orders': () => {
+        atSend = undefined
+        void r.cookies.readCheckoutChoice().then((c) => (atSend = c?.placing))
+        return backendError(503, 'SERVICE_UNAVAILABLE')
+      },
+    })
+    await m.orders.POST(post('/api/orders', PLACE, headers(r.csrf)))
+    await Promise.resolve()
+    expect(atSend).toBe(QUOTE)
+    expect((await r.cookies.readCheckoutChoice())?.placing).toBe(QUOTE)
   })
 
   it('clears the checkout choice after success; the location and session cookies are untouched', async () => {
@@ -323,7 +342,7 @@ describe('POST /api/orders: placing', () => {
       'POST /v1/customer/orders': () => reply(200, orderBody()),
     })
     const res = await m.orders.POST(post('/api/orders', PLACE, headers(r.csrf)))
-    expect(await res.json()).toEqual({ ok: true, data: { orderId: ORDER } })
+    expect(await res.json()).toEqual({ ok: true, data: { orderId: ORDER, payablePaise: 99800 } })
     expect(calls()).toEqual([
       `GET /v1/customer/cart?addressId=${ADDR}`,
       'POST /v1/auth/refresh',
@@ -393,7 +412,7 @@ describe('the checkout cookie across outcomes (the idempotency key lifecycle)', 
     // the retry: same body, same quote, and this time the answer arrives
     happyBackend()
     const retry = await m.orders.POST(post('/api/orders', PLACE, headers(r.csrf)))
-    expect(await retry.json()).toEqual({ ok: true, data: { orderId: ORDER } })
+    expect(await retry.json()).toEqual({ ok: true, data: { orderId: ORDER, payablePaise: 99800 } })
     const quotes = fetchMock.mock.calls
       .filter(([, init]) => init?.method === 'POST')
       .map(([, init]) => JSON.parse(String(init!.body)).quoteId)
@@ -458,7 +477,7 @@ describe('the checkout cookie across outcomes (the idempotency key lifecycle)', 
       'POST /v1/customer/orders': () => reply(200, orderBody()),
     })
     const retry = await m.orders.POST(post('/api/orders', PLACE, headers(r.csrf)))
-    expect(await retry.json()).toEqual({ ok: true, data: { orderId: ORDER } })
+    expect(await retry.json()).toEqual({ ok: true, data: { orderId: ORDER, payablePaise: 99800 } })
     expect(calls()).toEqual(['POST /v1/customer/orders'])
     expect(jar.get('__Host-tz_checkout')).toBeUndefined()
   })

@@ -21,6 +21,8 @@ import {
   isCancelReason,
   isOrderCursor,
   isOrderId,
+  justPlaced,
+  reviewedPaise,
   slotDate,
   statusOf,
   type Order,
@@ -91,6 +93,29 @@ describe('order ids and cursors (the grammar that guards every path and query)',
     expect(statusOf('OUT_FOR_DELIVERY')).toBe('OUT_FOR_DELIVERY')
     expect(statusOf('RETURNED')).toBe('UNKNOWN')
     expect(statusOf('CREATED')).toBe('UNKNOWN')
+  })
+})
+
+describe('the thank-you page', () => {
+  const at = Date.parse('2026-10-11T04:30:20.000Z')
+  const o = (status: 'CONFIRMED' | 'CANCELLED' | 'DELIVERED', confirmedAt: string | null) => ({
+    status,
+    confirmedAt,
+  })
+  it('is for a confirmed order confirmed within ten minutes only', () => {
+    expect(justPlaced(o('CONFIRMED', '2026-10-11T04:30:20.000Z'), at + 1000)).toBe(true)
+    expect(justPlaced(o('CONFIRMED', '2026-10-11T04:30:20.000Z'), at + 600_000)).toBe(true)
+    expect(justPlaced(o('CONFIRMED', '2026-10-11T04:30:20.000Z'), at + 600_001)).toBe(false)
+    expect(justPlaced(o('CONFIRMED', '2026-10-11T04:30:20.000Z'), at - 120_000)).toBe(false)
+    expect(justPlaced(o('CANCELLED', '2026-10-11T04:30:20.000Z'), at)).toBe(false)
+    expect(justPlaced(o('DELIVERED', '2026-10-11T04:30:20.000Z'), at)).toBe(false)
+    expect(justPlaced(o('CONFIRMED', null), at)).toBe(false)
+    expect(justPlaced(o('CONFIRMED', 'soon'), at)).toBe(false)
+  })
+  it('reads the reviewed total from the URL as plain digits only', () => {
+    expect(reviewedPaise('115750')).toBe(115750)
+    for (const bad of ['', '-1', '1.5', '1e3', '12345678901234', 'x', undefined, ['1']])
+      expect(reviewedPaise(bad)).toBeNull()
   })
 })
 
@@ -290,6 +315,24 @@ describe('order detail', () => {
     expect(out).toMatchObject({ ok: false, error })
     expect(JSON.stringify(out)).not.toContain(SECRET_TEXT)
     expect(logs.join('\n')).not.toContain(SECRET_TEXT)
+  })
+})
+
+describe('logs', () => {
+  it('never carry an order id', async () => {
+    const r = await loadEnv()
+    const { s, session } = await service(r)
+    routeBackend({
+      [`GET /v1/customer/orders/${ORDER}`]: () => backendError(503, 'SERVICE_UNAVAILABLE'),
+    })
+    await s.pageOrder(session, ORDER)
+    routeBackend({
+      [`POST /v1/customer/orders/${ORDER}/cancel`]: () => backendError(503, 'SERVICE_UNAVAILABLE'),
+    })
+    await s.cancelMyOrder(session, ORDER, 'OTHER')
+    const text = logs.join('\n')
+    expect(text).toContain('path=/v1/customer/orders/{id}')
+    expect(text).not.toContain(ORDER)
   })
 })
 

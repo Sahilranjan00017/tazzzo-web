@@ -325,6 +325,20 @@ allows customer cancellation only inside `tazzzo.orders.customer-cancel-window-s
 `STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS` (unset or 0 = no control) and the order is CONFIRMED and inside it; the backend still decides every request, and a refusal is
 shown as "Cancelling is not available for this order" (not an error code).
 
+**Unknown outcomes and the lost response.** Only a closed error code from this site's own route is a definite answer. A browser-to-Next failure, a proxy's HTML
+error page, a truncated or unrecognised body or a 5xx is **status unknown** ("check your orders"), never "no order was placed". Defences, in layers: (1) the route marks the
+attempt `placing` in the sealed cookie BEFORE it calls the backend (kept on unknown, cleared on any definite answer); (2) the browser keeps its own mark in this tab's
+`sessionStorage` (`PendingOrderNotice` in the layout shows "An order you just tried to place may have gone through" on every page until `/orders` has been visited or the
+customer says they checked), because a lost response also loses the server's Set-Cookie; (3) while a mark exists, a "cart changed" / "choice changed" answer (an order
+that went through has emptied the cart) is shown as unknown and points to Orders instead of refreshing into an empty cart. Re-placing the same quote can only return that
+one order.
+
+**Known limits (reviewed).** (a) The backend re-evaluates Benefits at placement and keeps the result even when it differs from the quote's advisory preview (it does not
+answer `PRICE_CHANGED` for it) and offers no pre-commit check, so a total that moves because of a benefit cannot be refused. The review says benefits are re-checked; the
+placing screen compares the order's payable with the reviewed one and the confirmation shows "Your total changed from X to Y" (the reviewed amount travels in `?was=`,
+display only). (b) A retry after an unknown outcome places the quote the customer saw, even if the cart changed since (the pre-check is skipped for exactly that quote).
+(c) `?placed=1` says "your order is placed" only for a CONFIRMED order confirmed in the last 10 minutes.
+
 **Not built (not in the brief's contract).** Support cases (`/v1/customer/support/*` exist; no screen yet), account deletion, reorder, invoices, payment methods other than COD.
 
 ## Images

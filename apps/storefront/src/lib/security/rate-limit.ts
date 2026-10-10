@@ -146,6 +146,8 @@ export function isExpensivePath(pathname: string, searchParams: URLSearchParams)
   // Placing and cancelling an order each cost several backend calls (cart check, reservation transaction): every
   // mutating order and checkout route (`/api/orders*`, `/api/checkout/*`) is in the stricter bucket.
   if (pathname.startsWith('/api/orders') || pathname.startsWith('/api/checkout/')) return true
+  // The review page itself: every render reads the cart, address and slots and writes (or replays) a quote.
+  if (pathname === '/checkout') return true
   return pathname.startsWith('/c/') && searchParams.has('cursor')
 }
 

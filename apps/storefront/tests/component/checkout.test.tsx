@@ -7,13 +7,15 @@ import { CheckoutReview } from '@/components/CheckoutReview'
 import { DeliveryChoice } from '@/components/DeliveryChoice'
 import { OrderDetail } from '@/components/OrderDetail'
 import { OrderList } from '@/components/OrderList'
+import { PendingOrderNotice } from '@/components/PendingOrderNotice'
+import { clearPendingOrder, markPendingOrder, readPendingOrder } from '@/lib/pending-order'
 import { RefreshReview } from '@/components/RefreshReview'
 import type { ReviewView } from '@/lib/checkout/model'
 import type { Order, OrderPage } from '@/lib/orders/model'
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }))
 const navigate = vi.hoisted(() => vi.fn())
-vi.mock('next/navigation', () => ({ useRouter: () => router }))
+vi.mock('next/navigation', () => ({ useRouter: () => router, usePathname: () => '/cart' }))
 vi.mock('@/lib/navigate', () => ({ hardNavigate: navigate }))
 vi.mock('next/link', () => ({
   default: ({
@@ -39,6 +41,7 @@ const CSRF = 'c'.repeat(43)
 const ORDER = 'ORD_abcdefghijklmnopqrstu'
 
 beforeEach(() => {
+  clearPendingOrder()
   fetchMock.mockReset()
   navigate.mockReset()
   router.refresh.mockReset()
@@ -201,7 +204,7 @@ describe('CheckoutReview', () => {
     render(<CheckoutReview view={view()} csrfToken={CSRF} />)
     await userEvent.setup().click(placeButton())
     await waitFor(() =>
-      expect(screen.getByTestId('checkout-error')).toHaveTextContent('No order was placed'),
+      expect(screen.getByTestId('checkout-error')).toHaveTextContent('could not confirm whether'),
     )
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -315,16 +318,89 @@ describe('CheckoutReview', () => {
     expect(placeButton()).toHaveAttribute('aria-disabled', 'false')
   })
 
-  it('a network failure is "no order was placed" with a retry (the request never completed)', async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError('network'))
+  it.each([
+    ['the network failing', () => Promise.reject(new TypeError('network'))],
+    [
+      'a proxy HTML 502 page',
+      () => Promise.resolve(new Response('<html>502 Bad Gateway</html>', { status: 502 })),
+    ],
+    [
+      'a framework 500 page',
+      () => Promise.resolve(new Response('Internal Server Error', { status: 500 })),
+    ],
+    ['a truncated body', () => Promise.resolve(new Response('{"ok":fal', { status: 200 }))],
+    ['a 504 with no body', () => Promise.resolve(new Response(null, { status: 504 }))],
+  ])(
+    '%s is status UNKNOWN (the backend may have committed), never "no order was placed"',
+    async (_n, answer) => {
+      fetchMock.mockImplementationOnce(answer)
+      render(<CheckoutReview view={view()} csrfToken={CSRF} />)
+      await userEvent.setup().click(placeButton())
+      const alert = screen.getByTestId('checkout-error')
+      await waitFor(() =>
+        expect(alert).toHaveTextContent('could not confirm whether your order was placed'),
+      )
+      expect(alert).not.toHaveTextContent('No order was placed')
+      expect(screen.getByTestId('checkout-to-orders')).toHaveAttribute('href', '/orders')
+      expect(readPendingOrder()).toEqual({ quoteId: 'CHKQ_abcdefghijklmnopqrstu' })
+      expect(placeButton()).toHaveAttribute('aria-disabled', 'false')
+    },
+  )
+
+  it('after an unknown outcome, a "cart changed" answer (the order emptied it) points to Orders instead of refreshing', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValueOnce(
+        json(409, { ok: false, error: 'cart_changed', retryAfterSeconds: null }),
+      )
+    render(<CheckoutReview view={view()} csrfToken={CSRF} />)
+    const user = userEvent.setup()
+    await user.click(placeButton())
+    await waitFor(() => expect(screen.getByTestId('checkout-to-orders')).toBeInTheDocument())
+    await user.click(placeButton())
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(screen.getByTestId('checkout-error')).toHaveTextContent('could not confirm whether'),
+    )
+    expect(router.refresh).not.toHaveBeenCalled()
+    expect(readPendingOrder()).not.toBeNull()
+  })
+
+  it('a success clears the pending mark; the total that differs from the reviewed one is carried to the confirmation', async () => {
+    markPendingOrder('CHKQ_abcdefghijklmnopqrstu')
+    fetchMock.mockResolvedValueOnce(
+      json(200, { ok: true, data: { orderId: ORDER, payablePaise: 100000 } }),
+    )
     render(<CheckoutReview view={view()} csrfToken={CSRF} />)
     await userEvent.setup().click(placeButton())
     await waitFor(() =>
-      expect(screen.getByTestId('checkout-error')).toHaveTextContent(
-        'could not place your order right now',
-      ),
+      expect(navigate).toHaveBeenCalledWith(`/orders/${ORDER}?placed=1&was=115750`),
     )
-    expect(placeButton()).toHaveAttribute('aria-disabled', 'false')
+    expect(readPendingOrder()).toBeNull()
+  })
+
+  it('an equal total adds nothing to the confirmation address', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json(200, { ok: true, data: { orderId: ORDER, payablePaise: 115750 } }),
+    )
+    render(<CheckoutReview view={view()} csrfToken={CSRF} />)
+    await userEvent.setup().click(placeButton())
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(`/orders/${ORDER}?placed=1`))
+  })
+
+  it('the page tells that benefits are checked again at placement (it does not promise a confirmation it cannot give)', () => {
+    render(<CheckoutReview view={view()} csrfToken={CSRF} />)
+    expect(document.body).toHaveTextContent('Benefits are checked again when the order is placed')
+  })
+
+  it('PendingOrderNotice shows for an unresolved attempt, offers Orders, and clears when checked', async () => {
+    markPendingOrder('CHKQ_abcdefghijklmnopqrstu')
+    render(<PendingOrderNotice />)
+    expect(await screen.findByTestId('pending-order')).toHaveTextContent('may have gone through')
+    expect(screen.getByTestId('pending-order-link')).toHaveAttribute('href', '/orders')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'I have checked' }))
+    expect(screen.queryByTestId('pending-order')).not.toBeInTheDocument()
+    expect(readPendingOrder()).toBeNull()
   })
 
   it('a session that ended goes to sign-in and back to the review', async () => {
@@ -343,7 +419,7 @@ describe('CheckoutReview', () => {
     render(<CheckoutReview view={view()} csrfToken={CSRF} />)
     await userEvent.setup().click(placeButton())
     await waitFor(() =>
-      expect(screen.getByTestId('checkout-error')).toHaveTextContent('No order was placed'),
+      expect(screen.getByTestId('checkout-error')).toHaveTextContent('could not confirm whether'),
     )
     expect(document.body).not.toHaveTextContent('DROP TABLE')
     expect(document.body).not.toHaveTextContent('secret')
@@ -616,6 +692,43 @@ describe('OrderDetail', () => {
     )
     expect(screen.getByText('Out for delivery 11 Oct 2026, 11:00 am')).toBeInTheDocument()
     expect(screen.getByText('Delivered 11 Oct 2026, 12:00 pm')).toBeInTheDocument()
+  })
+})
+
+describe('OrderDetail: a total that changed at placement', () => {
+  it('says so on the confirmation, with both amounts; nothing when equal or when not just placed', () => {
+    const { rerender } = render(
+      <OrderDetail
+        order={order()}
+        placed
+        reviewedPayablePaise={110000}
+        cancelOffered={false}
+        csrfToken={CSRF}
+      />,
+    )
+    expect(screen.getByTestId('order-total-changed')).toHaveTextContent(
+      'changed from ₹1,100 to ₹1,041.75',
+    )
+    rerender(
+      <OrderDetail
+        order={order()}
+        placed
+        reviewedPayablePaise={104175}
+        cancelOffered={false}
+        csrfToken={CSRF}
+      />,
+    )
+    expect(screen.queryByTestId('order-total-changed')).not.toBeInTheDocument()
+    rerender(
+      <OrderDetail
+        order={order()}
+        placed={false}
+        reviewedPayablePaise={110000}
+        cancelOffered={false}
+        csrfToken={CSRF}
+      />,
+    )
+    expect(screen.queryByTestId('order-total-changed')).not.toBeInTheDocument()
   })
 })
 

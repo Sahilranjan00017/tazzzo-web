@@ -37,7 +37,7 @@ export type OrderCallResult<T> =
   { ok: true; data: T } | { ok: false; reason: OrderError; retryAfterSeconds: number | null }
 
 export type PlaceCallResult =
-  | { ok: true; data: { orderId: string } }
+  | { ok: true; data: { orderId: string; payablePaise: number | null } }
   | { ok: false; reason: PlaceError; retryAfterSeconds: number | null }
 
 const paise = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -317,5 +317,8 @@ export async function placeCodOrder(
     console.warn('storefront_backend_malformed path=/v1/customer/orders')
     return { ok: false, reason: 'unknown', retryAfterSeconds: null }
   }
-  return { ok: true, data: { orderId: order.orderId } }
+  return {
+    ok: true,
+    data: { orderId: order.orderId, payablePaise: order.money?.payablePaise ?? null },
+  }
 }

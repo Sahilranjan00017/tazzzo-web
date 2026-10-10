@@ -159,3 +159,20 @@ export function slotDate(slotId: string): string | null {
   const date = slotId.split('~')[1]
   return date !== undefined && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date) ? date : null
 }
+
+/** How long after confirmation an order still counts as "just placed" for the `?placed=1` thank-you page. */
+export const JUST_PLACED_MS = 10 * 60 * 1000
+
+/** A confirmed order, confirmed within the last ten minutes: the only kind the thank-you page may claim was just placed. */
+export function justPlaced(order: Pick<Order, 'status' | 'confirmedAt'>, now: number): boolean {
+  if (order.status !== 'CONFIRMED' || order.confirmedAt === null) return false
+  const confirmed = Date.parse(order.confirmedAt)
+  return (
+    Number.isFinite(confirmed) && now - confirmed <= JUST_PLACED_MS && now - confirmed >= -60_000
+  )
+}
+
+/** A rupee amount in paise carried in the confirmation URL (display only), or null. */
+export function reviewedPaise(raw: unknown): number | null {
+  return typeof raw === 'string' && /^[0-9]{1,12}$/.test(raw) ? Number(raw) : null
+}

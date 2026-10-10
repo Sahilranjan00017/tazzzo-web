@@ -213,7 +213,8 @@ function toView(
 }
 
 export type PlaceOutcome =
-  { ok: true; orderId: string } | { ok: false; error: PlaceError; retryAfterSeconds: number | null }
+  | { ok: true; orderId: string; payablePaise: number | null }
+  | { ok: false; error: PlaceError; retryAfterSeconds: number | null }
 
 const failPlace = (error: PlaceError, retryAfterSeconds: number | null = null): PlaceOutcome => ({
   ok: false,
@@ -255,6 +256,14 @@ export async function placeOrder(
     return failPlace('choice_changed')
   }
   const retrying = choice.placing === input.quoteId
+  // Mark the attempt BEFORE anything is sent: whatever happens to the answer, the server's own cookie already says this
+  // quote may be on its way. (If the response is lost the browser never sees this cookie; the screen has its own marker
+  // for that, see `PendingOrderNotice`.)
+  let current: CheckoutChoice = choice
+  if (!retrying) {
+    await setCheckoutPlacing(choice, input.quoteId)
+    current = { ...choice, placing: input.quoteId }
+  }
   const outcome = await withAccessToken<PlaceOutcome>(
     session,
     async (token) => {
@@ -277,7 +286,7 @@ export async function placeOrder(
         deliverySlotId: choice.slotId,
       })
       return placed.ok
-        ? { ok: true, orderId: placed.data.orderId }
+        ? { ok: true, orderId: placed.data.orderId, payablePaise: placed.data.payablePaise }
         : failPlace(placed.reason, placed.retryAfterSeconds)
     },
     {
@@ -289,10 +298,10 @@ export async function placeOrder(
   if (outcome.ok || outcome.error === 'already_ordered') {
     await clearCheckoutChoice()
   } else if (ENDS_THE_QUOTE.has(outcome.error)) {
-    await rotateCheckoutQuoteKey(choice)
+    await rotateCheckoutQuoteKey(current)
   } else {
-    // Unknown: remember it, so the retry is recognised. Anything else is a definite "not placed": forget it.
-    await setCheckoutPlacing(choice, outcome.error === 'unknown' ? input.quoteId : undefined)
+    // Unknown: keep it, so the retry is recognised. Anything else is a definite "not placed": forget it.
+    await setCheckoutPlacing(current, outcome.error === 'unknown' ? input.quoteId : undefined)
   }
   return outcome
 }

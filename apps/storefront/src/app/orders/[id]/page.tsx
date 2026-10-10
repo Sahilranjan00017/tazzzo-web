@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { OrderDetail } from '@/components/OrderDetail'
-import { isOrderId } from '@/lib/orders/model'
-import { cancelOfferedFor, pageOrder } from '@/server/orders/service'
+import { isOrderId, reviewedPaise } from '@/lib/orders/model'
+import { cancelOfferedFor, justPlacedNow, pageOrder } from '@/server/orders/service'
 import { readSession } from '@/server/session/cookies'
 import { accessTokenUsable } from '@/server/session/service'
 
@@ -42,7 +42,8 @@ export default async function OrderPage({ params, searchParams }: PageProps<'/or
   return (
     <OrderDetail
       order={outcome.data}
-      placed={placed}
+      placed={placed && justPlacedNow(outcome.data)}
+      reviewedPayablePaise={reviewedPaise(query.was)}
       cancelOffered={cancelOfferedFor(outcome.data)}
       csrfToken={session.csrf}
     />

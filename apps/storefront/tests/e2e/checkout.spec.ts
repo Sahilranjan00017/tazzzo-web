@@ -37,6 +37,7 @@ const control = (name: string, query: string) =>
 
 async function signIn(page: Page, phone = '9876543210', next?: string) {
   await page.goto(next ? `/login?next=${encodeURIComponent(next)}` : '/login')
+  await page.locator('body[data-hydrated]').waitFor({ state: 'attached' }) // the buttons only work once the page has hydrated
   await page.getByLabel('Mobile number').fill(phone)
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('6-digit code').fill('123456')
@@ -64,7 +65,7 @@ async function addToCart(page: Page, sku = 'TZP-1001', times = 1) {
   await page.goto(`/p/${sku}`)
   for (let i = 0; i < times; i++) {
     await page.getByRole('button', { name: 'Add to cart' }).click()
-    await expect(page.getByTestId('add-status')).toContainText('to your cart')
+    await expect(page.getByTestId('add-status')).toHaveText(/^Added/)
   }
 }
 
@@ -93,7 +94,7 @@ async function toReview(page: Page, phone?: string) {
   await page.getByTestId('delivery-continue').click()
   await expect(page).toHaveURL(/\/checkout$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Review your order' })).toBeVisible()
-  await page.waitForLoadState('networkidle') // the buttons only work once the page has hydrated
+  await page.locator('body[data-hydrated]').waitFor({ state: 'attached' }) // the buttons only work once the page has hydrated
 }
 
 test.beforeEach(async () => {
@@ -154,7 +155,6 @@ test.describe('signed out and incomplete', () => {
     await expect(page).toHaveURL(/\/cart$/)
     await expect(page.getByText('Your cart is empty.')).toBeVisible()
     await addToCart(page)
-    await page.waitForLoadState('networkidle') // the add has settled (and the header refresh with it)
     await page.goto('/checkout')
     await expect(page).toHaveURL(/\/checkout\/delivery$/, { timeout: 15_000 })
   })
@@ -417,6 +417,81 @@ test.describe('placing twice, retries and unknown outcomes', () => {
     await page.goto(reviewUrl)
     await expect(page).toHaveURL(/\/cart$/)
     expect((await state()).orders).toHaveLength(1)
+  })
+})
+
+test.describe('lost answers and totals that move', () => {
+  test('the answer is lost AFTER the backend committed (a proxy 502 page): status unknown everywhere until Orders was looked at; no second order', async ({
+    page,
+  }) => {
+    await toReview(page)
+    await page.route('**/api/orders', async (route) => {
+      await route.fetch() // the request reaches Next and the backend: the order is committed ...
+      await route.fulfill({
+        status: 502,
+        contentType: 'text/html',
+        body: '<html>502 Bad Gateway</html>',
+      }) // ... the answer is not
+    })
+    await page.getByTestId('checkout-place').click()
+    await expect(page.getByTestId('checkout-error')).toContainText(
+      'could not confirm whether your order was placed',
+    )
+    await expect(page.getByTestId('checkout-error')).not.toContainText('No order was placed')
+    await expect(page.getByTestId('pending-order')).toBeVisible()
+    expect((await state()).orders).toHaveLength(1)
+    // Pressing again (this browser never saw the server's cookie): the emptied cart is read as the order, not as a reason to start over.
+    await page.unroute('**/api/orders')
+    await page.getByTestId('checkout-place').click()
+    await expect(page.getByTestId('checkout-error')).toContainText('could not confirm whether')
+    await expect(page).toHaveURL(/\/checkout$/)
+    expect((await state()).orders).toHaveLength(1)
+    // Leaving for the empty cart: the warning follows the customer until Orders was looked at.
+    await page.goto('/cart')
+    await expect(page.getByText('Your cart is empty.')).toBeVisible()
+    await expect(page.getByTestId('pending-order')).toBeVisible()
+    await page.getByTestId('pending-order-link').click()
+    await expect(page).toHaveURL(/\/orders$/)
+    await expect(page.locator('.order-card')).toHaveCount(1)
+    await page.goto('/cart')
+    await expect(page.getByTestId('pending-order')).toHaveCount(0)
+  })
+
+  test('a transport failure BEFORE the backend saw anything is also "unknown": the screen cannot tell, and retrying the same quote is safe', async ({
+    page,
+  }) => {
+    await toReview(page)
+    await page.route('**/api/orders', (route) => route.abort('failed'))
+    await page.getByTestId('checkout-place').click()
+    await expect(page.getByTestId('checkout-error')).toContainText('could not confirm whether')
+    await page.unroute('**/api/orders')
+    await page.getByTestId('checkout-place').click()
+    await expect(page).toHaveURL(/placed=1$/)
+    expect((await state()).orders).toHaveLength(1)
+  })
+
+  test('benefits re-evaluated at placement: the confirmation says the total changed, with both amounts', async ({
+    page,
+  }) => {
+    await toReview(page)
+    await expect(page.getByTestId('checkout-total')).toHaveText('₹998')
+    await control('orders', 'benefit=1000') // a discount that appears between the quote and the placement
+    await page.getByTestId('checkout-place').click()
+    await expect(page).toHaveURL(/placed=1&was=99800$/)
+    await expect(page.getByTestId('order-total-changed')).toContainText(
+      'changed from ₹998 to ₹898.20',
+    )
+    await expect(page.getByTestId('order-total')).toHaveText('₹898.20')
+  })
+
+  test('?placed=1 only claims "just placed" for a recent confirmed order', async ({ page }) => {
+    await signIn(page)
+    await control('orders', 'seed=25&customer=CUS_e2e0001')
+    const old = (await state()).orders.find((o) => o.orderId.includes('seed00010024'))!
+    await page.goto(`/orders/${old.orderId}?placed=1&was=100`)
+    await expect(page.getByRole('heading', { level: 1, name: 'Your order' })).toBeVisible()
+    await expect(page.getByTestId('order-placed')).toHaveCount(0)
+    await expect(page.getByTestId('order-total-changed')).toHaveCount(0)
   })
 })
 
