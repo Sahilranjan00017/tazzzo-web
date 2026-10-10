@@ -375,3 +375,43 @@ test.describe('loading', () => {
     await expect(page.getByTestId('page-skeleton')).toHaveCount(0)
   })
 })
+
+test.describe('no sideways scroll at phone widths, even with a wide fallback font', () => {
+  // CI's system-ui fallback is wider than a developer machine's: the signed-in header (location chip, Cart, Orders,
+  // Account) overflowed by 2px at 375px there. Forcing a wide monospace font reproduces it everywhere.
+  // Mutation (verified): without `flex-wrap: wrap` on `.account-nav` at <=480px the Account link overflows at 320 and 375.
+  for (const width of [320, 360, 375, 390, 412]) {
+    test(`${width}px: header and pages fit`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await signIn(page, '/')
+      await page.goto('/location')
+      await page.getByLabel('PIN code').fill('560001')
+      await page
+        .getByRole('button', { name: /check|use|set|save/i })
+        .first()
+        .click()
+      await expect(page.getByTestId('location-chip')).toHaveText('Deliver to 560001')
+      for (const path of [
+        '/',
+        '/search?q=rice',
+        '/cart',
+        '/orders',
+        '/account',
+        '/login',
+        '/checkout/delivery',
+        '/faq',
+        '/contact',
+      ]) {
+        await page.goto(path)
+        await page.addStyleTag({
+          content:
+            'body, button, input { font-family: "DejaVu Sans Mono", monospace !important; letter-spacing: 0.02em }',
+        })
+        const over = await page.evaluate(
+          () => document.documentElement.scrollWidth - window.innerWidth,
+        )
+        expect(over, `${path} at ${width}`).toBeLessThanOrEqual(0)
+      }
+    })
+  }
+})
