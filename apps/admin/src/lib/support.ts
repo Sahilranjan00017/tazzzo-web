@@ -78,7 +78,8 @@ export const staffCaseSchema = z.object({
   messages: z
     .array(
       z.object({
-        id: z.string(),
+        // the backend's StaffMessage.id is an int (1-based position in the case thread), never a string
+        id: z.number().int(),
         author: z.string(),
         staffId: z.string().nullish(),
         text: z.string(),

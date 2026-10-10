@@ -34,13 +34,13 @@ const theCase = (over: Record<string, unknown> = {}) => ({
   version: 2,
   messages: [
     {
-      id: 'm1',
+      id: 1,
       author: 'CUSTOMER',
       text: '<img src=x onerror=alert(1)>\nwhere is it',
       at: '2026-10-06T03:30:00Z',
     },
     {
-      id: 'm2',
+      id: 2,
       author: 'STAFF',
       staffId: 'google:9',
       text: 'Checking',
