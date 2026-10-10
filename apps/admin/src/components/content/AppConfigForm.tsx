@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useBffAction } from '@/components/useBffAction'
@@ -126,8 +127,11 @@ export function AppConfigForm({ config }: { config: AppConfig }) {
         <fieldset>
           <legend>Legal links</legend>
           <p className="muted">
-            Links only. The policy documents themselves must be written and approved by the
-            business/legal owner, not here. Blank means “not published yet”.
+            Terms and Privacy are now managed under{' '}
+            <Link href="/content/legal">Content → Legal</Link>: the website and app read them from
+            there. The Terms and Privacy URLs below are optional external overrides; leave them
+            blank to use the managed documents. The refund policy has no managed document yet, so
+            its link stays here. Blank means “not published yet”.
           </p>
           {f('termsUrl', 'Terms of service URL', { placeholder: 'https://…' })}
           {f('privacyUrl', 'Privacy policy URL', { placeholder: 'https://…' })}

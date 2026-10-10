@@ -92,6 +92,8 @@ describe('no fake or browser-held identity', () => {
         join('api', 'bff', 'content', 'blocks', '[blockId]', 'route.ts'),
         join('api', 'bff', 'content', 'blocks', '[blockId]', 'status', 'route.ts'),
         join('api', 'bff', 'content', 'faqs', 'route.ts'),
+        join('api', 'bff', 'content', 'legal', '[blockId]', 'route.ts'),
+        join('api', 'bff', 'content', 'legal', 'route.ts'),
         join('api', 'bff', 'content', 'home', 'blocks', 'route.ts'),
         join('api', 'bff', 'content', 'home', 'blocks', '[blockId]', 'route.ts'),
         join('api', 'bff', 'content', 'home', 'reorder', 'route.ts'),

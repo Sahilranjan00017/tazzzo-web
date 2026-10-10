@@ -95,8 +95,12 @@ it('sign-in, /me bootstrap, 403, 401 re-authentication and logout through the re
   expect(home).toContain('ops@tazzzo.test')
   expect(home).toContain('You can view and edit catalogue content.')
   expect(home).not.toContain('eyJ')
-  expect(h.backend.requests.at(-1)).toMatchObject({ path: '/api/v1/admin/me' })
+  // Home is the launcher: /me bootstraps the shell, then the existing dashboard summary feeds "Needs attention"
+  const paths = h.backend.requests.map((r) => r.path)
+  expect(paths).toContain('/api/v1/admin/me')
+  expect(paths.at(-1)).toBe('/api/v1/admin/dashboard/summary')
   expect(h.backend.requests.at(-1)!.authorization).toMatch(/^Bearer eyJ/)
+  expect(home).toContain('Needs attention')
 
   res = await go('/login')
   expect([307, 303, 302]).toContain(res.status)

@@ -206,10 +206,13 @@ test('dashboard (mock backend): shows counts, flags capped values, forwards only
   const calls = (await backendRequests(request)).filter((r) =>
     r.path.endsWith('/dashboard/summary'),
   )
-  expect(calls).toHaveLength(1)
-  expect(calls[0]!.sub).toBe(WRITER_SUB)
-  expect(calls[0]!.authorization).toMatch(/^Bearer ey/)
-  expect(calls[0]!.headers['cookie']).toBeUndefined()
+  // sign-in lands on Home, whose "Needs attention" strip reads the same summary once; the Dashboard page reads it once more
+  expect(calls).toHaveLength(2)
+  for (const call of calls) {
+    expect(call.sub).toBe(WRITER_SUB)
+    expect(call.authorization).toMatch(/^Bearer ey/)
+    expect(call.headers['cookie']).toBeUndefined()
+  }
 })
 
 test('dashboard (mock backend): a backend outage shows an error with retry and no numbers', async ({
@@ -910,6 +913,208 @@ test('FAQs (mock backend): a reader sees content read-only with inert text', asy
     page.getByText('Read-only: changing content needs the cms-writer role'),
   ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Publish' })).toHaveCount(0)
+})
+
+test('Home launcher (mock backend): role-aware cards and a needs-attention strip from the dashboard summary', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible()
+  await expect(page.getByText(/Modules marked/)).toHaveCount(0)
+  await expect(page.getByTestId('launch-pricing')).toBeVisible()
+  await expect(page.getByTestId('launch-orders')).toHaveCount(0)
+  await page.getByTestId('launch-legal').getByRole('link', { name: 'Legal' }).click()
+  await expect(page).toHaveURL(/\/content\/legal$/)
+})
+
+test('Home launcher (mock backend): the summary failing leaves the launcher working', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await request.post(`${BACKEND()}/__control/dashboard`, {
+    data: { status: 503, body: { error: { code: 'SERVICE_UNAVAILABLE' } } },
+  })
+  await page.goto('/')
+  await expect(page.getByText(/live summary is unavailable/)).toBeVisible()
+  await expect(page.getByTestId('launch-products')).toBeVisible()
+})
+
+test('product detail (mock backend): Price, Stock and Media deep-link to that product', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/catalogue/products/TZP-REF-1')
+  await expect(page.getByRole('heading', { name: 'Price, stock and media' })).toBeVisible()
+  await expect(
+    page.locator('#main').getByRole('link', { name: 'Import', exact: true }),
+  ).toHaveCount(1)
+  await page.locator('#main').getByRole('link', { name: 'Price', exact: true }).click()
+  await expect(page).toHaveURL(/\/pricing\?sku=TZP-REF-1$/)
+  await page.goBack()
+  await page.locator('#main').getByRole('link', { name: 'Stock', exact: true }).click()
+  await expect(page).toHaveURL(/\/inventory\?sku=TZP-REF-1$/)
+  await expect(page.getByText('Enter the location id')).toBeVisible()
+  await expect(page.locator('main').getByRole('alert')).toHaveCount(0)
+  await page.goBack()
+  await page.locator('#main').getByRole('link', { name: 'Media', exact: true }).click()
+  await expect(page).toHaveURL(/\/catalogue\/media\?type=product&id=TZP-REF-1$/)
+})
+
+test('legal documents (mock backend): the live document per slug, create, publish, the one-live rule, replace, edit, unpublish', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/legal')
+  await expect(page.getByTestId('live-terms')).toContainText('Terms of Service')
+  await expect(page.getByTestId('live-terms')).toContainText('effective 2026-10-01')
+  await expect(page.getByTestId('live-privacy')).toContainText('none live')
+
+  const create = async (title: string, text: string) => {
+    await page.goto('/content/legal/new')
+    await page.getByRole('combobox', { name: /^Document/ }).selectOption('PRIVACY')
+    await page.getByLabel('Document title (shown to customers as the heading)').fill(title)
+    await page.getByRole('textbox', { name: 'Text', exact: true }).fill(text)
+    await expect(page.getByText(/shown to customers as plain paragraphs/)).toBeVisible()
+    await page.getByRole('button', { name: 'Review new document' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+    await expect(page).toHaveURL(/\/content\/legal\/CB_/)
+    await expect(page.getByText('draft', { exact: true }).first()).toBeVisible()
+    return page.url()
+  }
+  const publish = async () => {
+    await page.getByRole('button', { name: 'Publish' }).click()
+    await expect(page.getByRole('dialog')).toContainText('Only one document')
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click()
+  }
+
+  const first = await create('Privacy Policy', 'We keep little.\n\nWe sell nothing.')
+  await publish()
+  await expect(page.getByText('Published.', { exact: true })).toBeVisible()
+  await page.goto('/content/legal')
+  await expect(page.getByTestId('live-privacy')).toContainText('Privacy Policy')
+
+  // a second PRIVACY document cannot be published while the first is: the backend refuses, nothing changes
+  const second = await create('Privacy Policy v2', 'Newer text.')
+  await publish()
+  await expect(page.getByText(/Only one Terms and one Privacy document/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeVisible()
+
+  // replace it the supported way: unpublish the first, publish the second
+  await page.goto(first)
+  await page.getByRole('button', { name: 'Unpublish' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Unpublish' }).click()
+  await expect(page.getByText('Unpublished.', { exact: true })).toBeVisible()
+  await page.goto(second)
+  await publish()
+  await expect(page.getByText('Published.', { exact: true })).toBeVisible()
+
+  // editing the live document warns it changes the public page
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Unpublish' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('Newer text, edited.')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await expect(page.getByRole('dialog')).toContainText('changes the public page')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Document saved.')).toBeVisible()
+  await page.goto('/content/legal')
+  await expect(page.getByTestId('live-privacy')).toContainText('Privacy Policy v2')
+
+  const writes = (await backendRequests(request)).filter(
+    (r) => r.method !== 'GET' && r.path.includes('/content/blocks'),
+  )
+  expect(writes.map((w) => `${w.method} ${w.path.split('/').slice(-1)[0]}`)).toEqual([
+    'POST blocks',
+    'POST status',
+    'POST blocks',
+    'POST status',
+    'POST status',
+    'POST status',
+    'PUT ' + writes[6]!.path.split('/').slice(-1)[0],
+  ])
+  expect(writes.every((w) => w.sub === WRITER_SUB)).toBe(true)
+  const created = JSON.parse((writes[0] as unknown as { body: string }).body)
+  expect(created).toMatchObject({ placement: 'HELP', type: 'LEGAL' })
+  expect(created.payload).toEqual({
+    legalSlug: 'PRIVACY',
+    body: 'We keep little.\n\nWe sell nothing.',
+  })
+})
+
+test('legal documents (mock backend): a reader sees the text read-only and the sidebar lists Legal; the FAQ id route redirects', async ({
+  page,
+}) => {
+  await signIn(page, READER_SUB)
+  await page.goto('/content/legal/CB_legalseed00000001')
+  await expect(
+    page.getByText('Read-only: changing content needs the cms-writer role'),
+  ).toBeVisible()
+  await expect(page.getByText('These terms apply to every order.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Unpublish' })).toHaveCount(0)
+  await expect(
+    page.getByRole('navigation', { name: 'Modules' }).getByRole('link', { name: 'Legal' }),
+  ).toBeVisible()
+  await page.goto('/content/faqs/CB_legalseed00000001')
+  await expect(page).toHaveURL(/\/content\/legal\/CB_legalseed00000001$/)
+  await page.goto('/content/legal/new')
+  await expect(page.getByText('Creating content needs the cms-writer role')).toBeVisible()
+})
+
+test('legal documents (mock backend): the backend refuses a reader write with 403 (no UI-only control), and the editor tells a stale version from an overlap', async ({
+  page,
+  request,
+}) => {
+  // a reader forging the BFF call is refused by the BACKEND, and the refusal is surfaced
+  await signIn(page, READER_SUB)
+  const forged = await page.request.post(`${BASE}/api/bff/content/legal`, {
+    headers: { origin: BASE, 'x-tazzzo-csrf': '1', 'content-type': 'application/json' },
+    data: {
+      title: 'Forged',
+      sort: 0,
+      payload: { legalSlug: 'PRIVACY', body: 'Not allowed.' },
+    },
+  })
+  expect(forged.status()).toBe(403)
+  const attempts = (await backendRequests(request)).filter(
+    (r) => r.method === 'POST' && r.path.endsWith('/content/blocks'),
+  )
+  expect(attempts).toHaveLength(1)
+  expect(attempts[0]!.sub).toBe(READER_SUB)
+
+  // a writer whose open document was changed by someone else sees the stale-version message and keeps the text
+  await page.context().clearCookies()
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/legal/CB_legalseed00000001')
+  // typing before hydration is lost: retry until React has taken the edit ("Unsaved changes" appears only then)
+  await expect(async () => {
+    const text = page.getByRole('textbox', { name: 'Text', exact: true })
+    await text.focus()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText('My unsaved terms.')
+    await expect(text).toHaveValue('My unsaved terms.', { timeout: 1000 })
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 1000 })
+  }).toPass()
+  await control(request, 'bump-block', { id: 'CB_legalseed00000001' })
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText(/Someone else changed this document/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('textbox', { name: 'Text', exact: true })).toHaveValue(
+    'My unsaved terms.',
+  )
+})
+
+test('app config (mock backend): the legal links explain they are overrides of the managed Legal documents', async ({
+  page,
+}) => {
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/app-config')
+  await expect(page.getByText(/optional external overrides/)).toBeVisible()
+  await page.getByRole('link', { name: 'Content → Legal' }).click()
+  await expect(page).toHaveURL(/\/content\/legal$/)
 })
 
 test('app config (mock backend): insecure links are blocked, first save sends nulls for blanks, closing the store is flagged', async ({

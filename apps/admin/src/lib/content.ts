@@ -14,6 +14,11 @@ export const FAQ_CATEGORIES = [
   'REFUND',
   'ACCOUNT',
 ] as const
+/** Legal documents (type LEGAL on placement HELP): one live document per slug; the public path is the lowercase slug. */
+export const LEGAL_SLUGS = ['TERMS', 'PRIVACY'] as const
+export type LegalSlug = (typeof LEGAL_SLUGS)[number]
+export const LEGAL_SLUG_LABEL: Record<string, string> = { TERMS: 'Terms', PRIVACY: 'Privacy' }
+export const LEGAL_BODY_MAX = 60_000
 export const BLOCK_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const
 export const FAQ_CATEGORY_LABEL: Record<string, string> = {
   DELIVERY: 'Delivery',
@@ -41,6 +46,9 @@ export const blockSchema = z.object({
       faqCategory: z.string().nullish(),
       question: z.string().nullish(),
       answer: z.string().nullish(),
+      legalSlug: z.string().nullish(),
+      body: z.string().nullish(),
+      effectiveDate: z.string().nullish(),
     })
     .default({}),
   version: z.number().int(),
@@ -98,6 +106,61 @@ export const faqFields = z.object({
   answer: plain(2000),
 })
 
+/**
+ * LEGAL text rules (backend `ContentBlock.validate`): body 1..60000, already trimmed, no `<` or `>`, no control characters
+ * except the line feed (so no tab or carriage return), no C1 controls and no bidirectional override/isolate characters.
+ */
+export function legalBodyProblem(body: string): string | undefined {
+  if (body.length === 0) return 'empty'
+  if (body.length > LEGAL_BODY_MAX) return 'too-long'
+  if (body !== body.trim()) return 'untrimmed'
+  if (/[<>]/.test(body)) return 'angle-brackets'
+  for (const ch of body) {
+    const c = ch.codePointAt(0)!
+    if (
+      (c < 0x20 && c !== 0x0a) ||
+      c === 0x7f ||
+      (c >= 0x80 && c <= 0x9f) ||
+      c === 0x061c ||
+      c === 0x200b ||
+      c === 0x200e ||
+      c === 0x200f ||
+      (c >= 0x202a && c <= 0x202e) ||
+      c === 0x2060 ||
+      (c >= 0x2066 && c <= 0x2069) ||
+      c === 0xfeff
+    )
+      return 'control'
+  }
+  // an unpaired surrogate iterates as itself (the zero-width joiner and non-joiner stay allowed)
+  if (/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(body))
+    return 'control'
+  return undefined
+}
+
+/** The paragraphs customers see: blocks of text separated by one or more blank lines. */
+export function legalParagraphs(body: string): string[] {
+  return body
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+}
+
+/** A real calendar date as yyyy-MM-dd (no times, no other shapes). */
+export function validIsoDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const d = new Date(`${v}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v
+}
+
+export const legalFields = z
+  .object({
+    legalSlug: z.enum(LEGAL_SLUGS),
+    body: z.string().refine((v) => legalBodyProblem(v) === undefined, 'invalid body'),
+    effectiveDate: z.string().refine(validIsoDate, 'invalid date').optional(),
+  })
+  .strict()
+
 const instant = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/)
 const version = z.number().int().min(1).max(2_147_483_647)
 
@@ -119,6 +182,48 @@ export const faqUpdateInput = faqWriteInput.safeExtend({
   blockId: z.string().regex(BLOCK_ID),
   expectedVersion: version,
 })
+
+/** Create/replace a legal document. The title is the document title customers see (unlike an FAQ's internal title). */
+export const legalWriteInput = z
+  .object({
+    title: plain(80),
+    sort: z.number().int().min(0).max(10000),
+    startsAt: instant.optional(),
+    endsAt: instant.optional(),
+    payload: legalFields,
+  })
+  .strict()
+  .refine((v) => !v.startsAt || !v.endsAt || Date.parse(v.startsAt) < Date.parse(v.endsAt), {
+    path: ['endsAt'],
+    message: 'end must be after start',
+  })
+
+export const legalUpdateInput = legalWriteInput.safeExtend({
+  blockId: z.string().regex(BLOCK_ID),
+  expectedVersion: version,
+})
+
+/**
+ * The document the public page serves for a slug right now: among LEGAL blocks that are live (PUBLISHED and inside the
+ * window), the most recently updated, then the greater id, exactly the backend's deterministic pick. `undefined` means the
+ * public page answers 404 for this slug.
+ */
+export function liveLegalFor(
+  items: readonly ContentBlock[],
+  slug: string,
+  nowMs: number,
+): ContentBlock | undefined {
+  return items
+    .filter(
+      (b) =>
+        b.type === 'LEGAL' && b.payload.legalSlug === slug && effectiveStatus(b, nowMs) === 'live',
+    )
+    .sort(
+      (a, b) =>
+        Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? '') ||
+        b.blockId.localeCompare(a.blockId),
+    )[0]
+}
 
 export const statusInput = z
   .object({
@@ -146,6 +251,34 @@ export function contentErrorMessage(result: Extract<BffResult<unknown>, { ok: fa
   if (result.code && CODE_COPY[result.code]) return CODE_COPY[result.code]!
   if (result.status === 404) return 'This entry no longer exists.'
   return bffErrorMessage(result, 'content change')
+}
+
+/**
+ * Largest request body the legal routes accept. MUST match the backend's `tazzzo.http.content-block-max-request-body-bytes`
+ * (default 262144) for `POST/PUT /api/v1/admin/content/blocks`: a 60,000-character body is up to 180,000 bytes in UTF-8
+ * (Devanagari, 3 bytes per character) before JSON escapes. Every other BFF route keeps the 16 KiB default.
+ */
+export const LEGAL_REQUEST_MAX_BYTES = 256 * 1024
+
+/**
+ * Operator-facing text for a failed legal write or status change. `editing` is true in the editor, where the typed text
+ * stays on screen after a refusal; false for publish/unpublish/archive, where the page is reloaded.
+ */
+export function legalErrorMessage(
+  result: Extract<BffResult<unknown>, { ok: false }>,
+  editing: boolean,
+): string {
+  if (result.status === 413)
+    return 'This document is too large to save (limit 60,000 characters / 256 KB). Shorten it or split it.'
+  if (result.status === 409 && result.code === 'STATE_CONFLICT')
+    return editing
+      ? 'Another document for this page (Terms or Privacy) is already published for an overlapping period, or this document’s status does not allow the change. Unpublish the other document or end its window before this one starts. Your text is still here.'
+      : 'Only one Terms and one Privacy document can be published for any period, and an archived document is final. Unpublish the other document or end its window before this one starts. The latest version has been reloaded.'
+  if (result.status === 409 && result.code === 'STALE_VERSION')
+    return editing
+      ? 'Someone else changed this document since you loaded it. Your text is still here: copy it, then reload the latest version and apply it again.'
+      : 'This document changed since you loaded it. The latest version has been reloaded; review it and try again.'
+  return contentErrorMessage(result)
 }
 
 /** Disclosed wherever publication changes visibility (decision D5). */

@@ -17,6 +17,7 @@ export function InventoryView({
   stock,
   canWrite,
   invalidInput,
+  needLocation,
 }: {
   sku?: string
   location?: string
@@ -24,6 +25,8 @@ export function InventoryView({
   stock?: Ok<AdminInventory>
   canWrite: boolean
   invalidInput?: boolean
+  /** A valid product id arrived without a location (e.g. from the product page): ask for it, do not call it an error. */
+  needLocation?: boolean
 }) {
   const header = (
     <PageHeader
@@ -55,6 +58,12 @@ export function InventoryView({
           <p className="notice" role="alert">
             Enter a product id like TZP-1001 (case matters) and a location id of letters, digits and
             . _ : - only.
+          </p>
+        ) : needLocation ? (
+          <p className="notice" role="status">
+            Stock is held per product and location. Enter the location id to open {sku}’s stock
+            record, or <Link href="/inventory">go back to the stock list</Link> to find the
+            locations that hold it.
           </p>
         ) : (
           <p className="muted">

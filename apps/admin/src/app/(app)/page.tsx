@@ -1,26 +1,23 @@
-import { PageHeader } from '@/components/ui/primitives'
+import { LauncherView, type LauncherDashboard } from '@/components/launcher/LauncherView'
+import { canReadDashboard } from '@/lib/launcher'
 import { canWrite } from '@/lib/roles'
+import { readDashboard } from '@/server/backend/dashboard'
 import { requireAdmin } from '@/server/session/require-session'
 
-/** Home. Role display is UX only: the backend authorizes every request. */
+export const dynamic = 'force-dynamic'
+
+/** Home: a role-aware launcher. Role display is UX only: the backend authorizes every request. */
 export default async function HomePage() {
   const access = await requireAdmin()
-  const writer = access.view === 'ok' && canWrite(access.me.roles)
+  const roles = access.view === 'ok' ? access.me.roles : []
+  const dashboard: LauncherDashboard = canReadDashboard(roles)
+    ? await readDashboard()
+    : { kind: 'not_requested' }
   return (
-    <>
-      <PageHeader
-        title="Tazzzo Admin"
-        description={
-          writer
-            ? 'You can view and edit catalogue content.'
-            : 'Editing controls are hidden for your roles.'
-        }
-      />
-      <section className="panel">
-        <p className="muted">
-          Modules marked “Soon” in the sidebar are not built yet. Nothing here is sample data.
-        </p>
-      </section>
-    </>
+    <LauncherView
+      roles={roles}
+      writer={access.view === 'ok' && canWrite(access.me.roles)}
+      dashboard={dashboard}
+    />
   )
 }

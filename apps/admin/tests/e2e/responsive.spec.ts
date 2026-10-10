@@ -31,6 +31,9 @@ const GENERAL_PAGES = [
   '/delivery/slots?area=Ejipura',
   '/content/faqs',
   '/content/faqs/CB_faqseed000000001',
+  '/content/legal',
+  '/content/legal/CB_legalseed00000001',
+  '/content/legal/new',
   '/content/app-config',
   '/system/status',
   '/system/notifications',
@@ -203,7 +206,10 @@ test('mobile navigation: closed drawer links are not focusable, open drawer link
   await signIn(page, WRITER_SUB)
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto('/', { waitUntil: 'networkidle' })
-  const link = page.getByRole('link', { name: 'Products' })
+  // Home also carries a "Products" launcher card, so name the drawer's own navigation
+  const link = page
+    .getByRole('navigation', { name: 'Modules' })
+    .getByRole('link', { name: 'Products' })
   await expect(link).toBeHidden()
   await page.getByRole('button', { name: 'Open navigation' }).click()
   await expect(link).toBeVisible()

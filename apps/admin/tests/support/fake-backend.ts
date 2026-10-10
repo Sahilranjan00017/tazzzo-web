@@ -272,6 +272,25 @@ export class FakeBackend {
         answer: 'Evenings.\nSeven days a week.',
       },
     })
+    this.blocks.set('CB_legalseed00000001', {
+      blockId: 'CB_legalseed00000001',
+      placement: 'HELP',
+      type: 'LEGAL',
+      title: 'Terms of Service',
+      sort: 0,
+      status: 'PUBLISHED',
+      audience: 'BOTH',
+      version: 2,
+      payload: {
+        legalSlug: 'TERMS',
+        body: 'These terms apply to every order.\n\nWe may update them from time to time.',
+        effectiveDate: '2026-10-01',
+      },
+      createdBy: seedBy,
+      updatedBy: seedBy,
+      createdAt: '2026-10-06T03:30:00Z',
+      updatedAt: '2026-10-06T03:30:00Z',
+    })
     this.appConfig = {
       storeOpen: true,
       maintenance: false,
@@ -439,6 +458,31 @@ export class FakeBackend {
     return [...this.blocks.values()]
       .filter((x) => x.placement === placement)
       .sort((a, b) => Number(a.sort) - Number(b.sort) || a.blockId.localeCompare(b.blockId))
+  }
+
+  /**
+   * `ContentService.requireSingleLive`: at most one PUBLISHED LEGAL block per slug covers any instant. Windows are
+   * half-open and compared from now on, so a successor may start exactly when its predecessor ends. Returns the
+   * conflicting block's id, if any.
+   */
+  legalOverlap(
+    selfId: string,
+    slug: unknown,
+    startsAt: unknown,
+    endsAt: unknown,
+    now = Date.now(),
+  ) {
+    const from = (v: unknown) => (v ? Math.max(Date.parse(String(v)), now) : now)
+    const to = (v: unknown) => (v ? Date.parse(String(v)) : Number.POSITIVE_INFINITY)
+    return [...this.blocks.values()].find(
+      (o) =>
+        o.type === 'LEGAL' &&
+        o.status === 'PUBLISHED' &&
+        o.blockId !== selfId &&
+        (o.payload as Record<string, unknown> | undefined)?.legalSlug === slug &&
+        from(startsAt) < to(o.endsAt) &&
+        from(o.startsAt) < to(endsAt),
+    )?.blockId
   }
 
   /** The backend's admin view: derived effectiveStatus and resolved image URLs. */
@@ -929,6 +973,21 @@ export class FakeBackend {
         return json(409, { error: { code: 'STATE_CONFLICT' } })
       if (b.expectedVersion !== cur.version) return json(409, { error: { code: 'STALE_VERSION' } })
       if (req.method === 'POST' && blk[2]) {
+        if (cur.type === 'LEGAL' && b.to === 'PUBLISHED') {
+          const other = this.legalOverlap(
+            cur.blockId,
+            (cur.payload as Record<string, unknown>).legalSlug,
+            cur.startsAt,
+            cur.endsAt,
+          )
+          if (other)
+            return json(409, {
+              error: {
+                code: 'STATE_CONFLICT',
+                message: `another document is published for an overlapping period (${other})`,
+              },
+            })
+        }
         const next = {
           ...cur,
           status: String(b.to),
@@ -949,6 +1008,16 @@ export class FakeBackend {
           cur.payload as Record<string, unknown> | undefined,
         )
         if (bad) return json(bad.status, { error: { code: bad.code, message: 'detail' } })
+        if (cur.type === 'LEGAL' && cur.status === 'PUBLISHED') {
+          const other = this.legalOverlap(cur.blockId, b.payload?.legalSlug, b.startsAt, b.endsAt)
+          if (other)
+            return json(409, {
+              error: {
+                code: 'STATE_CONFLICT',
+                message: `another document is published for an overlapping period (${other})`,
+              },
+            })
+        }
         const { expectedVersion, ...rest } = b
         const next = {
           blockId: cur.blockId,
@@ -1661,7 +1730,12 @@ export function validateContent(
 ): string | undefined {
   const homeTypes = ['BANNER', 'PRODUCT_RAIL', 'CATEGORY_GRID']
   if (create) {
-    if (!(placement === 'HOME' ? homeTypes : ['FAQ']).includes(type)) return 'type/placement'
+    if (
+      !(placement === 'HOME' ? homeTypes : placement === 'HELP' ? ['FAQ', 'LEGAL'] : []).includes(
+        type,
+      )
+    )
+      return 'type/placement'
     if (b.audience !== undefined && !['APP_ONLY', 'WEB_ONLY', 'BOTH'].includes(String(b.audience)))
       return 'audience'
     if (placement === 'HELP' && b.audience !== undefined && b.audience !== 'BOTH')
@@ -1693,6 +1767,8 @@ export function validateContent(
   const has = (k: string) => p[k] !== undefined && p[k] !== null
   if (type !== 'FAQ' && (has('faqCategory') || has('question') || has('answer')))
     return 'faq fields'
+  if (type !== 'LEGAL' && (has('legalSlug') || has('body') || has('effectiveDate')))
+    return 'legal fields'
   if (type !== 'BANNER' && (has('subtitle') || has('altText') || has('desktopImageAssetKey')))
     return 'banner-only fields'
   if (type === 'BANNER') {
@@ -1709,6 +1785,53 @@ export function validateContent(
     if (new Set(ids).size !== ids.length) return 'duplicate ids'
     const shape = rail ? /^TZP-[A-Za-z0-9-]{1,40}$/ : /^TZ[SCGV]-[0-9]{6}$/
     if (ids.some((id) => typeof id !== 'string' || !shape.test(id))) return 'id shape'
+  } else if (type === 'LEGAL') {
+    // `ContentBlock.validate` LEGAL: slug, plain-text body (1..60000, trimmed, no < >, no control but \n), optional date
+    if (
+      has('imageAssetKey') ||
+      has('link') ||
+      ids.length ||
+      has('faqCategory') ||
+      has('question') ||
+      has('answer')
+    )
+      return 'legal only'
+    if (!['TERMS', 'PRIVACY'].includes(String(p.legalSlug))) return 'legalSlug'
+    const body = p.body
+    if (
+      typeof body !== 'string' ||
+      body.length < 1 ||
+      body.length > 60_000 ||
+      body !== body.trim() ||
+      [...body].some((ch) => {
+        const c = ch.codePointAt(0)!
+        return (
+          (c < 0x20 && c !== 0x0a) ||
+          c === 0x7f ||
+          c === 0x3c ||
+          c === 0x3e ||
+          (c >= 0x80 && c <= 0x9f) ||
+          c === 0x61c ||
+          c === 0x200b ||
+          c === 0x200e ||
+          c === 0x200f ||
+          (c >= 0x202a && c <= 0x202e) ||
+          c === 0x2060 ||
+          (c >= 0x2066 && c <= 0x2069) ||
+          c === 0xfeff
+        )
+      }) ||
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(body)
+    )
+      return 'body'
+    if (has('effectiveDate')) {
+      const d = String(p.effectiveDate)
+      const ok =
+        /^\d{4}-\d{2}-\d{2}$/.test(d) &&
+        !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) &&
+        new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d
+      if (!ok) return 'effectiveDate'
+    }
   } else if (type === 'FAQ') {
     if (has('imageAssetKey') || has('link') || ids.length) return 'faq only'
     if (
