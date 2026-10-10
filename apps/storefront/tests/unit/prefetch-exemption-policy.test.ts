@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import nextConfig from '../../next.config'
+import { config as proxyConfig } from '@/proxy'
 
 /**
  * Repository policy guarding the proxy matcher's prefetch exemption (`src/proxy.ts`, `config.matcher`).
@@ -50,5 +51,14 @@ describe('prefetch exemption policy (see src/proxy.ts matcher)', () => {
       /\bexperimental_ppr\b/.test(readFileSync(path, 'utf8')),
     )
     expect(optIns).toEqual([])
+  })
+
+  it('never exempts /api/*: route handlers ignore the prefetch headers and run in full', () => {
+    const entries = proxyConfig.matcher as Array<{ source: string; missing?: unknown }>
+    expect(entries.some((e) => e.source === '/api/:path*' && e.missing === undefined)).toBe(true)
+    // every route handler lives under /api (a handler elsewhere would be exempt from the limiter)
+    const handlers = filesUnder(appDir).filter((path) => /\/route\.(ts|tsx|js)$/.test(path))
+    const outside = handlers.filter((path) => !path.includes('/src/app/api/'))
+    expect(outside.map((p) => p.split('/src/app/')[1])).toEqual([])
   })
 })

@@ -93,7 +93,7 @@ request with a 500 and logs only the variable name). Logs are counts only, at mo
     from the right of `X-Forwarded-For` is the visitor, as the ALB appends what it saw; anything the client wrote to
     the left is ignored. A chain too short or an entry that is not a literal IP falls into one shared, limited bucket.
     IPv6 visitors are keyed by their /64. Only safe if the app is reachable through those proxies alone.
-- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch:
+- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch on a PAGE path (never `/api/*`: route handlers ignore those headers and always run in full, so they are always limited and get the security headers, whatever method or headers they carry):
   `rsc: 1` **and** `next-router-prefetch: 1`, the Next server's own rule. Next answers those with a small prefetch
   payload without rendering the page body (measured: replayed `/search` and `/c/<node>?cursor=` prefetches with fresh
   queries made no backend call), and charging them would spend a visitor's tokens on `<Link>`s merely scrolled past
@@ -257,7 +257,13 @@ the ORDER only** (`deliverySlotId` on placing the order, reserved in its transac
 `/checkout/delivery` validates the choice with the backend (the address is the caller's and serviceable, the slot is offered for its PIN and AVAILABLE) and
 keeps `{customer, addressId, slotId}` in a sealed 30-minute cookie (`__Host-tz_checkout`) for the order step, which must re-check it. It places no order.
 
-**Limits / not done.** Payment methods other than Cash on Delivery do not exist in the backend. The cart uses a saved address only if one was chosen (no automatic "use the default address" yet). No
+**The browser PIN outlives the account on purpose.** The location cookie's PIN and serviceable flag are not cleared when a session expires or a
+different customer signs in on the same browser: a PIN is a browser-level shopping choice, not personal data, and a visitor has one before signing in.
+What belongs to a customer (the saved-address id, bound to the customer id) is ignored for anyone else and dropped on sign-out, deletion or a new PIN.
+
+**Limits / not done.** The shared 60 s cache holds `lowStockRemaining` (and stock) per serviceable PIN, so a low-stock count can be up to ~60 s old and is
+shared by every visitor of that PIN. Client-side checks use JS `trim()`, the backend Java `strip()`/`trim()`: they differ for exotic whitespace (the server and
+the backend validate again, so the worst case is a refused save). Payment methods other than Cash on Delivery do not exist in the backend. The cart uses a saved address only if one was chosen (no automatic "use the default address" yet). No
 map or lat/lng. Slot horizon is the backend default; `days` is not sent. A PIN's serviceability is checked when it is set (not re-checked per page).
 
 ## Checkout, Cash on Delivery orders and Orders (`src/server/checkout/*`, `src/server/orders/*`, `src/server/backend/{checkout,orders}.ts`)

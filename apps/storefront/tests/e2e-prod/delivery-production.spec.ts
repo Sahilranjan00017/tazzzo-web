@@ -180,3 +180,35 @@ test('addresses and slots under the production CSP: create, pick a slot, keep it
   expect(await violations(page)).toEqual([])
   expect(errors).toEqual([])
 })
+
+test('prefetch headers do not exempt route handlers: a POST carrying them is limited and gets the security headers', async ({
+  request,
+}) => {
+  counter += 1
+  const headers = {
+    'x-forwarded-for': `198.51.100.${60 + counter}`,
+    'content-type': 'application/json',
+    'x-tazzzo-csrf': '1',
+    origin: ORIGIN,
+    rsc: '1',
+    'next-router-prefetch': '1',
+  }
+  for (const path of ['/api/location', '/api/auth/otp/request']) {
+    const body = path === '/api/location' ? { pin: '560001' } : { phone: '9999999999' }
+    let limited = null
+    for (let i = 0; i < 12 && limited === null; i++) {
+      const res = await request.post(path, {
+        headers: { ...headers, 'x-forwarded-for': `198.51.100.${70 + counter + path.length}` },
+        data: body,
+      })
+      if (res.status() === 429) limited = res
+      else
+        expect(res.headers()['content-security-policy'], path).toContain(
+          "script-src 'self' 'nonce-",
+        )
+    }
+    expect(limited, path).not.toBeNull()
+    expect(limited!.headers()['retry-after']).toBeTruthy()
+    expect(limited!.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-")
+  }
+})
