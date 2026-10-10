@@ -102,6 +102,7 @@ export const ACCESS_MATRIX: readonly MatrixRow[] = [
   row('Import jobs (background, any size)', 'R', 'R W', '', '', ''),
   row('Service areas, delivery slots', 'R', 'R W', '', '', ''),
   row('Home content, FAQs, app config', 'R', 'R W', '', '', ''),
+  row('Legal documents (terms, privacy)', 'R', 'R W', '', '', ''),
   row('Orders', '', '', '', 'R W', 'R'),
   row('Support cases', '', '', '', 'R', 'R W'),
   row('Audit log', '', '', 'R', '', ''),

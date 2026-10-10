@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { FaqDetailView } from '@/components/content/FaqViews'
 import { BLOCK_ID } from '@/lib/content'
 import { canWrite } from '@/lib/roles'
@@ -15,11 +15,9 @@ export default async function FaqPage({ params }: { params: Promise<{ blockId: s
   if (!BLOCK_ID.test(blockId)) notFound()
   const access = await requireAdmin()
   const roles = access.view === 'ok' ? access.me.roles : []
-  return (
-    <FaqDetailView
-      result={await readBlock(blockId)}
-      canWrite={canWrite(roles)}
-      nowMs={serverNow()}
-    />
-  )
+  const result = await readBlock(blockId)
+  // the go-to box and old links land here for any content id: a legal document belongs on its own screen
+  if (result.kind === 'ok' && result.data.type === 'LEGAL')
+    redirect(`/content/legal/${encodeURIComponent(blockId)}`)
+  return <FaqDetailView result={result} canWrite={canWrite(roles)} nowMs={serverNow()} />
 }

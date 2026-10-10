@@ -41,6 +41,8 @@ export default async function InventoryPage({
       />
     )
   }
+  if (!location && PRODUCT_ID.test(sku))
+    return <InventoryView sku={sku} canWrite={writer} needLocation />
   if (!location || !PRODUCT_ID.test(sku) || !LOCATION_ID.test(location)) {
     return <InventoryView canWrite={writer} invalidInput />
   }

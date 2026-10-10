@@ -9,6 +9,10 @@ export function readFaqBlocks(status?: string) {
   if (status && (BLOCK_STATUSES as readonly string[]).includes(status)) p.set('status', status)
   return readAsAdmin(`/api/v1/admin/content/blocks?${p.toString()}`, blockListSchema)
 }
+/** Legal documents are content blocks on placement HELP, type LEGAL (filtered client-side; the backend has no type filter). */
+export function readLegalBlocks(status?: string) {
+  return readFaqBlocks(status)
+}
 export function readBlock(id: string) {
   if (!BLOCK_ID.test(id)) throw new Error('invalid block id')
   return readAsAdmin(`/api/v1/admin/content/blocks/${encodeURIComponent(id)}`, blockSchema)

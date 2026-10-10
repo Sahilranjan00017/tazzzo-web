@@ -153,8 +153,18 @@ export function HomeDetailView({
       <>
         <PageHeader title="Not Home content" />
         <p className="notice" role="alert">
-          This content entry is a {b.type} on {b.placement}. FAQs are managed in{' '}
-          <Link href={`/content/faqs/${encodeURIComponent(b.blockId)}`}>FAQs</Link>.
+          This content entry is a {b.type} on {b.placement}.{' '}
+          {b.type === 'LEGAL' ? (
+            <>
+              Legal documents are managed in{' '}
+              <Link href={`/content/legal/${encodeURIComponent(b.blockId)}`}>Legal</Link>.
+            </>
+          ) : (
+            <>
+              FAQs are managed in{' '}
+              <Link href={`/content/faqs/${encodeURIComponent(b.blockId)}`}>FAQs</Link>.
+            </>
+          )}
         </p>
       </>
     )

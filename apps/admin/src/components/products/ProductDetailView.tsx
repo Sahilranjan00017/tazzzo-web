@@ -68,10 +68,6 @@ export function ProductDetailView({
             <dt>Version</dt>
             <dd>{p.version}</dd>
           </dl>
-          <p className="muted">
-            Price, stock and media are managed in their own modules; the backend does not return
-            them with the product.
-          </p>
         </section>
         <section className="panel" aria-labelledby="edit-h">
           <h2 id="edit-h">Edit</h2>
@@ -82,6 +78,39 @@ export function ProductDetailView({
           />
         </section>
       </div>
+      <section className="panel" aria-labelledby="ops-h">
+        <h2 id="ops-h">Price, stock and media</h2>
+        <p className="muted">
+          The backend does not return price, stock or images with the product, so they are edited in
+          their own screens. These links open them for {p.id}.
+        </p>
+        <div className="row">
+          <Link href={`/pricing?sku=${encodeURIComponent(p.id)}`} className="btn">
+            Price
+          </Link>
+          <Link href={`/inventory?sku=${encodeURIComponent(p.id)}`} className="btn">
+            Stock
+          </Link>
+          <Link
+            href={`/catalogue/media?type=product&id=${encodeURIComponent(p.id)}`}
+            className="btn"
+          >
+            Media
+          </Link>
+          {canWrite ? (
+            <Link href="/catalogue/imports" className="btn">
+              Import
+            </Link>
+          ) : null}
+        </div>
+        <p className="muted">
+          Edited on this page: the title and the lifecycle (activate, retire, revive, archive).
+          Type, brand, classification, taxonomy path and attributes are read-only in the CMS because
+          the backend only lets a product’s title be edited. Stock is held per location, so the
+          Stock link asks for the location. Price and stock are edited for one SKU at a time; many
+          at once go through Import{canWrite ? '' : ' (needs the cms-writer role)'}.
+        </p>
+      </section>
       <section className="panel" aria-labelledby="attrs-h">
         <h2 id="attrs-h">Attributes</h2>
         {attributes.length === 0 ? (

@@ -161,8 +161,18 @@ export function FaqDetailView({
       <>
         <PageHeader title="Not an FAQ" />
         <p className="notice" role="alert">
-          This content entry is a {b.type}, not an FAQ. Home content is managed in{' '}
-          <Link href={`/content/home/${encodeURIComponent(b.blockId)}`}>Home content</Link>.
+          This content entry is a {b.type}, not an FAQ.{' '}
+          {b.type === 'LEGAL' ? (
+            <>
+              Legal documents are managed in{' '}
+              <Link href={`/content/legal/${encodeURIComponent(b.blockId)}`}>Legal</Link>.
+            </>
+          ) : (
+            <>
+              Home content is managed in{' '}
+              <Link href={`/content/home/${encodeURIComponent(b.blockId)}`}>Home content</Link>.
+            </>
+          )}
         </p>
       </>
     )

@@ -14,6 +14,11 @@ export const FAQ_CATEGORIES = [
   'REFUND',
   'ACCOUNT',
 ] as const
+/** Legal documents (type LEGAL on placement HELP): one live document per slug; the public path is the lowercase slug. */
+export const LEGAL_SLUGS = ['TERMS', 'PRIVACY'] as const
+export type LegalSlug = (typeof LEGAL_SLUGS)[number]
+export const LEGAL_SLUG_LABEL: Record<string, string> = { TERMS: 'Terms', PRIVACY: 'Privacy' }
+export const LEGAL_BODY_MAX = 60_000
 export const BLOCK_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const
 export const FAQ_CATEGORY_LABEL: Record<string, string> = {
   DELIVERY: 'Delivery',
@@ -41,6 +46,9 @@ export const blockSchema = z.object({
       faqCategory: z.string().nullish(),
       question: z.string().nullish(),
       answer: z.string().nullish(),
+      legalSlug: z.string().nullish(),
+      body: z.string().nullish(),
+      effectiveDate: z.string().nullish(),
     })
     .default({}),
   version: z.number().int(),
@@ -98,6 +106,52 @@ export const faqFields = z.object({
   answer: plain(2000),
 })
 
+/**
+ * LEGAL text rules (backend `ContentBlock.validate`): body 1..60000, already trimmed, no `<` or `>`, no control characters
+ * except the line feed (so no tab or carriage return), no C1 controls and no bidirectional override/isolate characters.
+ */
+export function legalBodyProblem(body: string): string | undefined {
+  if (body.length === 0) return 'empty'
+  if (body.length > LEGAL_BODY_MAX) return 'too-long'
+  if (body !== body.trim()) return 'untrimmed'
+  if (/[<>]/.test(body)) return 'angle-brackets'
+  for (const ch of body) {
+    const c = ch.codePointAt(0)!
+    if (
+      (c < 0x20 && c !== 0x0a) ||
+      c === 0x7f ||
+      (c >= 0x80 && c <= 0x9f) ||
+      (c >= 0x202a && c <= 0x202e) ||
+      (c >= 0x2066 && c <= 0x2069)
+    )
+      return 'control'
+  }
+  return undefined
+}
+
+/** The paragraphs customers see: blocks of text separated by one or more blank lines. */
+export function legalParagraphs(body: string): string[] {
+  return body
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+}
+
+/** A real calendar date as yyyy-MM-dd (no times, no other shapes). */
+export function validIsoDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const d = new Date(`${v}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v
+}
+
+export const legalFields = z
+  .object({
+    legalSlug: z.enum(LEGAL_SLUGS),
+    body: z.string().refine((v) => legalBodyProblem(v) === undefined, 'invalid body'),
+    effectiveDate: z.string().refine(validIsoDate, 'invalid date').optional(),
+  })
+  .strict()
+
 const instant = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/)
 const version = z.number().int().min(1).max(2_147_483_647)
 
@@ -120,6 +174,48 @@ export const faqUpdateInput = faqWriteInput.safeExtend({
   expectedVersion: version,
 })
 
+/** Create/replace a legal document. The title is the document title customers see (unlike an FAQ's internal title). */
+export const legalWriteInput = z
+  .object({
+    title: plain(80),
+    sort: z.number().int().min(0).max(10000),
+    startsAt: instant.optional(),
+    endsAt: instant.optional(),
+    payload: legalFields,
+  })
+  .strict()
+  .refine((v) => !v.startsAt || !v.endsAt || Date.parse(v.startsAt) < Date.parse(v.endsAt), {
+    path: ['endsAt'],
+    message: 'end must be after start',
+  })
+
+export const legalUpdateInput = legalWriteInput.safeExtend({
+  blockId: z.string().regex(BLOCK_ID),
+  expectedVersion: version,
+})
+
+/**
+ * The document the public page serves for a slug right now: among LEGAL blocks that are live (PUBLISHED and inside the
+ * window), the most recently updated, then the greater id, exactly the backend's deterministic pick. `undefined` means the
+ * public page answers 404 for this slug.
+ */
+export function liveLegalFor(
+  items: readonly ContentBlock[],
+  slug: string,
+  nowMs: number,
+): ContentBlock | undefined {
+  return items
+    .filter(
+      (b) =>
+        b.type === 'LEGAL' && b.payload.legalSlug === slug && effectiveStatus(b, nowMs) === 'live',
+    )
+    .sort(
+      (a, b) =>
+        Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? '') ||
+        b.blockId.localeCompare(a.blockId),
+    )[0]
+}
+
 export const statusInput = z
   .object({
     blockId: z.string().regex(BLOCK_ID),
@@ -137,7 +233,7 @@ const CODE_COPY: Record<string, string> = {
   INVALID_CONTENT:
     'The backend rejected the content (check the text rules and the publication window).',
   STATE_CONFLICT:
-    'That change is not allowed from the current status (an archived entry is final; the 200-entry limit may be reached). It has been reloaded.',
+    'That change is not allowed from the current status (an archived entry is final; the 200-entry limit may be reached). For legal documents, only one Terms and one Privacy document may be published for any period: unpublish the other one, or end its window before this one starts. It has been reloaded.',
   STALE_VERSION:
     'This entry changed since you loaded it. The latest version has been reloaded; review it and try again.',
 }

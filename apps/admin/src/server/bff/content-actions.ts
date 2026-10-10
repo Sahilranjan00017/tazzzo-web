@@ -1,7 +1,13 @@
 import 'server-only'
 import { z } from 'zod'
 import { appConfigForm } from '@/lib/appconfig'
-import { faqUpdateInput, faqWriteInput, statusInput } from '@/lib/content'
+import {
+  faqUpdateInput,
+  faqWriteInput,
+  legalUpdateInput,
+  legalWriteInput,
+  statusInput,
+} from '@/lib/content'
 import type { BffMutationSpec } from './mutation'
 
 const blockOut = z.object({ blockId: z.string(), status: z.string(), version: z.number().int() })
@@ -39,6 +45,47 @@ export const updateFaqMutation: BffMutationSpec<
   routeId: 'content.faq.update',
   method: 'PUT',
   input: faqUpdateInput,
+  backend: ({ blockId, ...rest }) => ({
+    path: `/api/v1/admin/content/blocks/${encodeURIComponent(blockId)}`,
+    body: rest,
+  }),
+  output: blockOut,
+  toClient: (o) => o,
+}
+
+/**
+ * `POST /api/v1/admin/content/blocks` for a legal document. Placement HELP and type LEGAL are fixed here, never taken from
+ * the browser; the audience is left to the backend (HELP is always BOTH). Created as a DRAFT.
+ */
+export const createLegalMutation: BffMutationSpec<
+  z.infer<typeof legalWriteInput>,
+  BlockOut,
+  BlockOut
+> = {
+  routeId: 'content.legal.create',
+  method: 'POST',
+  input: legalWriteInput,
+  backend: (v) => ({
+    path: '/api/v1/admin/content/blocks',
+    body: { placement: 'HELP', type: 'LEGAL', ...v },
+  }),
+  output: blockOut,
+  toClient: (o) => o,
+}
+
+/**
+ * `PUT .../blocks/{id}` for a legal document: full replace (an omitted publication bound or effective date is CLEARED).
+ * Editing a PUBLISHED document changes the public page immediately; the backend refuses an edit that would leave two
+ * documents published for the same slug and period (409 STATE_CONFLICT).
+ */
+export const updateLegalMutation: BffMutationSpec<
+  z.infer<typeof legalUpdateInput>,
+  BlockOut,
+  BlockOut
+> = {
+  routeId: 'content.legal.update',
+  method: 'PUT',
+  input: legalUpdateInput,
   backend: ({ blockId, ...rest }) => ({
     path: `/api/v1/admin/content/blocks/${encodeURIComponent(blockId)}`,
     body: rest,

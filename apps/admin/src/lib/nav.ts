@@ -135,6 +135,7 @@ export const NAV: readonly NavSection[] = [
         state: 'available',
       },
       { id: 'faqs', label: 'FAQs', href: '/content/faqs', roles: GENERAL, state: 'available' },
+      { id: 'legal', label: 'Legal', href: '/content/legal', roles: GENERAL, state: 'available' },
       {
         id: 'app-config',
         label: 'App config',

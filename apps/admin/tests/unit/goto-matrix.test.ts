@@ -85,6 +85,7 @@ describe('access matrix', () => {
       support: 'Support cases',
       'home-content': 'Home content, FAQs, app config',
       faqs: 'Home content, FAQs, app config',
+      legal: 'Legal documents (terms, privacy)',
       'app-config': 'Home content, FAQs, app config',
       audit: 'Audit log',
     }
