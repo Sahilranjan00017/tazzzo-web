@@ -32,7 +32,9 @@ export async function untilPage(
       return true
     }
     if (Date.now() - t0 > timeoutMs) {
-      log(`  website ${path}: "${what}" NOT observed within ${Math.round(timeoutMs / 1000)} s (last status ${r?.status()})`)
+      log(
+        `  website ${path}: "${what}" NOT observed within ${Math.round(timeoutMs / 1000)} s (last status ${r?.status()})`,
+      )
       return false
     }
     await sleep(everyMs)
@@ -41,19 +43,37 @@ export async function untilPage(
 
 /** Block ids of banners / rails / grids on the storefront home, in document order. */
 export async function webBlocks(page: Page): Promise<{ id: string; kind: string }[]> {
-  return page.$$eval('.banner[data-block-id], section.rail[data-block-id], section.grid-block[data-block-id]', (els) =>
-    els.map((e) => ({
-      id: e.getAttribute('data-block-id')!,
-      kind: e.classList.contains('banner') ? 'banner' : e.classList.contains('rail') ? 'rail' : 'grid',
-    })),
+  return page.$$eval(
+    '.banner[data-block-id], section.rail[data-block-id], section.grid-block[data-block-id]',
+    (els) =>
+      els.map((e) => ({
+        id: e.getAttribute('data-block-id')!,
+        kind: e.classList.contains('banner')
+          ? 'banner'
+          : e.classList.contains('rail')
+            ? 'rail'
+            : 'grid',
+      })),
   )
 }
-export async function untilHome(page: Page, what: string, ok: (ids: string[]) => boolean, timeoutMs = 220_000): Promise<string[]> {
+export async function untilHome(
+  page: Page,
+  what: string,
+  ok: (ids: string[]) => boolean,
+  timeoutMs = 220_000,
+): Promise<string[]> {
   let last: string[] = []
-  await untilPage(page, what, '/', async (p) => {
-    last = (await webBlocks(p)).map((b) => b.id)
-    return ok(last)
-  }, timeoutMs, 5_000)
+  await untilPage(
+    page,
+    what,
+    '/',
+    async (p) => {
+      last = (await webBlocks(p)).map((b) => b.id)
+      return ok(last)
+    },
+    timeoutMs,
+    5_000,
+  )
   return last
 }
 
@@ -62,14 +82,30 @@ export async function uiSetLocation(page: Page, pin = '560001') {
   await page.goto('/location')
   await page.getByLabel('PIN code').fill(pin)
   await page.getByRole('button', { name: 'Check PIN code' }).click()
-  await page.getByTestId('location-chip').filter({ hasText: pin }).waitFor({ timeout: 15_000 }).catch(() => undefined)
+  await page
+    .getByTestId('location-chip')
+    .filter({ hasText: pin })
+    .waitFor({ timeout: 15_000 })
+    .catch(() => undefined)
 }
 
 /** Sign in, save a serviceable address, return the phone. */
-export async function uiCustomer(page: Page, signIn: (p: Page, phone?: string, next?: string) => Promise<string>, pin = '560001'): Promise<string> {
+export async function uiCustomer(
+  page: Page,
+  signIn: (p: Page, phone?: string, next?: string) => Promise<string>,
+  pin = '560001',
+): Promise<string> {
   const phone = await signIn(page, undefined, '/account/addresses/new')
-  const v: Record<string, string> = { 'Full name': 'E2E Tester', 'Mobile number': phone, 'Address line 1': '12 MG Road', City: 'Bengaluru', State: 'Karnataka', 'PIN code': pin }
-  for (const [label, value] of Object.entries(v)) await page.getByLabel(label, { exact: true }).fill(value)
+  const v: Record<string, string> = {
+    'Full name': 'E2E Tester',
+    'Mobile number': phone,
+    'Address line 1': '12 MG Road',
+    City: 'Bengaluru',
+    State: 'Karnataka',
+    'PIN code': pin,
+  }
+  for (const [label, value] of Object.entries(v))
+    await page.getByLabel(label, { exact: true }).fill(value)
   await page.getByRole('button', { name: 'Save address' }).click()
   await page.waitForURL(/\/account\/addresses$/)
   return phone
@@ -77,17 +113,24 @@ export async function uiCustomer(page: Page, signIn: (p: Page, phone?: string, n
 export async function uiAdd(page: Page, sku: string) {
   await page.goto(`/p/${sku}`)
   await page.getByRole('button', { name: 'Add to cart' }).click()
-  await page.getByTestId('add-status').filter({ hasText: /^Added/ }).waitFor({ timeout: 15_000 })
+  await page
+    .getByTestId('add-status')
+    .filter({ hasText: /^Added/ })
+    .waitFor({ timeout: 15_000 })
 }
 /** /checkout/delivery: first selectable slot -> Save delivery choice -> Continue -> review page. */
 export async function uiDelivery(page: Page) {
   await page.goto('/checkout/delivery')
-  const slot = page.locator('[data-testid="slot-option"] input[type="radio"]:not([disabled])').first()
+  const slot = page
+    .locator('[data-testid="slot-option"] input[type="radio"]:not([disabled])')
+    .first()
   await slot.check()
   await page.getByRole('button', { name: 'Save delivery choice' }).click()
   await page.getByTestId('delivery-saved').waitFor({ timeout: 15_000 })
   await page.getByTestId('delivery-continue').click()
-  await page.getByRole('heading', { level: 1, name: 'Review your order' }).waitFor({ timeout: 20_000 })
+  await page
+    .getByRole('heading', { level: 1, name: 'Review your order' })
+    .waitFor({ timeout: 20_000 })
   await page.locator('body[data-hydrated]').waitFor({ state: 'attached', timeout: 15_000 })
 }
 

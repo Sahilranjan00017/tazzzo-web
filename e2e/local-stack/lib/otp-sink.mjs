@@ -18,7 +18,8 @@ http
     let body = ''
     req.on('data', (c) => (body += c))
     req.on('end', () => {
-      const ok = req.method === 'POST' && req.url === '/sms' && req.headers['authorization'] === token
+      const ok =
+        req.method === 'POST' && req.url === '/sms' && req.headers['authorization'] === token
       if (!ok) {
         res.writeHead(req.headers['authorization'] === token ? 404 : 401).end()
         process.stdout.write(`${new Date().toISOString()} sms REFUSED ${req.method} ${req.url}\n`)
@@ -28,7 +29,10 @@ http
         const m = JSON.parse(body)
         const digits = String(m.to).replace(/\D/g, '')
         const code = /\b(\d{4,8})\b/.exec(String(m.message))?.[1] ?? ''
-        writeFileSync(join(dir, `${digits}.json`), JSON.stringify({ to: m.to, code, at: Date.now() }))
+        writeFileSync(
+          join(dir, `${digits}.json`),
+          JSON.stringify({ to: m.to, code, at: Date.now() }),
+        )
         appendFileSync(join(dir, 'count.log'), `${digits}\n`)
         // the log line never carries the code or the full number
         process.stdout.write(`${new Date().toISOString()} sms accepted to=***${digits.slice(-4)}\n`)

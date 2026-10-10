@@ -15,18 +15,18 @@ component and fake-backend E2E) stay fast and hermetic.
 
 ## What runs
 
-| Piece | What | Where |
-| --- | --- | --- |
-| Backend | `tazzzo-backend` `origin/main`, built from a clean worktree (`scripts/backend-build.sh`), `java -jar`, Java 21. Migrations V0001..V0018 applied by its normal startup path (`TAZZZO_MIGRATION_MODE=APPLY_ON_STARTUP`, `TAZZZO_MIGRATION_ENVIRONMENT=local`, `docs/database/DATABASE_MIGRATION_RUNBOOK.md`) | `127.0.0.1:8080` |
-| MongoDB 7 | single-node replica set `rs0` (transactions) | `127.0.0.1:27117` |
-| Redis 7 | consumer + OTP rate-limit store (`TAZZZO_CONSUMER_RATE_LIMIT_MODE=REDIS`) | `127.0.0.1:6391` |
-| Object store | Versity S3 Gateway, the image digest `S3SignatureEnforcementIT` pins (SigV4, `If-None-Match`), bucket CORS via `PutBucketCors` | `127.0.0.1:7070` |
-| CDN stand-in | `lib/cdn-proxy.mjs`: HTTPS, self-signed cert, GET/HEAD of `p/*` and `c/*` only, reads the private bucket with signed S3 calls, `Cache-Control: public, max-age=31536000, immutable` | `https://localhost:8443` |
-| OTP gateway stand-in | `lib/otp-sink.mjs`: receiver for the backend's real `HttpOtpDeliveryProvider` (see "OTP" below) | `127.0.0.1:7181` |
-| Admin JWKS stand-in | `lib/idp.mjs`: public key set for the human-admin trust (see "Admin credentials") | `127.0.0.1:7182` |
-| Counting proxy | `lib/api-proxy.mjs`: between the storefront server and the backend; records method/path/query and which trusted-caller headers were present (never secrets, bodies) | `127.0.0.1:8081` |
-| Storefront | `apps/storefront` of this repo, `next build` + `next start`, `NODE_ENV=production` | `http://localhost:3100` |
-| CMS origin | a loopback page at the CMS origin used only for the browser-direct presigned PUT | `http://localhost:3000` |
+| Piece                | What                                                                                                                                                                                                                                                                                                       | Where                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Backend              | `tazzzo-backend` `origin/main`, built from a clean worktree (`scripts/backend-build.sh`), `java -jar`, Java 21. Migrations V0001..V0018 applied by its normal startup path (`TAZZZO_MIGRATION_MODE=APPLY_ON_STARTUP`, `TAZZZO_MIGRATION_ENVIRONMENT=local`, `docs/database/DATABASE_MIGRATION_RUNBOOK.md`) | `127.0.0.1:8080`         |
+| MongoDB 7            | single-node replica set `rs0` (transactions)                                                                                                                                                                                                                                                               | `127.0.0.1:27117`        |
+| Redis 7              | consumer + OTP rate-limit store (`TAZZZO_CONSUMER_RATE_LIMIT_MODE=REDIS`)                                                                                                                                                                                                                                  | `127.0.0.1:6391`         |
+| Object store         | Versity S3 Gateway, the image digest `S3SignatureEnforcementIT` pins (SigV4, `If-None-Match`), bucket CORS via `PutBucketCors`                                                                                                                                                                             | `127.0.0.1:7070`         |
+| CDN stand-in         | `lib/cdn-proxy.mjs`: HTTPS, self-signed cert, GET/HEAD of `p/*` and `c/*` only, reads the private bucket with signed S3 calls, `Cache-Control: public, max-age=31536000, immutable`                                                                                                                        | `https://localhost:8443` |
+| OTP gateway stand-in | `lib/otp-sink.mjs`: receiver for the backend's real `HttpOtpDeliveryProvider` (see "OTP" below)                                                                                                                                                                                                            | `127.0.0.1:7181`         |
+| Admin JWKS stand-in  | `lib/idp.mjs`: public key set for the human-admin trust (see "Admin credentials")                                                                                                                                                                                                                          | `127.0.0.1:7182`         |
+| Counting proxy       | `lib/api-proxy.mjs`: between the storefront server and the backend; records method/path/query and which trusted-caller headers were present (never secrets, bodies)                                                                                                                                        | `127.0.0.1:8081`         |
+| Storefront           | `apps/storefront` of this repo, `next build` + `next start`, `NODE_ENV=production`                                                                                                                                                                                                                         | `http://localhost:3100`  |
+| CMS origin           | a loopback page at the CMS origin used only for the browser-direct presigned PUT                                                                                                                                                                                                                           | `http://localhost:3000`  |
 
 ## Usage (one command per step; idempotent and re-runnable)
 

@@ -25,7 +25,9 @@ writeFileSync(join(process.env.E2E_CERT_DIR, 'idp.kid'), jwk.kid)
 http
   .createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/jwks') {
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ keys: [jwk] }))
+      res
+        .writeHead(200, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ keys: [jwk] }))
     } else res.writeHead(404).end()
   })
   .listen(port, '127.0.0.1', () => process.stdout.write(`jwks stand-in on 127.0.0.1:${port}\n`))

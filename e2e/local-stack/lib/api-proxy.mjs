@@ -36,7 +36,13 @@ http
     entries.push(entry)
     if (entries.length > 20000) entries.splice(0, 5000)
     const up = http.request(
-      { host: target.hostname, port: target.port, method: req.method, path: req.url, headers: req.headers },
+      {
+        host: target.hostname,
+        port: target.port,
+        method: req.method,
+        path: req.url,
+        headers: req.headers,
+      },
       (r) => {
         entry.status = r.statusCode
         res.writeHead(r.statusCode, r.headers)
@@ -49,4 +55,6 @@ http
     })
     req.pipe(up)
   })
-  .listen(listen, '127.0.0.1', () => process.stdout.write(`api proxy on 127.0.0.1:${listen} -> ${target.origin}\n`))
+  .listen(listen, '127.0.0.1', () =>
+    process.stdout.write(`api proxy on 127.0.0.1:${listen} -> ${target.origin}\n`),
+  )

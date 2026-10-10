@@ -208,7 +208,7 @@ async function backendRequests(): Promise<
 test('per-visitor rate limit (default limits, behind a trusted proxy): a burst to /search gets 429', async ({
   request,
 }) => {
-  const visitor = { 'x-forwarded-for': '203.0.113.50' }
+  const visitor = { 'x-forwarded-for': '192.0.2.50' }
   const searchCalls = async () =>
     (await backendRequests()).filter((r) => r.path === '/v1/search').length
   const before = await searchCalls()
@@ -238,15 +238,13 @@ test('per-visitor rate limit (default limits, behind a trusted proxy): a burst t
 
   // Writing a fresh address on the client-controlled left of X-Forwarded-For buys nothing.
   const spoofed = await request.get('/search?q=dal', {
-    headers: { 'x-forwarded-for': '198.51.100.77, 203.0.113.50' },
+    headers: { 'x-forwarded-for': '198.51.100.77, 192.0.2.50' },
   })
   expect(spoofed.status()).toBe(429)
   // Ordinary pages still have their own (larger) bucket; another visitor is unaffected.
   expect((await request.get('/', { headers: visitor })).status()).toBe(200)
   expect(
-    (
-      await request.get('/search?q=dal', { headers: { 'x-forwarded-for': '203.0.113.51' } })
-    ).status(),
+    (await request.get('/search?q=dal', { headers: { 'x-forwarded-for': '192.0.2.51' } })).status(),
   ).toBe(200)
 })
 

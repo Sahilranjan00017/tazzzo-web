@@ -10,10 +10,15 @@ for (const run of runs) {
   const checks = rs.reduce((a, r) => a + r.checks, 0)
   const failed = rs.reduce((a, r) => a + r.failed, 0)
   out.push(`### ${run}: ${pass}/${rs.length} journeys PASS (${checks - failed}/${checks} checks)\n`)
-  if (existsSync(`${dir}/${run}/cycle.txt`)) out.push('```\n' + readFileSync(`${dir}/${run}/cycle.txt`, 'utf8').trim() + '\n```\n')
-  out.push('| journey | verdict | checks | time | transcript lines | title |\n| --- | --- | --- | --- | --- | --- |')
+  if (existsSync(`${dir}/${run}/cycle.txt`))
+    out.push('```\n' + readFileSync(`${dir}/${run}/cycle.txt`, 'utf8').trim() + '\n```\n')
+  out.push(
+    '| journey | verdict | checks | time | transcript lines | title |\n| --- | --- | --- | --- | --- | --- |',
+  )
   for (const r of rs)
-    out.push(`| ${r.id} | ${r.verdict} | ${r.checks - r.failed}/${r.checks} | ${Math.round(r.ms / 1000)} s | \`${run}/transcript.txt\` L${r.startLine}-${r.endLine} | ${r.title}${r.failures.length ? ' <br>**FAILED:** ' + r.failures.join('; ').replace(/\|/g, '/') : ''}${r.blocked ? ' <br>**BLOCKED:** ' + r.blocked : ''} |`)
+    out.push(
+      `| ${r.id} | ${r.verdict} | ${r.checks - r.failed}/${r.checks} | ${Math.round(r.ms / 1000)} s | \`${run}/transcript.txt\` L${r.startLine}-${r.endLine} | ${r.title}${r.failures.length ? ' <br>**FAILED:** ' + r.failures.join('; ').replace(/\|/g, '/') : ''}${r.blocked ? ' <br>**BLOCKED:** ' + r.blocked : ''} |`,
+    )
   out.push('')
 }
 console.log(out.join('\n'))

@@ -45,7 +45,9 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // ---------------------------------------------------------------------------------------------------------------------
 const TRANSCRIPT = () => join(env.evidence, 'transcript.txt')
 // A worker restart reloads this module: pick the transcript position and the recorded results up from the files.
-let lineNo = existsSync(TRANSCRIPT()) ? readFileSync(TRANSCRIPT(), 'utf8').split('\n').length - 1 : 0
+let lineNo = existsSync(TRANSCRIPT())
+  ? readFileSync(TRANSCRIPT(), 'utf8').split('\n').length - 1
+  : 0
 export const currentLine = () => lineNo
 export function resetTranscript(header: string) {
   writeFileSync(TRANSCRIPT(), header + '\n')
@@ -53,15 +55,29 @@ export function resetTranscript(header: string) {
 }
 export function redact(s: string): string {
   let out = s.replace(/\?X-Amz-[^"\s]*/g, '?X-Amz-…(presigned query redacted)')
-  out = out.replace(/<AWSAccessKeyId>[^<]*<\/AWSAccessKeyId>/g, '<AWSAccessKeyId>(redacted)</AWSAccessKeyId>')
+  out = out.replace(
+    /<AWSAccessKeyId>[^<]*<\/AWSAccessKeyId>/g,
+    '<AWSAccessKeyId>(redacted)</AWSAccessKeyId>',
+  )
   out = out.replace(/"(accessToken|refreshToken|token)":"[^"]*"/g, '"$1":"<redacted>"')
   out = out.replace(/"otp":"[^"]*"/g, '"otp":"<redacted>"')
   out = out.replace(/\b(SES_[A-Za-z0-9_-]{4,}\.)[A-Za-z0-9_-]+/g, '$1<redacted>')
-  out = out.replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<jwt redacted>')
+  out = out.replace(
+    /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+    '<jwt redacted>',
+  )
   const secrets = [
-    env.cmsToken, env.readToken, env.callerSecret, process.env.E2E_S3_ACCESS_KEY, process.env.E2E_S3_SECRET_KEY,
-    process.env.E2E_CURSOR_KEY, process.env.E2E_SESSION_SECRET, process.env.E2E_SMS_TOKEN,
-    process.env.E2E_CUSTOMER_ACCESS_KEY, process.env.E2E_CUSTOMER_REFRESH_KEY, process.env.E2E_OTP_HMAC_KEY,
+    env.cmsToken,
+    env.readToken,
+    env.callerSecret,
+    process.env.E2E_S3_ACCESS_KEY,
+    process.env.E2E_S3_SECRET_KEY,
+    process.env.E2E_CURSOR_KEY,
+    process.env.E2E_SESSION_SECRET,
+    process.env.E2E_SMS_TOKEN,
+    process.env.E2E_CUSTOMER_ACCESS_KEY,
+    process.env.E2E_CUSTOMER_REFRESH_KEY,
+    process.env.E2E_OTP_HMAC_KEY,
   ]
   for (const secret of secrets) if (secret) out = out.split(secret).join('<redacted>')
   return out
@@ -91,7 +107,9 @@ export interface JourneyResult {
   ms: number
 }
 const RESULTS = () => join(env.evidence, 'results.json')
-const results: JourneyResult[] = existsSync(RESULTS()) ? JSON.parse(readFileSync(RESULTS(), 'utf8')) : []
+const results: JourneyResult[] = existsSync(RESULTS())
+  ? JSON.parse(readFileSync(RESULTS(), 'utf8'))
+  : []
 let current: { id: string; n: number; failures: string[] } | null = null
 
 /** A recorded assertion. Never throws: the journey continues and reports FAIL at the end. */
@@ -100,7 +118,10 @@ export function check(name: string, cond: unknown, detail?: unknown): boolean {
   const ok = Boolean(cond)
   const n = j ? ++j.n : 0
   const tag = j ? `${j.id}.${n}` : '?'
-  const extra = detail === undefined ? '' : ` :: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 600)
+  const extra =
+    detail === undefined
+      ? ''
+      : ` :: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 600)
   log(`  CHECK ${ok ? 'PASS' : 'FAIL'} ${tag} ${name}${extra}`)
   if (!ok && j) j.failures.push(`${tag} ${name}`)
   return ok
@@ -115,11 +136,19 @@ export function blocked(reason: string): never {
 const STATE = () => join(env.runDir, 'journey-state.json')
 export const S = {
   get<T = any>(k: string): T | undefined {
-    try { return JSON.parse(readFileSync(STATE(), 'utf8'))[k] } catch { return undefined }
+    try {
+      return JSON.parse(readFileSync(STATE(), 'utf8'))[k]
+    } catch {
+      return undefined
+    }
   },
   set(k: string, v: unknown) {
     let cur: Record<string, unknown> = {}
-    try { cur = JSON.parse(readFileSync(STATE(), 'utf8')) } catch { /* new */ }
+    try {
+      cur = JSON.parse(readFileSync(STATE(), 'utf8'))
+    } catch {
+      /* new */
+    }
     cur[k] = v
     writeFileSync(STATE(), JSON.stringify(cur))
   },
@@ -132,7 +161,11 @@ export function resetRunFiles(header: string) {
 }
 
 /** Registers one journey as one Playwright test. Verdict: PASS (all checks), FAIL (a check failed or it threw), BLOCKED. */
-export function journey(id: string, title: string, fn: (ctx: { page: Page; browser: any; info: TestInfo }) => Promise<void>) {
+export function journey(
+  id: string,
+  title: string,
+  fn: (ctx: { page: Page; browser: any; info: TestInfo }) => Promise<void>,
+) {
   test(`${id} ${title}`, async ({ page, browser }, info) => {
     const startLine = lineNo + 1
     const t0 = Date.now()
@@ -149,16 +182,36 @@ export function journey(id: string, title: string, fn: (ctx: { page: Page; brows
         log(`  BLOCKED ${id}: ${e.message}`)
       } else {
         verdict = 'FAIL'
-        current.failures.push(`THROWN ${String(e?.message ?? e).split('\n')[0]!.slice(0, 300)}`)
-        log(`  THROWN ${id}: ${String(e?.stack ?? e).split('\n').slice(0, 4).join(' | ').slice(0, 800)}`)
+        current.failures.push(
+          `THROWN ${String(e?.message ?? e)
+            .split('\n')[0]!
+            .slice(0, 300)}`,
+        )
+        log(
+          `  THROWN ${id}: ${String(e?.stack ?? e)
+            .split('\n')
+            .slice(0, 4)
+            .join(' | ')
+            .slice(0, 800)}`,
+        )
       }
     }
     if (verdict === 'PASS' && current.failures.length) verdict = 'FAIL'
     const r: JourneyResult = {
-      id, title, verdict, checks: current.n, failed: current.failures.length, failures: current.failures,
-      blocked: blockedReason, startLine, endLine: lineNo, ms: Date.now() - t0,
+      id,
+      title,
+      verdict,
+      checks: current.n,
+      failed: current.failures.length,
+      failures: current.failures,
+      blocked: blockedReason,
+      startLine,
+      endLine: lineNo,
+      ms: Date.now() - t0,
     }
-    log(`  RESULT ${id} ${verdict} checks=${r.checks} failed=${r.failed} lines ${startLine}-${lineNo} ${Math.round(r.ms / 1000)}s`)
+    log(
+      `  RESULT ${id} ${verdict} checks=${r.checks} failed=${r.failed} lines ${startLine}-${lineNo} ${Math.round(r.ms / 1000)}s`,
+    )
     results.push(r)
     writeFileSync(RESULTS(), JSON.stringify(results, null, 1))
     current = null
@@ -170,7 +223,14 @@ export function journey(id: string, title: string, fn: (ctx: { page: Page; brows
 // ---------------------------------------------------------------------------------------------------------------------
 // HTTP to the backend
 // ---------------------------------------------------------------------------------------------------------------------
-export type Role = 'cms-writer' | 'reader' | 'anonymous' | 'order-ops' | 'support-agent' | 'human-writer' | 'human-reader'
+export type Role =
+  | 'cms-writer'
+  | 'reader'
+  | 'anonymous'
+  | 'order-ops'
+  | 'support-agent'
+  | 'human-writer'
+  | 'human-reader'
 export interface Res {
   status: number
   body: any
@@ -179,18 +239,29 @@ export interface Res {
 }
 
 const HUMAN_SUB: Record<string, string> = {
-  'order-ops': 'e2e-sub-ops', 'support-agent': 'e2e-sub-support', 'human-writer': 'e2e-sub-writer', 'human-reader': 'e2e-sub-reader',
+  'order-ops': 'e2e-sub-ops',
+  'support-agent': 'e2e-sub-support',
+  'human-writer': 'e2e-sub-writer',
+  'human-reader': 'e2e-sub-reader',
 }
 /** RS256 ID token for an allowlisted human admin (see the header comment). Short-lived; never logged. */
 export function adminToken(sub: string): string {
   const key = readFileSync(join(env.certDir, 'idp.key'))
   const kid = readFileSync(join(env.certDir, 'idp.kid'), 'utf8').trim()
-  const b64u = (o: unknown) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url')
+  const b64u = (o: unknown) =>
+    Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url')
   const now = Math.floor(Date.now() / 1000)
   const h = b64u({ alg: 'RS256', typ: 'JWT', kid })
   const p = b64u({
-    iss: 'https://accounts.google.com', aud: env.adminAudience, azp: env.adminAudience, sub, hd: env.adminHd,
-    email: `${sub}@${env.adminHd}`, email_verified: true, iat: now, exp: now + 300,
+    iss: 'https://accounts.google.com',
+    aud: env.adminAudience,
+    azp: env.adminAudience,
+    sub,
+    hd: env.adminHd,
+    email: `${sub}@${env.adminHd}`,
+    email_verified: true,
+    iat: now,
+    exp: now + 300,
   })
   const sig = createSign('RSA-SHA256').update(`${h}.${p}`).sign(key).toString('base64url')
   return `${h}.${p}.${sig}`
@@ -222,7 +293,8 @@ export async function call(method: string, path: string, opts: CallOpts = {}): P
     headers['X-Tazzzo-Caller'] = env.callerName
     headers['X-Tazzzo-Caller-Secret'] = env.callerSecret
   }
-  if (opts.body !== undefined || opts.rawBody !== undefined) headers['Content-Type'] ??= 'application/json'
+  if (opts.body !== undefined || opts.rawBody !== undefined)
+    headers['Content-Type'] ??= 'application/json'
   const payload = opts.rawBody ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body))
   const r = await fetch(env.backend + path, { method, headers, body: payload })
   const text = await r.text()
@@ -234,58 +306,136 @@ export async function call(method: string, path: string, opts: CallOpts = {}): P
   }
   if (!opts.quiet) {
     const who = opts.bearer ? 'customer' : role
-    log(`$ ${method} ${path}  [${opts.label ?? who}]${payload === undefined ? '' : '  ' + payload.slice(0, 500)}`)
-    log(`  -> ${r.status} ${typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body).slice(0, 700)}`)
+    log(
+      `$ ${method} ${path}  [${opts.label ?? who}]${payload === undefined ? '' : '  ' + payload.slice(0, 500)}`,
+    )
+    log(
+      `  -> ${r.status} ${typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body).slice(0, 700)}`,
+    )
   }
   return { status: r.status, body, headers: r.headers, text }
 }
-export const get = (path: string, opts: CallOpts = {}) => call('GET', path, { role: 'anonymous', ...opts })
+export const get = (path: string, opts: CallOpts = {}) =>
+  call('GET', path, { role: 'anonymous', ...opts })
 /** Public read the way the apps/storefront server makes it: anonymous + trusted-caller headers. */
-export const pub = (path: string, opts: CallOpts = {}) => call('GET', path, { role: 'anonymous', caller: true, ...opts })
+export const pub = (path: string, opts: CallOpts = {}) =>
+  call('GET', path, { role: 'anonymous', caller: true, ...opts })
 
 // ---- catalogue / commerce admin (apps/admin/src/server/bff/*-actions.ts) ----
 /** product-actions.ts createProductMutation -> POST /api/v1/products */
 export const createProduct = (v: Record<string, unknown>, role: Role = 'cms-writer') =>
   call('POST', '/api/v1/products', { role, body: v })
 export const productBody = (id: string, title: string, over: Record<string, unknown> = {}) => ({
-  id, productType: 'single', identityType: 'internal', internalKey: `k-${createHash('sha1').update(id).digest('hex').slice(0, 24)}`, brandCode: 'E2E',
-  title, verticalId: 'TZV-000001', releaseId: 'R1', classificationStatus: 'confirmed', ...over,
+  id,
+  productType: 'single',
+  identityType: 'internal',
+  internalKey: `k-${createHash('sha1').update(id).digest('hex').slice(0, 24)}`,
+  brandCode: 'E2E',
+  title,
+  verticalId: 'TZV-000001',
+  releaseId: 'R1',
+  classificationStatus: 'confirmed',
+  ...over,
 })
 /** product-actions.ts lifecycleMutation -> POST /api/v1/products/{id}/activate  (If-Match = version) */
 export const activate = (id: string, version: number) =>
-  call('POST', `/api/v1/products/${encodeURIComponent(id)}/activate`, { headers: { 'If-Match': String(version) } })
+  call('POST', `/api/v1/products/${encodeURIComponent(id)}/activate`, {
+    headers: { 'If-Match': String(version) },
+  })
 /** commerce-actions.ts pricing.set -> PUT /api/v1/admin/prices/{sku} */
-export const setPrice = (sku: string, sell: number, mrp: number, expectedVersion?: number, role: Role = 'cms-writer') =>
+export const setPrice = (
+  sku: string,
+  sell: number,
+  mrp: number,
+  expectedVersion?: number,
+  role: Role = 'cms-writer',
+) =>
   call('PUT', `/api/v1/admin/prices/${encodeURIComponent(sku)}`, {
-    role, body: { sellingPricePaise: sell, mrpPaise: mrp, currency: 'INR', ...(expectedVersion ? { expectedVersion } : {}) } })
+    role,
+    body: {
+      sellingPricePaise: sell,
+      mrpPaise: mrp,
+      currency: 'INR',
+      ...(expectedVersion ? { expectedVersion } : {}),
+    },
+  })
 /** commerce-actions.ts inventory.set -> PUT /api/v1/admin/inventory/{sku}/{location} */
-export const setStock = (sku: string, onHand: number, over: Record<string, unknown> = {}, loc = 'FL-E2E-1', role: Role = 'cms-writer') =>
+export const setStock = (
+  sku: string,
+  onHand: number,
+  over: Record<string, unknown> = {},
+  loc = 'FL-E2E-1',
+  role: Role = 'cms-writer',
+) =>
   call('PUT', `/api/v1/admin/inventory/${encodeURIComponent(sku)}/${encodeURIComponent(loc)}`, {
-    role, body: { onHand, lowStockThreshold: 3, maxPurchasable: Math.max(1, Math.min(10, onHand)), ...over } })
+    role,
+    body: {
+      onHand,
+      lowStockThreshold: 3,
+      maxPurchasable: Math.max(1, Math.min(10, onHand)),
+      ...over,
+    },
+  })
 /** A complete sellable product: create + activate + price + stock. */
-export async function sellable(id: string, title: string, o: { sell?: number; mrp?: number; stock?: number; vertical?: string } = {}) {
-  const c = await createProduct(productBody(id, title, o.vertical ? { verticalId: o.vertical } : {}))
+export async function sellable(
+  id: string,
+  title: string,
+  o: { sell?: number; mrp?: number; stock?: number; vertical?: string } = {},
+) {
+  const c = await createProduct(
+    productBody(id, title, o.vertical ? { verticalId: o.vertical } : {}),
+  )
   if (c.status !== 201) throw new Error(`create ${id}: ${c.status} ${c.text.slice(0, 200)}`)
   const a = await activate(id, c.body.version)
   if (a.status !== 200) throw new Error(`activate ${id}: ${a.status}`)
   const p = await setPrice(id, o.sell ?? 20000, o.mrp ?? 25000)
   const s = await setStock(id, o.stock ?? 20)
-  if (p.status >= 300 || s.status >= 300) throw new Error(`price/stock ${id}: ${p.status}/${s.status}`)
+  if (p.status >= 300 || s.status >= 300)
+    throw new Error(`price/stock ${id}: ${p.status}/${s.status}`)
 }
 
 // ---- media / content (media-actions.ts, home-content-actions.ts, content-actions.ts) ----
-export const productUploadTarget = (ownerId: string, contentType: string, sizeBytes: number, role: Role = 'cms-writer') =>
-  call('POST', '/api/v1/admin/media/uploads', { role, body: { ownerType: 'product', ownerId, contentType, sizeBytes } })
-export const putMediaSet = (ownerId: string, assets: unknown[], expectedVersion?: number, role: Role = 'cms-writer') =>
+export const productUploadTarget = (
+  ownerId: string,
+  contentType: string,
+  sizeBytes: number,
+  role: Role = 'cms-writer',
+) =>
+  call('POST', '/api/v1/admin/media/uploads', {
+    role,
+    body: { ownerType: 'product', ownerId, contentType, sizeBytes },
+  })
+export const putMediaSet = (
+  ownerId: string,
+  assets: unknown[],
+  expectedVersion?: number,
+  role: Role = 'cms-writer',
+) =>
   call('PUT', `/api/v1/admin/media/product/${encodeURIComponent(ownerId)}`, {
-    role, body: { assets, ...(expectedVersion ? { expectedVersion } : {}) } })
-export const contentUploadTarget = (contentType: string, sizeBytes: number, role: Role = 'cms-writer') =>
-  call('POST', '/api/v1/admin/content/uploads', { role, body: { contentType, sizeBytes } })
+    role,
+    body: { assets, ...(expectedVersion ? { expectedVersion } : {}) },
+  })
+export const contentUploadTarget = (
+  contentType: string,
+  sizeBytes: number,
+  role: Role = 'cms-writer',
+) => call('POST', '/api/v1/admin/content/uploads', { role, body: { contentType, sizeBytes } })
 export const createBlock = (v: Record<string, unknown>, role: Role = 'cms-writer') =>
   call('POST', '/api/v1/admin/content/blocks', { role, body: { placement: 'HOME', ...v } })
-export const setStatus = (blockId: string, to: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED', expectedVersion: number, role: Role = 'cms-writer') =>
-  call('POST', `/api/v1/admin/content/blocks/${encodeURIComponent(blockId)}/status`, { role, body: { to, expectedVersion } })
-export const reorder = (order: { blockId: string; expectedVersion: number }[], role: Role = 'cms-writer') =>
+export const setStatus = (
+  blockId: string,
+  to: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED',
+  expectedVersion: number,
+  role: Role = 'cms-writer',
+) =>
+  call('POST', `/api/v1/admin/content/blocks/${encodeURIComponent(blockId)}/status`, {
+    role,
+    body: { to, expectedVersion },
+  })
+export const reorder = (
+  order: { blockId: string; expectedVersion: number }[],
+  role: Role = 'cms-writer',
+) =>
   call('POST', '/api/v1/admin/content/blocks/reorder', { role, body: { placement: 'HOME', order } })
 export async function listBlocks(status?: string): Promise<any[]> {
   const q = status ? `&status=${status}` : ''
@@ -294,18 +444,32 @@ export async function listBlocks(status?: string): Promise<any[]> {
   return r.body.items
 }
 export const preview = (channel: 'app' | 'web', drafts: boolean, at?: string) =>
-  call('GET', `/api/v1/admin/content/preview/home?channel=${channel}&drafts=${drafts}${at ? `&at=${encodeURIComponent(at)}` : ''}`)
+  call(
+    'GET',
+    `/api/v1/admin/content/preview/home?channel=${channel}&drafts=${drafts}${at ? `&at=${encodeURIComponent(at)}` : ''}`,
+  )
 export const publicHome = (channel?: 'app' | 'web') =>
   call('GET', `/v1/content/home${channel ? `?channel=${channel}` : ''}`, { role: 'anonymous' })
 export const titles = (home: Res) => (home.body.blocks as any[]).map((b) => b.title as string)
 
 // ---- import jobs (docs/ops/BULK_IMPORT.md; the CMS on main has no BFF for these yet) ----
-export const createJob = (note: string) => call('POST', '/api/v1/admin/imports/jobs', { body: { kind: 'products', note } })
+export const createJob = (note: string) =>
+  call('POST', '/api/v1/admin/imports/jobs', { body: { kind: 'products', note } })
 export const appendCsv = (id: string, csv: string) =>
-  call('POST', `/api/v1/admin/imports/jobs/${id}/rows`, { rawBody: csv, headers: { 'Content-Type': 'text/csv' } })
-export const getJob = (id: string, quiet = true) => call('GET', `/api/v1/admin/imports/jobs/${id}`, { quiet })
-export const jobAction = (id: string, action: 'validate' | 'apply' | 'cancel' | 'resume', version?: number) =>
-  call('POST', `/api/v1/admin/imports/jobs/${id}/${action}`, { body: version === undefined ? {} : { version } })
+  call('POST', `/api/v1/admin/imports/jobs/${id}/rows`, {
+    rawBody: csv,
+    headers: { 'Content-Type': 'text/csv' },
+  })
+export const getJob = (id: string, quiet = true) =>
+  call('GET', `/api/v1/admin/imports/jobs/${id}`, { quiet })
+export const jobAction = (
+  id: string,
+  action: 'validate' | 'apply' | 'cancel' | 'resume',
+  version?: number,
+) =>
+  call('POST', `/api/v1/admin/imports/jobs/${id}/${action}`, {
+    body: version === undefined ? {} : { version },
+  })
 export async function waitJob(id: string, until: string[], timeoutMs = 120_000): Promise<any> {
   const t0 = Date.now()
   let last: any = null
@@ -313,12 +477,16 @@ export async function waitJob(id: string, until: string[], timeoutMs = 120_000):
     const r = await getJob(id)
     last = r.body
     if (until.includes(last?.status)) {
-      log(`  job ${id} reached ${last.status} after ${Math.round((Date.now() - t0) / 100) / 10}s counts=${JSON.stringify(last.counts)} lastError=${last.lastError ?? null}`)
+      log(
+        `  job ${id} reached ${last.status} after ${Math.round((Date.now() - t0) / 100) / 10}s counts=${JSON.stringify(last.counts)} lastError=${last.lastError ?? null}`,
+      )
       return last
     }
     await sleep(700)
   }
-  log(`  job ${id} did NOT reach ${until.join('|')} within ${timeoutMs / 1000}s; last=${JSON.stringify(last)?.slice(0, 400)}`)
+  log(
+    `  job ${id} did NOT reach ${until.join('|')} within ${timeoutMs / 1000}s; last=${JSON.stringify(last)?.slice(0, 400)}`,
+  )
   return last
 }
 
@@ -356,12 +524,24 @@ export class Customer {
   static async signIn(phone = freshPhone()): Promise<Customer> {
     const c = new Customer(phone)
     const before = Date.now() - 1
-    const rq = await call('POST', '/v1/auth/otp/request', { role: 'anonymous', caller: true, body: { phone } })
+    const rq = await call('POST', '/v1/auth/otp/request', {
+      role: 'anonymous',
+      caller: true,
+      body: { phone },
+    })
     if (rq.status !== 202) throw new Error(`otp request ${rq.status} ${rq.text.slice(0, 200)}`)
     const code = await otpFor(phone, before)
-    const vf = await call('POST', '/v1/auth/otp/verify', { role: 'anonymous', caller: true, body: { challengeId: rq.body.challengeId, otp: code } })
+    const vf = await call('POST', '/v1/auth/otp/verify', {
+      role: 'anonymous',
+      caller: true,
+      body: { challengeId: rq.body.challengeId, otp: code },
+    })
     if (vf.status !== 200) throw new Error(`otp verify ${vf.status} ${vf.text.slice(0, 200)}`)
-    const se = await call('POST', '/v1/auth/session', { role: 'anonymous', caller: true, body: { grantId: vf.body.grantId } })
+    const se = await call('POST', '/v1/auth/session', {
+      role: 'anonymous',
+      caller: true,
+      body: { grantId: vf.body.grantId },
+    })
     if (se.status !== 200) throw new Error(`session ${se.status}`)
     c.token = se.body.accessToken
     c.refresh = se.body.refreshToken
@@ -369,43 +549,79 @@ export class Customer {
     return c
   }
   req(method: string, path: string, o: CallOpts = {}) {
-    return call(method, path, { role: 'anonymous', caller: true, bearer: this.token, label: `customer ${this.customerId.slice(0, 8)}`, ...o })
+    return call(method, path, {
+      role: 'anonymous',
+      caller: true,
+      bearer: this.token,
+      label: `customer ${this.customerId.slice(0, 8)}`,
+      ...o,
+    })
   }
   async addAddress(pin = '560001'): Promise<string> {
     const r = await this.req('POST', '/v1/customer/addresses', {
       headers: { 'Idempotency-Key': randomUUID().replace(/-/g, '') },
-      body: { label: 'Home', recipientName: 'E2E Tester', recipientPhone: this.phone, addressLine1: '12 MG Road', city: 'Bengaluru', state: 'Karnataka', postalCode: pin },
+      body: {
+        label: 'Home',
+        recipientName: 'E2E Tester',
+        recipientPhone: this.phone,
+        addressLine1: '12 MG Road',
+        city: 'Bengaluru',
+        state: 'Karnataka',
+        postalCode: pin,
+      },
     })
     if (r.status !== 201) throw new Error(`address ${r.status} ${r.text.slice(0, 200)}`)
     this.addressId = r.body.addressId
     return this.addressId
   }
   cart() {
-    return this.req('GET', `/v1/customer/cart${this.addressId ? `?addressId=${this.addressId}` : ''}`)
+    return this.req(
+      'GET',
+      `/v1/customer/cart${this.addressId ? `?addressId=${this.addressId}` : ''}`,
+    )
   }
   async setItem(sku: string, quantity: number) {
     const c = await this.req('GET', `/v1/customer/cart`, { quiet: true })
-    return this.req('PUT', `/v1/customer/cart/items/${encodeURIComponent(sku)}${this.addressId ? `?addressId=${this.addressId}` : ''}`, {
-      body: { quantity }, headers: { 'If-Match': `"cart-${c.body.version}"` } })
+    return this.req(
+      'PUT',
+      `/v1/customer/cart/items/${encodeURIComponent(sku)}${this.addressId ? `?addressId=${this.addressId}` : ''}`,
+      {
+        body: { quantity },
+        headers: { 'If-Match': `"cart-${c.body.version}"` },
+      },
+    )
   }
   async removeItem(sku: string) {
     const c = await this.req('GET', `/v1/customer/cart`, { quiet: true })
-    return this.req('DELETE', `/v1/customer/cart/items/${encodeURIComponent(sku)}${this.addressId ? `?addressId=${this.addressId}` : ''}`, {
-      headers: { 'If-Match': `"cart-${c.body.version}"` } })
+    return this.req(
+      'DELETE',
+      `/v1/customer/cart/items/${encodeURIComponent(sku)}${this.addressId ? `?addressId=${this.addressId}` : ''}`,
+      {
+        headers: { 'If-Match': `"cart-${c.body.version}"` },
+      },
+    )
   }
   async slot(): Promise<string> {
-    const r = await this.req('GET', '/v1/customer/delivery/slots?pin=560001&days=3', { quiet: true })
-    const s = (r.body.slots as any[]).find((x) => x.status === 'AVAILABLE' && x.label === 'Evening') ?? (r.body.slots as any[]).find((x) => x.status === 'AVAILABLE')
+    const r = await this.req('GET', '/v1/customer/delivery/slots?pin=560001&days=3', {
+      quiet: true,
+    })
+    const s =
+      (r.body.slots as any[]).find((x) => x.status === 'AVAILABLE' && x.label === 'Evening') ??
+      (r.body.slots as any[]).find((x) => x.status === 'AVAILABLE')
     if (!s) throw new Error('no AVAILABLE delivery slot')
     return s.slotId
   }
   async quote(idem = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 12)) {
     const c = await this.req('GET', `/v1/customer/cart`, { quiet: true })
     return this.req('POST', '/v1/customer/checkout/quote', {
-      body: { addressId: this.addressId }, headers: { 'If-Match': `"cart-${c.body.version}"`, 'Idempotency-Key': idem } })
+      body: { addressId: this.addressId },
+      headers: { 'If-Match': `"cart-${c.body.version}"`, 'Idempotency-Key': idem },
+    })
   }
   place(quoteId: string, slotId: string) {
-    return this.req('POST', '/v1/customer/orders', { body: { quoteId, paymentMethod: 'COD', deliverySlotId: slotId } })
+    return this.req('POST', '/v1/customer/orders', {
+      body: { quoteId, paymentMethod: 'COD', deliverySlotId: slotId },
+    })
   }
 }
 
@@ -421,14 +637,21 @@ export async function visitor(page: Page): Promise<string> {
   await page.addInitScript(() => {
     const seen: string[] = []
     ;(window as any).__csp = seen
-    document.addEventListener('securitypolicyviolation', (e) => seen.push(`${e.violatedDirective} ${e.blockedURI}`))
+    document.addEventListener('securitypolicyviolation', (e) =>
+      seen.push(`${e.violatedDirective} ${e.blockedURI}`),
+    )
   })
   return ip
 }
-export const cspViolations = (page: Page) => page.evaluate(() => (window as any).__csp ?? []) as Promise<string[]>
+export const cspViolations = (page: Page) =>
+  page.evaluate(() => (window as any).__csp ?? []) as Promise<string[]>
 
 /** Sign in through the real /login page: phone -> Send code -> code from the gateway stand-in -> Sign in. */
-export async function uiSignIn(page: Page, phone = freshPhone(), next = '/account'): Promise<string> {
+export async function uiSignIn(
+  page: Page,
+  phone = freshPhone(),
+  next = '/account',
+): Promise<string> {
   await page.goto(`/login?next=${encodeURIComponent(next)}`)
   await page.getByLabel('Mobile number').fill(phone)
   const before = Date.now() - 1
@@ -437,20 +660,40 @@ export async function uiSignIn(page: Page, phone = freshPhone(), next = '/accoun
   await page.getByLabel('6-digit code').fill(code)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20_000 })
-  log(`  [browser] signed in as ${phone} via /login (code read from the gateway stand-in, not logged) -> ${new URL(page.url()).pathname}`)
+  log(
+    `  [browser] signed in as ${phone} via /login (code read from the gateway stand-in, not logged) -> ${new URL(page.url()).pathname}`,
+  )
   return phone
 }
 export async function uiAddAddress(page: Page, phone: string, pin = '560001') {
   await page.goto('/account/addresses/new')
   const v: Record<string, string> = {
-    'Full name': 'E2E Tester', 'Mobile number': phone, 'Address line 1': '12 MG Road', City: 'Bengaluru', State: 'Karnataka', 'PIN code': pin }
-  for (const [label, value] of Object.entries(v)) await page.getByLabel(label, { exact: true }).fill(value)
+    'Full name': 'E2E Tester',
+    'Mobile number': phone,
+    'Address line 1': '12 MG Road',
+    City: 'Bengaluru',
+    State: 'Karnataka',
+    'PIN code': pin,
+  }
+  for (const [label, value] of Object.entries(v))
+    await page.getByLabel(label, { exact: true }).fill(value)
   await page.getByRole('button', { name: 'Save address' }).click()
   await page.waitForURL(/\/account\/addresses$/)
 }
 
 // ---- backend call counting through the proxy the storefront server uses ----
-export interface ProxyEntry { seq: number; t: number; method: string; path: string; query: string; caller: string | null; callerSecretPresent: boolean; bearer: boolean; forwardedFor: string | null; status: number }
+export interface ProxyEntry {
+  seq: number
+  t: number
+  method: string
+  path: string
+  query: string
+  caller: string | null
+  callerSecretPresent: boolean
+  bearer: boolean
+  forwardedFor: string | null
+  status: number
+}
 export async function proxyMark(): Promise<number> {
   return (await (await fetch(`${env.apiProxy}/__harness/log?since=999999999`)).json()).last
 }
@@ -488,7 +731,12 @@ export function png(width: number, height: number, rgb: [number, number, number]
   ihdr.writeUInt32BE(height, 4)
   ihdr[8] = 8
   ihdr[9] = 2
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))])
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
 }
 /** A PNG whose HEADER declares a huge size but whose pixel data is tiny (decompression-bomb shape). */
 export function pngBomb(width: number, height: number): Buffer {
@@ -524,11 +772,20 @@ export async function stopCmsOrigin(): Promise<void> {
   cmsOriginServers = []
 }
 /** apps/admin/src/lib/upload.ts putToStorage: XHR PUT to the presigned URL from a page on the CMS origin, withCredentials=false. */
-export async function browserPut(page: Page, target: any, bytes: Buffer, contentType: string): Promise<number> {
+export async function browserPut(
+  page: Page,
+  target: any,
+  bytes: Buffer,
+  contentType: string,
+): Promise<number> {
   await startCmsOrigin()
   await page.goto(`${env.cmsOrigin}/media-upload-harness`)
   const BROWSER_OWNED = ['content-length', 'host', 'connection', 'keep-alive', 'expect']
-  const headers = Object.fromEntries(Object.entries(target.headers as Record<string, string>).filter(([k]) => !BROWSER_OWNED.includes(k.toLowerCase())))
+  const headers = Object.fromEntries(
+    Object.entries(target.headers as Record<string, string>).filter(
+      ([k]) => !BROWSER_OWNED.includes(k.toLowerCase()),
+    ),
+  )
   const status = await page.evaluate(
     async ({ url, headers, b64, contentType }) => {
       const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
@@ -545,14 +802,21 @@ export async function browserPut(page: Page, target: any, bytes: Buffer, content
     },
     { url: target.url, headers, b64: bytes.toString('base64'), contentType },
   )
-  log(`$ [browser @ ${env.cmsOrigin}] XHR PUT ${target.url}  headers=${JSON.stringify(headers)} bytes=${bytes.length}`)
+  log(
+    `$ [browser @ ${env.cmsOrigin}] XHR PUT ${target.url}  headers=${JSON.stringify(headers)} bytes=${bytes.length}`,
+  )
   log(`  -> ${status}`)
   return status
 }
 /** A non-browser PUT to the same presigned URL (write-once / tamper checks). */
-export async function rawPut(target: any, bytes: Buffer, headerOverrides: Record<string, string> = {}): Promise<number> {
+export async function rawPut(
+  target: any,
+  bytes: Buffer,
+  headerOverrides: Record<string, string> = {},
+): Promise<number> {
   const headers: Record<string, string> = {}
-  for (const [k, v] of Object.entries(target.headers as Record<string, string>)) if (k.toLowerCase() !== 'content-length') headers[k] = v
+  for (const [k, v] of Object.entries(target.headers as Record<string, string>))
+    if (k.toLowerCase() !== 'content-length') headers[k] = v
   Object.assign(headers, headerOverrides)
   const r = await fetch(target.url, { method: 'PUT', headers, body: bytes })
   log(`$ PUT ${target.url}  headers=${JSON.stringify(headers)} bytes=${bytes.length}`)
@@ -563,25 +827,53 @@ export async function rawPut(target: any, bytes: Buffer, headerOverrides: Record
 // ---------------------------------------------------------------------------------------------------------------------
 // command evidence
 // ---------------------------------------------------------------------------------------------------------------------
-export function sh(cmd: string, args: string[], extraEnv: Record<string, string> = {}): { code: number; out: string } {
+export function sh(
+  cmd: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): { code: number; out: string } {
   let out = ''
   let code = 0
   try {
-    out = execFileSync(cmd, args, { encoding: 'utf8', env: { ...process.env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] })
+    out = execFileSync(cmd, args, {
+      encoding: 'utf8',
+      env: { ...process.env, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   } catch (e: any) {
     code = e.status ?? 1
     out = (e.stdout ?? '') + (e.stderr ?? '')
   }
-  const shown = [cmd === 'curl' ? 'curl' : cmd.replace(env.harness + '/', ''), ...args.map((a) => a.replace(env.harness + '/', ''))].join(' ')
+  const shown = [
+    cmd === 'curl' ? 'curl' : cmd.replace(env.harness + '/', ''),
+    ...args.map((a) => a.replace(env.harness + '/', '')),
+  ].join(' ')
   log(`$ ${shown}`)
-  log(out.trimEnd().split('\n').map((l) => '  ' + l).join('\n'))
+  log(
+    out
+      .trimEnd()
+      .split('\n')
+      .map((l) => '  ' + l)
+      .join('\n'),
+  )
   return { code, out }
 }
-export const cdnHead = (url: string) => sh('curl', ['-sS', '-I', '--max-time', '5', '--cacert', env.certFile, url])
-export const s3Head = (key: string) => sh('node', [join(env.harness, 'lib/s3-admin.mjs'), 'head', key])
-export const cdnCtl = (action: 'start' | 'stop' | 'status') => sh(join(env.harness, 'scripts/cdn.sh'), [action])
+export const cdnHead = (url: string) =>
+  sh('curl', ['-sS', '-I', '--max-time', '5', '--cacert', env.certFile, url])
+export const s3Head = (key: string) =>
+  sh('node', [join(env.harness, 'lib/s3-admin.mjs'), 'head', key])
+export const cdnCtl = (action: 'start' | 'stop' | 'status') =>
+  sh(join(env.harness, 'scripts/cdn.sh'), [action])
 export const mongosh = (js: string) =>
-  sh('docker', ['exec', 'tazzzo-e2e-mongo', 'mongosh', '--quiet', `mongodb://localhost:${env.mongoPort}/tazzzo_e2e?replicaSet=rs0`, '--eval', js])
+  sh('docker', [
+    'exec',
+    'tazzzo-e2e-mongo',
+    'mongosh',
+    '--quiet',
+    `mongodb://localhost:${env.mongoPort}/tazzzo_e2e?replicaSet=rs0`,
+    '--eval',
+    js,
+  ])
 export const docker = (...args: string[]) => sh('docker', args)
 
 export { expect }

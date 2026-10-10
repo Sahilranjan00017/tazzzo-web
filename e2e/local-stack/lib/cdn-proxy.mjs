@@ -51,7 +51,10 @@ const handler = async (req, res) => {
   }
 }
 // Loopback only (both families when the host has IPv6, since "localhost" may resolve to either); never a LAN interface.
-const banner = () => process.stdout.write(`cdn stand-in listening on https://localhost:${port} (bucket ${cfg.bucket})\n`)
+const banner = () =>
+  process.stdout.write(
+    `cdn stand-in listening on https://localhost:${port} (bucket ${cfg.bucket})\n`,
+  )
 https.createServer(tls, handler).listen(port, '127.0.0.1', banner)
 const v6 = https.createServer(tls, handler)
 v6.on('error', () => {}) // no IPv6 on this host: IPv4 loopback is enough
