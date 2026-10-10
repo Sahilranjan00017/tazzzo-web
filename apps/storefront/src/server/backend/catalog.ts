@@ -3,6 +3,7 @@ import { cache } from 'react'
 import type { CategoryNode } from '@/lib/categories'
 import { parseHome, type HomeBlock, type HomeParseReport } from '@/lib/content/blocks'
 import { isNodeId, isProductId } from '@/lib/ids'
+import { isPin } from '@/lib/location/validation'
 import {
   parseProductDetail,
   parseProductSummary,
@@ -15,7 +16,10 @@ import { serverEnv } from '@/server/env'
 /**
  * Typed reads over the public `/v1` contract (tazzzo-backend docs/api/v1/openapi.yaml). Each read is wrapped in React
  * `cache()` so a page and its `generateMetadata` share one call per render, and every fetch goes through the shared
- * 60 s data cache in `client.ts`. No location (`pin`) is ever sent, so responses are the same for every visitor.
+ * 60 s data cache in `client.ts`. Product, list and search reads carry the visitor's `pin` when one is known to be
+ * serviceable (`catalogPin()`): the backend then answers stock, serviceability and ETA for it, and the data cache is
+ * keyed by the full URL, so it holds one copy per serviceable PIN. Without a PIN the answers are the same for
+ * everyone. Home content and category names never carry a location.
  */
 export type Unavailable = { ok: false; reason: 'unavailable' }
 
@@ -58,11 +62,16 @@ export function logHomeReport(
   console.warn(`storefront_home_blocks_degraded ${key}`)
 }
 
-/** `GET /v1/products/{id}`. Null for a missing/hidden product (one flat 404 by design) or a malformed body. */
+/** `?pin=` for a canonical PIN, else nothing (any other value never reaches a backend URL). */
+function pinQuery(pin: string | null): string {
+  return pin !== null && isPin(pin) ? `?pin=${pin}` : ''
+}
+
+/** `GET /v1/products/{id}[?pin=]`. Null for a missing/hidden product (one flat 404 by design) or a malformed body. */
 export const getProduct = cache(
-  async (id: string): Promise<ProductDetail | null | 'unavailable'> => {
+  async (id: string, pin: string | null = null): Promise<ProductDetail | null | 'unavailable'> => {
     if (!isProductId(id)) return null
-    const result = await getJson(`/v1/products/${encodeURIComponent(id)}`)
+    const result = await getJson(`/v1/products/${encodeURIComponent(id)}${pinQuery(pin)}`)
     if (!result.ok) return result.kind === 'unavailable' ? 'unavailable' : null
     return parseProductDetail(result.data, serverEnv().media)
   },
@@ -72,8 +81,11 @@ export const getProduct = cache(
  * Cards for a product rail, in the rail's order. There is no public batch read, so each id is one cached
  * `GET /v1/products/{id}` (admission cost 1 each). Missing, hidden or failing products are skipped silently.
  */
-export async function getRailProducts(ids: string[]): Promise<ProductSummary[]> {
-  const results = await Promise.all(ids.map((id) => getProduct(id)))
+export async function getRailProducts(
+  ids: string[],
+  pin: string | null = null,
+): Promise<ProductSummary[]> {
+  const results = await Promise.all(ids.map((id) => getProduct(id, pin)))
   return results.filter((p): p is ProductDetail => p !== null && p !== 'unavailable')
 }
 
@@ -169,13 +181,17 @@ function parsePage(data: unknown): ProductPage | null {
 export async function getCategoryProducts(
   id: string,
   cursor: string | null,
-): Promise<ProductPage | null | 'unavailable'> {
+  pin: string | null = null,
+): Promise<ProductPage | null | 'unavailable' | 'stale_cursor'> {
   if (!isNodeId(id)) return null
   const query = new URLSearchParams({ page_size: String(PAGE_SIZE) })
   if (cursor !== null) query.set('cursor', cursor)
+  if (pin !== null && isPin(pin)) query.set('pin', pin)
   const result = await getJson(`/v1/categories/${encodeURIComponent(id)}/products?${query}`, {
     cache: cursor === null,
   })
+  // A cursor is bound to the location it started under: after a PIN change the backend refuses it (400).
+  if (!result.ok && result.kind === 'bad_request' && cursor !== null) return 'stale_cursor'
   if (!result.ok) return result.kind === 'unavailable' ? 'unavailable' : null
   return parsePage(result.data) ?? 'unavailable'
 }
@@ -184,10 +200,13 @@ export async function getCategoryProducts(
 export async function searchProducts(
   q: string,
   cursor: string | null,
-): Promise<ProductPage | 'rejected' | 'unavailable'> {
+  pin: string | null = null,
+): Promise<ProductPage | 'rejected' | 'unavailable' | 'stale_cursor'> {
   const query = new URLSearchParams({ q, page_size: String(PAGE_SIZE) })
   if (cursor !== null) query.set('cursor', cursor)
+  if (pin !== null && isPin(pin)) query.set('pin', pin)
   const result = await getJson(`/v1/search?${query}`, { cache: false })
+  if (!result.ok && result.kind === 'bad_request' && cursor !== null) return 'stale_cursor'
   if (!result.ok) return result.kind === 'bad_request' ? 'rejected' : 'unavailable'
   return parsePage(result.data) ?? 'unavailable'
 }

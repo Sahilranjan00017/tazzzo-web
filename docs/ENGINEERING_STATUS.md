@@ -1,20 +1,30 @@
 # Engineering status
 
-| Area                                                | State       | Record                                                                                                                                           |
-| --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28                                                      |
-| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97                                               |
-| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716                                          |
-| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                                                            |
-| CMS business modules                                | NOT STARTED |                                                                                                                                                  |
-| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                                                          |
-| Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; customer cart (S2, stacked on S1); see README |
+| Area                                                | State       | Record                                                                                                                                                                         |
+| --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28                                                                                    |
+| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97                                                                             |
+| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716                                                                        |
+| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                                                                                          |
+| CMS business modules                                | NOT STARTED |                                                                                                                                                                                |
+| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                                                                                        |
+| Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; customer cart (S2); delivery location, addresses and slots (S3); see README |
 
 **Storefront cart (S2, stacked on S1 = PR #29):** the customer cart on the existing backend (`/v1/customer/cart*`): typed client
 (`server/backend/cart.ts`), BFF routes `/api/cart/{add,update,remove,clear}` + `GET /api/cart` (S1 CSRF guard, strict bodies, canonical
 `TZP-` ids never case-changed, quantity 1..20, `If-Match` cart versions with a fresh-cart answer on conflict, closed error codes), `/cart`
 page, header count, Add to cart on `/p/[id]`. Backend reports `LOCATION_REQUIRED`/stock `UNKNOWN` until a delivery address is sent (no
 address UI yet): shown as information. Not done: checkout, addresses, guest cart/merge. Details: `apps/storefront/README.md` (Cart).
+
+**Storefront delivery (S3, stacked on S2):** delivery location, saved addresses and delivery slots on the existing backend. Location:
+`/location` + header chip, `POST /api/location` (`{pin}` -> `GET /v1/serviceability`, or `{addressId}` for a signed-in customer), kept in a
+sealed HttpOnly cookie (PIN, serviceable flag, and for a saved address its id bound to the customer id; no name/phone/street). The PIN goes to
+product, rail, list and search reads as `?pin=` (only when serviceable); the cart is located by `?addressId=` (the only location it accepts), so
+stock/`LOCATION_REQUIRED` become real. Addresses: `/account/addresses*` and `POST /api/addresses{,/update,/delete,/default}` (strict bodies that
+mirror `AddressService`, `Idempotency-Key` on create, `If-Match: "address-<n>"` on edit/delete, CSRF, closed error codes, no customer id ever
+accepted). Slots: reusable `SlotPicker` + `/checkout/delivery`; the backend takes a slot only when the ORDER is placed (`deliverySlotId`), so the
+validated address + slot are kept in a sealed 30-minute cookie for S4 and nothing is reserved. Not done: payment/order placement (S4), default-address
+auto-selection, lat/lng. Details: `apps/storefront/README.md` (Delivery location, addresses and slots).
 
 **W3 (merged, PR #3):** a narrow BFF mutation layer (`src/server/bff/mutation.ts`). There is no generic proxy: every route
 declares its one backend path, method, strict request schema, response schema and header allowlist. Each mutation

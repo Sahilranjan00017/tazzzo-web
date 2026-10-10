@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { ProductGrid } from '@/components/ProductGrid'
 import { Unavailable } from '@/components/Unavailable'
 import { isNodeId } from '@/lib/ids'
@@ -10,6 +10,7 @@ import {
   getChildCategories,
   isCursor,
 } from '@/server/backend/catalog'
+import { catalogPin } from '@/server/location/service'
 
 function firstString(value: string | string[] | undefined): string | null {
   return typeof value === 'string' ? value : null
@@ -47,11 +48,14 @@ export default async function CategoryPage({ params, searchParams }: PageProps<'
   if (!isNodeId(node)) notFound()
   const rawCursor = firstString((await searchParams).cursor)
   const cursor = isCursor(rawCursor) ? rawCursor : null
+  const pin = await catalogPin()
   const [name, children, page] = await Promise.all([
     categoryName(node),
     getChildCategories(node),
-    getCategoryProducts(node, cursor),
+    getCategoryProducts(node, cursor, pin),
   ])
+  // The delivery location changed since this page was opened: its cursor no longer fits, start again.
+  if (page === 'stale_cursor') redirect(`/c/${node}`)
   if (children === null && page === null) notFound()
   return (
     <section className="listing" aria-labelledby="category-title">

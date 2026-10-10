@@ -240,6 +240,12 @@ export function CartView({ initial, csrfToken }: { initial: Cart; csrfToken: str
               can buy.
             </p>
           )}
+          {cart.lines.some((l) => l.issues.includes('LOCATION_REQUIRED')) && (
+            <p className="notice" role="note" data-testid="cart-location-needed">
+              <Link href="/location?next=/cart">Choose a delivery address</Link> to see stock and
+              delivery for these items.
+            </p>
+          )}
           <ul className="cart-lines" aria-label="Items in your cart">
             {cart.lines.map((line) => (
               <CartLineItem
@@ -264,6 +270,11 @@ export function CartView({ initial, csrfToken }: { initial: Cart; csrfToken: str
                 {unpriced === 1 ? 'is' : 'are'} not included.
               </p>
             )}
+            <p className="cart-summary__hint">
+              <Link href="/checkout/delivery" data-testid="cart-delivery-link">
+                Choose delivery address and slot
+              </Link>
+            </p>
             <p className="cart-summary__hint">
               Delivery, fees and taxes are added at checkout. Prices can change until you pay.
             </p>

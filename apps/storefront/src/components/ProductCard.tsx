@@ -27,6 +27,9 @@ export function ProductCard({ product }: { product: ProductSummary }) {
         </p>
       )}
       <Price sellingPaise={product.sellingPricePaise} mrpPaise={product.mrpPaise} />
+      {product.stockState === 'OUT_OF_STOCK' && (
+        <p className="card__stock stock--out">Out of stock</p>
+      )}
     </article>
   )
 }

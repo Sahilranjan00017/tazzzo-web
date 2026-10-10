@@ -36,6 +36,9 @@ export default async function AccountPage() {
             We could not load your details right now. <Link href="/account">Try again</Link>
           </p>
         )}
+        <p>
+          <Link href="/account/addresses">Your addresses</Link>
+        </p>
         <LogoutButton csrfToken={session.csrf} />
       </div>
     </section>

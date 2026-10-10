@@ -3,7 +3,9 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { connection } from 'next/server'
 import { serverEnv } from '@/server/env'
+import { locationChipText } from '@/lib/location/model'
 import { headerCartCount } from '@/server/cart/service'
+import { currentLocation } from '@/server/location/service'
 import { readSession } from '@/server/session/cookies'
 import './globals.css'
 
@@ -30,6 +32,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const session = await readSession()
   const signedIn = session !== null
   const cartCount = await headerCartCount(session)
+  const location = await currentLocation(session)
   return (
     <html lang="en">
       <body>
@@ -58,6 +61,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <button type="submit">Search</button>
             </form>
             <nav aria-label="Account" className="account-nav">
+              <Link
+                href="/location"
+                className={`location-chip${location?.serviceable === false ? ' location-chip--no' : ''}`}
+                data-testid="location-chip"
+              >
+                {locationChipText(location)}
+              </Link>
               <Link
                 href="/cart"
                 className="cart-link"

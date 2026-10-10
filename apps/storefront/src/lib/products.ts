@@ -14,6 +14,15 @@ export interface ProductSummary {
   mrpPaise: number | null
   /** The best allowed image for a card (thumbnail, else the first gallery image), or null for the placeholder. */
   image: GalleryImage | null
+  /**
+   * The public read's stock signal. Without a delivery location (`pin`) the backend cannot say, so it is `UNKNOWN`;
+   * never guessed.
+   */
+  stockState: StockSignal
+  /** Whether the backend says the delivery location is served for this product (null: no location, or not told). */
+  serviceable: boolean | null
+  /** Units left when the backend reports `LOW_STOCK`, else null. */
+  lowStockRemaining: number | null
 }
 
 export type StockSignal = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN'
@@ -40,7 +49,17 @@ export function parseProductSummary(raw: unknown, media: MediaBase | null): Prod
   const productId = str(p.productId)
   const name = str(p.name)
   if (productId === null || name === null) return null
+  const stock = p.stockState
   return {
+    stockState:
+      stock === 'IN_STOCK' || stock === 'LOW_STOCK' || stock === 'OUT_OF_STOCK' ? stock : 'UNKNOWN',
+    serviceable: typeof p.serviceable === 'boolean' ? p.serviceable : null,
+    lowStockRemaining:
+      typeof p.lowStockRemaining === 'number' &&
+      Number.isSafeInteger(p.lowStockRemaining) &&
+      p.lowStockRemaining > 0
+        ? p.lowStockRemaining
+        : null,
     productId,
     name,
     brandName: str(p.brandName),

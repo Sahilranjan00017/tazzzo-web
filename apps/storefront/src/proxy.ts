@@ -69,5 +69,11 @@ export const config = {
       source: '/((?!_next/static|_next/image|favicon.ico).*)',
       missing: [{ type: 'header', key: 'next-router-prefetch', value: '1' }],
     },
+    // Route handlers ignore the prefetch headers and always run in full (and a POST can carry them), so `/api/*` is
+    // ALWAYS limited and given the security headers, whatever headers or method the request carries.
+    { source: '/api/:path*' },
+    // Metadata route handlers outside /api (robots, sitemap) also run in full: same rule.
+    { source: '/sitemap.xml' },
+    { source: '/robots.txt' },
   ],
 }

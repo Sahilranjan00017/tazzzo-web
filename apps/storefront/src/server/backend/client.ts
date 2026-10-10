@@ -135,7 +135,8 @@ export function requestHeaders(
 
 /** A log label without the query string (search text is customer input and is never logged). */
 function routeLabel(pathAndQuery: string): string {
-  return pathAndQuery.split('?')[0] ?? ''
+  // A saved-address id is customer data: the label names the route, not the address.
+  return (pathAndQuery.split('?')[0] ?? '').replace(/\/addresses\/[^/]+/, '/addresses/{id}')
 }
 
 function requestId(response: Response): string {
@@ -160,7 +161,7 @@ const SEND_RETRY_AFTER_MAX_S = 3_600
 const ERROR_CODE = /^[A-Z][A-Z_]{0,39}$/
 
 /**
- * Customer-session calls (`GET`/`POST`/`PUT`/`DELETE`; `ifMatch` sets the cart's `If-Match`): `/v1/auth/**` and
+ * Customer-session calls (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`; `ifMatch` sets the cart's or an address's `If-Match`, `idempotencyKey` an address create's `Idempotency-Key`): `/v1/auth/**` and
  * `/v1/customer/**`, never cached, never retried. Same transport rules as
  * `getJson` (timeout, redirects refused, trusted-caller headers, only `TAZZZO_API_BASE_URL`), plus an optional bearer
  * access token. No client address or any incoming header is forwarded: the backend takes the visitor address only from
@@ -168,9 +169,9 @@ const ERROR_CODE = /^[A-Z][A-Z_]{0,39}$/
  * credential carries nothing about the visitor. The body and the response body are never logged.
  */
 export async function sendJson(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
-  options: { body?: unknown; bearer?: string; ifMatch?: string } = {},
+  options: { body?: unknown; bearer?: string; ifMatch?: string; idempotencyKey?: string } = {},
 ): Promise<SendResult> {
   if (!/^\/v1\/(auth|customer)\//.test(path)) throw new Error('customer API paths only')
   const env = serverEnv()
@@ -178,6 +179,7 @@ export async function sendJson(
   if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (options.ifMatch) headers['If-Match'] = options.ifMatch
+  if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey
   let response: Response
   try {
     response = await fetch(`${env.apiBaseUrl}${path}`, {

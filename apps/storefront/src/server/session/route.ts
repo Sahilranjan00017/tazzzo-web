@@ -4,19 +4,24 @@ import type { AuthError } from '@/server/session/service'
 
 /** Shared plumbing of the `/api/auth/*` route handlers: bounded JSON in, normalised `no-store` JSON out. */
 const MAX_BODY_BYTES = 2_048
+/** A saved address can carry up to ~680 characters of free text (multi-byte scripts included). */
+export const ADDRESS_BODY_BYTES = 8_192
 
 export type BodyResult =
   { ok: true; value: Record<string, unknown> } | { ok: false; status: 400 | 413 }
 
 /**
  * Reads the body as a stream and stops at the cap: an oversized (or lying-`Content-Length`, or chunked) body is
- * refused with 413 after at most `MAX_BODY_BYTES + 1` bytes were buffered.
+ * refused with 413 after at most `maxBytes + 1` bytes were buffered (2 KiB unless the route asks for more).
  */
-export async function readJsonObject(request: Request): Promise<BodyResult> {
+export async function readJsonObject(
+  request: Request,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<BodyResult> {
   const type = request.headers.get('content-type') ?? ''
   if (!/^application\/json\s*(;|$)/i.test(type)) return { ok: false, status: 400 }
   const declared = Number(request.headers.get('content-length') ?? '0')
-  if (declared > MAX_BODY_BYTES) return { ok: false, status: 413 }
+  if (declared > maxBytes) return { ok: false, status: 413 }
   const chunks: Uint8Array[] = []
   let size = 0
   if (request.body) {
@@ -26,7 +31,7 @@ export async function readJsonObject(request: Request): Promise<BodyResult> {
         const { done, value } = await reader.read()
         if (done) break
         size += value.byteLength
-        if (size > MAX_BODY_BYTES) {
+        if (size > maxBytes) {
           await reader.cancel().catch(() => {})
           return { ok: false, status: 413 }
         }

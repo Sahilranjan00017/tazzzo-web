@@ -10,7 +10,7 @@ import { clientKey, UNRESOLVED_CLIENT, type ClientIpOptions } from '@/lib/securi
  * Two token buckets per visitor key (see `client-ip.ts` for the key):
  * - `page`: every request the proxy sees (pages, RSC navigations, robots/sitemap; build assets never reach it);
  * - `expensive`: additionally, the uncached paths that always cost a backend call: `/search`, paged category lists
- *   (`/c/<node>?cursor=...`) and the sign-in code routes (`/api/auth/otp/*`). Checked first, so a refused expensive
+ *   (`/c/<node>?cursor=...`) the sign-in code routes (`/api/auth/otp/*`), `POST /api/location` (a serviceability check) and `POST /api/checkout/delivery`. Checked first, so a refused expensive
  *   request does not also spend a page token.
  * The store is bounded: least recently used keys are evicted beyond `maxClients`, and keys idle long enough to have
  * refilled completely (indistinguishable from a new visitor) are dropped as they reach the old end.
@@ -139,6 +139,10 @@ export function isExpensivePath(pathname: string, searchParams: URLSearchParams)
   if (pathname === '/search') return true
   // Sending or checking a sign-in code: each is a backend call that texts a phone or spends an attempt.
   if (pathname.startsWith('/api/auth/otp/')) return true
+  // Checking a PIN is one uncached `/v1/serviceability` call every time (and the slot step reads and re-checks slots).
+  if (pathname === '/api/location' || pathname === '/api/checkout/delivery') return true
+  // Address create/update/delete/default: each is a customer-scoped backend write.
+  if (pathname.startsWith('/api/addresses')) return true
   return pathname.startsWith('/c/') && searchParams.has('cursor')
 }
 

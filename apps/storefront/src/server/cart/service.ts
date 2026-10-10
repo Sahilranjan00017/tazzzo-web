@@ -9,8 +9,10 @@ import {
   setCartItem,
   type CartCallResult,
 } from '@/server/backend/cart'
-import { clearSession, writeSession, type CustomerSession } from '@/server/session/cookies'
-import { accessTokenUsable, refreshSession } from '@/server/session/service'
+import { withAccessToken } from '@/server/session/access'
+import { cartAddressId } from '@/server/location/service'
+import { type CustomerSession } from '@/server/session/cookies'
+import { accessTokenUsable } from '@/server/session/service'
 
 /**
  * Cart flows for the pages and the `/api/cart/*` routes. What a caller learns is a closed outcome: the cart (already
@@ -30,6 +32,20 @@ export type CartOutcome =
 const fail = (error: CartError, retryAfterSeconds: number | null = null, cart?: Cart) =>
   ({ ok: false, error, retryAfterSeconds, cart }) as const
 
+/**
+ * Runs a cart call with the customer's chosen saved address; if the backend no longer knows that address (deleted on
+ * another device: a foreign or unknown id is the same 404) the call is repeated without it, so the cart still works
+ * (and says `LOCATION_REQUIRED`) instead of failing.
+ */
+async function located(
+  addressId: string | null,
+  run: (addressId: string | null) => Promise<CartCallResult<Cart>>,
+): Promise<CartCallResult<Cart>> {
+  const first = await run(addressId)
+  if (addressId !== null && !first.ok && first.reason === 'not_found') return run(null)
+  return first
+}
+
 const toOutcome = (result: CartCallResult<Cart>): CartOutcome =>
   result.ok ? { ok: true, cart: result.data } : fail(result.reason, result.retryAfterSeconds)
 
@@ -38,12 +54,16 @@ const toOutcome = (result: CartCallResult<Cart>): CartOutcome =>
  * `unauthenticated` and the PAGE sends the browser through `/api/auth/refresh`. One call per token per render, shared
  * by the layout (header count) and the page.
  */
-export const loadCart = cache(async (accessToken: string): Promise<CartOutcome> => {
-  return toOutcome(await getCart(accessToken))
-})
+export const loadCart = cache(
+  async (accessToken: string, addressId: string | null): Promise<CartOutcome> => {
+    return toOutcome(await located(addressId, (a) => getCart(accessToken, a)))
+  },
+)
 
 export async function loadCartForPage(session: CustomerSession): Promise<CartOutcome> {
-  return accessTokenUsable(session) ? loadCart(session.accessToken) : fail('unauthenticated')
+  return accessTokenUsable(session)
+    ? loadCart(session.accessToken, await cartAddressId(session))
+    : fail('unauthenticated')
 }
 
 const HEADER_BUDGET_MS = 1_500
@@ -52,68 +72,52 @@ const HEADER_BUDGET_MS = 1_500
 export async function headerCartCount(session: CustomerSession | null): Promise<number | null> {
   if (session === null || !accessTokenUsable(session)) return null
   const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), HEADER_BUDGET_MS))
-  const outcome = await Promise.race([loadCart(session.accessToken), timeout])
+  const outcome = await Promise.race([
+    cartAddressId(session).then((a) => loadCart(session.accessToken, a)),
+    timeout,
+  ])
   return outcome !== null && outcome.ok ? outcome.cart.itemCount : null
 }
 
-/**
- * Route handlers only (they can set cookies): runs `flow` with a usable access token. An expired token is rotated
- * first; a token the backend refuses is rotated once and the flow re-run. A session the backend will not refresh is
- * ended. Returns `unauthenticated` when there is no way to continue as this customer.
- */
-export async function withAccess(
+/** Route handlers only (they can set cookies); the shared implementation is `withAccessToken`. */
+export function withAccess(
   session: CustomerSession,
   flow: (accessToken: string) => Promise<CartOutcome>,
 ): Promise<CartOutcome> {
-  let current = session
-  let rotated = false
-  const rotate = async (): Promise<CartOutcome | null> => {
-    const result = await refreshSession(current)
-    if (!result.ok) {
-      if (result.reason === 'invalid') {
-        await clearSession()
-        return fail('unauthenticated')
-      }
-      return fail('unavailable')
-    }
-    current = result.session
-    rotated = true
-    await writeSession(current)
-    return null
-  }
-  if (!accessTokenUsable(current)) {
-    const stopped = await rotate()
-    if (stopped) return stopped
-  }
-  let outcome = await flow(current.accessToken)
-  if (!outcome.ok && outcome.error === 'unauthenticated' && !rotated) {
-    const stopped = await rotate()
-    if (stopped) return stopped
-    outcome = await flow(current.accessToken)
-  }
-  if (!outcome.ok && outcome.error === 'unauthenticated') await clearSession()
-  return outcome
+  return withAccessToken(session, flow, {
+    unauthenticated: () => fail('unauthenticated'),
+    unavailable: () => fail('unavailable'),
+    isUnauthenticated: (o) => !o.ok && o.error === 'unauthenticated',
+  })
 }
 
 /** After a refused mutation, the fresh cart for the screen (best effort). */
-async function withFresh(error: CartError, accessToken: string): Promise<CartOutcome> {
-  const fresh = await getCart(accessToken)
+async function withFresh(
+  error: CartError,
+  accessToken: string,
+  addressId: string | null,
+): Promise<CartOutcome> {
+  const fresh = await located(addressId, (a) => getCart(accessToken, a))
   return fail(error, null, fresh.ok ? fresh.data : undefined)
 }
 
-export function viewCart(session: CustomerSession): Promise<CartOutcome> {
-  return withAccess(session, async (token) => toOutcome(await getCart(token)))
+export async function viewCart(session: CustomerSession): Promise<CartOutcome> {
+  const addressId = await cartAddressId(session)
+  return withAccess(session, async (token) =>
+    toOutcome(await located(addressId, (a) => getCart(token, a))),
+  )
 }
 
 /** Adds `quantity` to the line (creating it). Never silently clamps: over the per-item bound is refused. */
-export function addToCart(
+export async function addToCart(
   session: CustomerSession,
   productId: string,
   quantity: number,
 ): Promise<CartOutcome> {
+  const addressId = await cartAddressId(session)
   return withAccess(session, async (token) => {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const current = await getCart(token)
+      const current = await located(addressId, (a) => getCart(token, a))
       if (!current.ok) return toOutcome(current)
       const cart = current.data
       const existing = cart.lines.find((l) => l.productId === productId)?.quantity ?? 0
@@ -121,7 +125,9 @@ export function addToCart(
       if (existing === 0 && cart.lines.length >= MAX_DISTINCT_ITEMS) {
         return fail('item_limit', null, cart)
       }
-      const set = await setCartItem(token, productId, existing + quantity, cart.version)
+      const set = await located(addressId, (a) =>
+        setCartItem(token, productId, existing + quantity, cart.version, a),
+      )
       if (set.ok || set.reason !== 'conflict' || attempt === 1) return toOutcome(set)
     }
     return fail('unavailable')
@@ -129,33 +135,35 @@ export function addToCart(
 }
 
 /** Sets the line to exactly `quantity`, given the cart version the customer saw. */
-export function setQuantity(
+export async function setQuantity(
   session: CustomerSession,
   productId: string,
   quantity: number,
   version: number,
 ): Promise<CartOutcome> {
+  const addressId = await cartAddressId(session)
   return withAccess(session, async (token) => {
-    const set = await setCartItem(token, productId, quantity, version)
+    const set = await located(addressId, (a) => setCartItem(token, productId, quantity, version, a))
     if (set.ok) return toOutcome(set)
     return set.reason === 'conflict' || set.reason === 'not_found'
-      ? withFresh(set.reason, token)
+      ? withFresh(set.reason, token, addressId)
       : toOutcome(set)
   })
 }
 
 /** Removes the line. A line that is already gone is a success: the customer's goal holds. */
-export function removeLine(
+export async function removeLine(
   session: CustomerSession,
   productId: string,
   version: number,
 ): Promise<CartOutcome> {
+  const addressId = await cartAddressId(session)
   return withAccess(session, async (token) => {
-    const removed = await removeCartItem(token, productId, version)
+    const removed = await located(addressId, (a) => removeCartItem(token, productId, version, a))
     if (removed.ok) return toOutcome(removed)
-    if (removed.reason === 'conflict') return withFresh('conflict', token)
+    if (removed.reason === 'conflict') return withFresh('conflict', token, addressId)
     if (removed.reason === 'not_found') {
-      const fresh = await getCart(token)
+      const fresh = await located(addressId, (a) => getCart(token, a))
       if (fresh.ok && !fresh.data.lines.some((l) => l.productId === productId)) {
         return { ok: true, cart: fresh.data }
       }
@@ -164,10 +172,13 @@ export function removeLine(
   })
 }
 
-export function emptyCart(session: CustomerSession, version: number): Promise<CartOutcome> {
+export async function emptyCart(session: CustomerSession, version: number): Promise<CartOutcome> {
+  const addressId = await cartAddressId(session)
   return withAccess(session, async (token) => {
-    const cleared = await clearCart(token, version)
+    const cleared = await located(addressId, (a) => clearCart(token, version, a))
     if (cleared.ok) return toOutcome(cleared)
-    return cleared.reason === 'conflict' ? withFresh('conflict', token) : toOutcome(cleared)
+    return cleared.reason === 'conflict'
+      ? withFresh('conflict', token, addressId)
+      : toOutcome(cleared)
   })
 }

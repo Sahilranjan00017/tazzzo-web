@@ -2,10 +2,12 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { AddToCart } from '@/components/AddToCart'
 import { Price } from '@/components/Price'
+import { ProductAvailability } from '@/components/ProductAvailability'
 import { ProductGallery } from '@/components/ProductGallery'
 import { Unavailable } from '@/components/Unavailable'
 import { isProductId } from '@/lib/ids'
 import { getProduct } from '@/server/backend/catalog'
+import { catalogPin, currentLocation } from '@/server/location/service'
 import { readSession } from '@/server/session/cookies'
 
 const DESCRIPTION_MAX = 160
@@ -17,7 +19,7 @@ function summary(text: string | null, name: string): string {
 
 export async function generateMetadata({ params }: PageProps<'/p/[id]'>): Promise<Metadata> {
   const { id } = await params
-  const product = isProductId(id) ? await getProduct(id) : null
+  const product = isProductId(id) ? await getProduct(id, await catalogPin()) : null
   if (product === null || product === 'unavailable') return { title: 'Product' }
   const image = product.images[0]
   return {
@@ -32,14 +34,16 @@ export async function generateMetadata({ params }: PageProps<'/p/[id]'>): Promis
   }
 }
 
-/** Product detail from `GET /v1/products/{id}`: gallery (primary first), name, brand, price, description. */
+/** Product detail from `GET /v1/products/{id}[?pin=]`: gallery (primary first), name, brand, price, description. */
 export default async function ProductPage({ params }: PageProps<'/p/[id]'>) {
   const { id } = await params
   if (!isProductId(id)) notFound()
-  const product = await getProduct(id)
+  const pin = await catalogPin()
+  const product = await getProduct(id, pin)
   if (product === null) notFound()
   if (product === 'unavailable') return <Unavailable what="this product" />
   const session = await readSession()
+  const location = await currentLocation(session)
   return (
     <article className="pdp" data-product-id={product.productId}>
       <ProductGallery images={product.images} productName={product.name} />
@@ -51,6 +55,12 @@ export default async function ProductPage({ params }: PageProps<'/p/[id]'>) {
           </p>
         )}
         <Price sellingPaise={product.sellingPricePaise} mrpPaise={product.mrpPaise} />
+        <ProductAvailability
+          location={location}
+          pinUsed={pin}
+          stockState={product.stockState}
+          lowStockRemaining={product.lowStockRemaining}
+        />
         <AddToCart
           productId={product.productId}
           productName={product.name}
