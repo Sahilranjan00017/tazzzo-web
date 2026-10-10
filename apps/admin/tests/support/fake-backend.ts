@@ -95,7 +95,7 @@ export class FakeBackend {
       status: string
       version: number
       assignedTo: string | null
-      messages: { id: string; author: string; staffId?: string; text: string; at: string }[]
+      messages: { id: number; author: string; staffId?: string; text: string; at: string }[]
     }
   >()
   readonly areas = new Map<
@@ -331,7 +331,7 @@ export class FakeBackend {
       assignedTo: null,
       messages: [
         {
-          id: 'm1',
+          id: 1,
           author: 'CUSTOMER',
           text: '<b>where</b> is my order',
           at: '2026-10-06T03:30:00Z',
@@ -1125,7 +1125,7 @@ export class FakeBackend {
             messages: [
               ...c.messages,
               {
-                id: `m${c.messages.length + 1}`,
+                id: c.messages.length + 1,
                 author: 'STAFF',
                 staffId: `google:${claims?.sub}`,
                 text: b.message ?? '',

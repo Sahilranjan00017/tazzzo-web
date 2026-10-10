@@ -4,11 +4,53 @@ import {
   caseListPath,
   parseCaseListQuery,
   replyText,
+  staffCaseSchema,
   supportErrorMessage,
   targetsFor,
 } from '@/lib/support'
 
 describe('support lib', () => {
+  it('parses the backend StaffCase payload: message ids are integers (SupportDtos.StaffMessage int id)', () => {
+    const backendShape = {
+      caseId: 'SUP_abc123',
+      customerId: 'CUS_1',
+      category: 'ORDER',
+      orderId: 'ORD_1',
+      subject: 'Late delivery',
+      status: 'OPEN',
+      assignedTo: null,
+      version: 3,
+      messages: [
+        {
+          id: 1,
+          author: 'CUSTOMER',
+          staffId: null,
+          text: 'where is it',
+          at: '2026-10-10T05:00:00Z',
+        },
+        {
+          id: 2,
+          author: 'STAFF',
+          staffId: 'staff-1',
+          text: 'on its way',
+          at: '2026-10-10T05:05:00Z',
+        },
+      ],
+      createdAt: '2026-10-10T05:00:00Z',
+      updatedAt: '2026-10-10T05:05:00Z',
+    }
+    const ok = staffCaseSchema.safeParse(backendShape)
+    expect(ok.success).toBe(true)
+    expect(ok.data?.messages.map((m) => m.id)).toEqual([1, 2])
+    // a string id is NOT what the backend sends: it must not be accepted (the fake backend once hid this)
+    expect(
+      staffCaseSchema.safeParse({
+        ...backendShape,
+        messages: [{ ...backendShape.messages[0], id: 'm1' }],
+      }).success,
+    ).toBe(false)
+  })
+
   it('list path carries only a valid status/cursor and page_size', () => {
     expect(caseListPath(parseCaseListQuery({}))).toBe('/api/v1/admin/support/cases?page_size=20')
     expect(caseListPath(parseCaseListQuery({ status: 'RESOLVED', cursor: 'abc_-9' }))).toBe(
