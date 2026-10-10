@@ -37,6 +37,7 @@ checked), review against a real backend or real Google Workspace.
 4. Actions could be clicked on a stale version during the post-save refresh (found by E2E): all actions now disable while a refresh is pending.
 5. A file chosen before hydration was silently dropped (media, imports): inputs now adopt a pre-existing selection.
 6. 360 px horizontal overflow (grid min-width, file inputs) found by the responsive sweep and fixed.
+7. W12-1 (final pass, medium): `safeReturnTo` rejected only a leading `//`, so `/.//evil.com`, `/x/..//evil.com`, `/%2e//evil.com` and `/%2e%2e//evil.com` normalised to `//evil.com` (login page and Google callback redirect). It now matches the storefront `safeNext`: no dot segments, backslashes, control characters or encoded slashes at any percent-decoding stage (bounded rounds), and the URL-parsed pathname must equal the cleaned path. Covered by unit fuzz payloads, a same-origin invariant test and an integration test through the callback redirect. Also: the admin proxy now skips the CSP only for a genuine prefetch (`rsc=1` AND `next-router-prefetch=1`), and the storefront order malformed-response log uses `routeLabel()` (W12-3, W12-5).
 
 ## Open items and residual risk
 
@@ -54,3 +55,4 @@ checked), review against a real backend or real Google Workspace.
 | Uploaded-but-never-saved objects stay in the bucket (no reaper yet)                                                    | Low                       | Bounded by the signed size and cms-writer trust; backend follow-up                                                |
 | Home content preview is admin-only and read-only (GET); drafts never reach a public endpoint (backend rule)            | Info                      | The CMS preview page only reads; publishing is a separate, confirmed, versioned action                            |
 | Backend #102 + #95 merge: a storage outage during banner verification is not mapped to 503 in `ContentAdminController` | Medium (backend)          | Raised as a backend follow-up; the CMS shows a generic failure if it surfaces as 500                              |
+| W12-2: OTP send volume budget, WAF and CAPTCHA                                                                         | Low/unknown               | Deployment and edge control, not application code. `EXTERNAL_CONFIG_PENDING`                                      |

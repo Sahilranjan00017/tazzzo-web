@@ -81,6 +81,11 @@ so every module built against them is UI-only until it is verified on staging. N
 `expectedVersion` in the body (products use `If-Match: <int>`), there is no notification-outbox admin API, no price or
 inventory list API, and media uploads return 503 until a storage provider exists.
 
+**Web security final pass:** admin `safeReturnTo` open-redirect bypass (dot segments and encoded slashes, W12-1) fixed to
+the storefront `safeNext` standard with fuzz, invariant and callback-redirect tests; admin proxy prefetch matcher now
+uses the exact `rsc=1` + `next-router-prefetch=1` pair (W12-3); storefront order log uses `routeLabel()` (W12-5). W12-2
+(OTP volume budget, WAF, CAPTCHA) is a deployment/edge control: `EXTERNAL_CONFIG_PENDING`.
+
 ## Scheduler / cron (architecture note, not implemented)
 
 Production scheduled work will not run inside the CMS. Planned model: AWS EventBridge Scheduler (or a scheduled ECS

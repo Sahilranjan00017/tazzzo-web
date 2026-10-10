@@ -177,6 +177,10 @@ describe('login start', () => {
       ['https://evil.com', '/'],
       ['//evil.com', '/'],
       ['/%2F%2Fevil.com', '/'],
+      ['/.//evil.com', '/'],
+      ['/x/..//evil.com', '/'],
+      ['/%2e//evil.com', '/'],
+      ['/%2e%2e//evil.com', '/'],
     ] as const) {
       await redis.flushall()
       await beginLogin(`?returnTo=${encodeURIComponent(given)}`)
@@ -201,6 +205,20 @@ describe('callback', () => {
     expect(session).toMatch(/Path=\//)
     expect(session).not.toMatch(/Domain=/i)
     expect(setCookie.find((c) => c.startsWith(`${TX_COOKIE}=`))).toMatch(/Max-Age=0/)
+  })
+
+  it('never redirects off-origin whatever return path the login started with (open-redirect sink)', async () => {
+    for (const hostile of [
+      '/.//evil.com',
+      '/x/..//evil.com',
+      '/%2e//evil.com',
+      '/%2e%2e//evil.com',
+    ]) {
+      await redis.flushall()
+      const { res } = await login(hostile)
+      expect(res.status, hostile).toBe(303)
+      expect(res.headers.get('location'), hostile).toBe(`${CMS_BASE_URL}/`)
+    }
   })
 
   it('stores the session under a hashed key with the ID token encrypted, never plaintext', async () => {
