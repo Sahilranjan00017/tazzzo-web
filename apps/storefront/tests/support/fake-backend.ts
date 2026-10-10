@@ -11,6 +11,10 @@ import { deflateSync } from 'node:zlib'
  * - `GET /v1/content/home`: `channel` is the ONLY accepted parameter (app|web, once); anything else is 400. Blocks are
  *   stored with an audience and filtered here like the backend does (web: WEB_ONLY+BOTH, app: APP_ONLY+BOTH, absent:
  *   BOTH only), in stored order, with `Cache-Control: public, max-age=60`;
+ * - `GET /v1/products:batch?ids=` (CommerceReadController.productsBatch; operationId getProductsBatch): `ids` once, 1..50 canonical
+ *   ids (duplicates count), raw query <= 2866 chars, else the flat 400; `items` in request order (duplicates collapsed) without
+ *   gallery/attributes, `missing` without a reason (unknown, draft and merged ids alike: `TZP-Merged-1` is merged into `TZP-1002`,
+ *   which the single read follows and the batch does not). `POST /__control/batch?down=1` makes it 503.
  * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}`, `/v1/categories/{id}/children`,
  *   `/v1/categories/{id}/products`, `/v1/search` with the documented shapes; unknown ids are a flat 404.
  * - the customer auth contract (OtpController, SessionController, CustomerProfileController): OTP request/verify,
@@ -136,6 +140,12 @@ interface FakeAddress {
 
 const SERVICEABLE_PINS = new Set(['560001', '560002', '110001'])
 const PIN_RE = /^[1-9][0-9]{5}$/
+const PRODUCT_ID_RE = /^TZP-[A-Za-z0-9-]{1,40}$/
+/** `GET /v1/products:batch` bounds (CommerceReadController.batchIds): ids incl. duplicates, and the raw query string. */
+export const BATCH_MAX_IDS = 50
+const BATCH_MAX_QUERY = 2866
+/** A product merged into a survivor: the single read follows it, the batch read does NOT (it is `missing`). */
+const MERGED_INTO: Record<string, string> = { 'TZP-Merged-1': 'TZP-1002' }
 const ADDRESS_ID_RE = /^ADDR_[A-Za-z0-9_-]{6,64}$/
 
 export class FakeBackend {
@@ -171,6 +181,7 @@ export class FakeBackend {
   /** What the order endpoint received (bodies are not part of `requests`). */
   readonly placements: Array<{ body: unknown }> = []
   private paged = false
+  private batchDown = false
   private slotsFull = false
   private addressDown = false
   private api?: Server
@@ -241,7 +252,7 @@ export class FakeBackend {
         blockId: 'CB_rail1',
         type: 'PRODUCT_RAIL',
         title: 'Bestsellers',
-        ids: ['TZP-1001', 'TZP-9999', 'TZP-1002'],
+        ids: ['TZP-1001', 'TZP-9999', 'TZP-Merged-1', 'TZP-1002'],
       },
       {
         audience: 'BOTH',
@@ -567,6 +578,50 @@ export class FakeBackend {
     }
   }
 
+  /**
+   * `GET /v1/products:batch?ids=&pin=`: `ids` exactly once, 1..50 comma-separated canonical ids (duplicates count towards
+   * the cap), raw query <= 2866 chars, otherwise the flat 400 (before anything is read). `items` follow request order
+   * (a repeated id once, at its first position) and are the single read's card minus gallery/attributes (and the
+   * detail-only description/highlights); `missing` lists every other id in request order, with no reason: unknown,
+   * draft and a MERGED id (not followed to its survivor) look the same. No ETag; `private, no-store`.
+   */
+  private batch(
+    url: URL,
+    pin: string | null,
+    send: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    error: (status: number, code: string) => void,
+  ): void {
+    const values = url.searchParams.getAll('ids')
+    if (url.search.length - 1 > BATCH_MAX_QUERY || values.length !== 1 || values[0] === '') {
+      return error(400, 'INVALID_REQUEST')
+    }
+    const parts = values[0]!.split(',')
+    if (parts.length > BATCH_MAX_IDS || !parts.every((id) => PRODUCT_ID_RE.test(id))) {
+      return error(400, 'INVALID_REQUEST')
+    }
+    if (this.batchDown) return error(503, 'SERVICE_UNAVAILABLE') // corrupt projection / outage, after validation
+    const catalog = this.catalog()
+    const items: Array<Record<string, unknown>> = []
+    const missing: string[] = []
+    for (const id of new Set(parts)) {
+      const card = catalog[id]
+      if (!card || id in MERGED_INTO) {
+        missing.push(id)
+        continue
+      }
+      const detailOnly = new Set(['gallery', 'attributes', 'description', 'highlights'])
+      const located = this.located(card, pin)
+      items.push(
+        Object.fromEntries(Object.entries(located).filter(([key]) => !detailOnly.has(key))),
+      )
+    }
+    return send(
+      200,
+      { resolvedReleaseId: 'R1', items, missing, requestId: 'req_batch' },
+      { 'cache-control': 'private, no-store' },
+    )
+  }
+
   /** A list/search page. Cursors are bound to the location they started under (a different one is 400, like the backend). */
   private page(
     all: Array<Record<string, unknown>>,
@@ -708,6 +763,10 @@ export class FakeBackend {
           placements: this.placements,
         })
       }
+      if (url.pathname === '/__control/batch' && req.method === 'POST') {
+        this.batchDown = url.searchParams.get('down') === '1'
+        return send(200, { batchDown: this.batchDown })
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -771,9 +830,15 @@ export class FakeBackend {
     const where = this.locationParams(url, true)
     if (where === 'invalid') return error(400, 'INVALID_REQUEST')
 
+    // GET /v1/products:batch (CommerceReadController.productsBatch): see `batch()`.
+    if (url.pathname === '/v1/products:batch') {
+      return this.batch(url, where, send, error)
+    }
+
     const product = /^\/v1\/products\/([^/]+)$/.exec(url.pathname)
     if (product) {
-      const p = this.catalog()[decodeURIComponent(product[1] ?? '')]
+      const wanted = decodeURIComponent(product[1] ?? '')
+      const p = this.catalog()[MERGED_INTO[wanted] ?? wanted]
       if (!p) return error(404, 'NOT_FOUND')
       return send(
         200,

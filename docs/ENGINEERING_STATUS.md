@@ -26,6 +26,13 @@ accepted). Slots: reusable `SlotPicker` + `/checkout/delivery`; the backend take
 validated address + slot are kept in a sealed 30-minute cookie for S4 and nothing is reserved. Not done: payment/order placement (S4), default-address
 auto-selection, lat/lng. Details: `apps/storefront/README.md` (Delivery location, addresses and slots).
 
+**Storefront rails use the batch product read:** `getRailProducts` makes ONE `GET /v1/products:batch?ids=` per rail (was up to 20 `GET /v1/products/{id}`),
+through a typed, zod-parsed `getProductsBatch(ids, {pin})` (canonical `TZP-` ids checked first and never case-folded, deduped, chunked at the backend cap of 50, 60 s
+cache keyed by URL incl. a serviceable PIN only, trusted-caller headers, 5 s timeout). `missing` ids (unknown, draft, merged: not followed to a survivor) are omitted like failed
+single reads were; any batch failure leaves the rail empty and never falls back to N single reads (rate-limit cost). Batch cards have no gallery (placeholder when no
+thumbnail). The fake backend mirrors the contract (order, duplicates, `missing`, flat 400s, cap 50). Known N+1 left: category grid names, one
+`GET /v1/categories/{id}` per tile (max 12), because the backend has no categories batch read. Details: `apps/storefront/README.md` (Home content contract, Backend gaps).
+
 **Storefront checkout and orders (S4, stacked on S3):** the order step on the existing backend. `/checkout` renders the backend's checkout QUOTE
 (`POST /v1/customer/checkout/quote`: `{addressId}`, `If-Match: "cart-<n>"`, `Idempotency-Key`) on every request, with the cart, address and slot re-read;
 `POST /api/orders` `{quoteId, cartVersion, addressId, slotId}` places the Cash on Delivery order (`POST /v1/customer/orders`, slot from the sealed choice, nothing

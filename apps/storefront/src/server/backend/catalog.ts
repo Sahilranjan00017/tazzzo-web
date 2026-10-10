@@ -1,8 +1,9 @@
 import 'server-only'
 import { cache } from 'react'
+import { z } from 'zod'
 import type { CategoryNode } from '@/lib/categories'
 import { parseHome, type HomeBlock, type HomeParseReport } from '@/lib/content/blocks'
-import { isNodeId, isProductId } from '@/lib/ids'
+import { PRODUCT_ID, isNodeId, isProductId } from '@/lib/ids'
 import { isPin } from '@/lib/location/validation'
 import {
   parseProductDetail,
@@ -77,16 +78,112 @@ export const getProduct = cache(
   },
 )
 
+/** The backend's cap on ids per `GET /v1/products:batch` (duplicates count; more is a flat 400). */
+export const PRODUCT_BATCH_MAX_IDS = 50
+
 /**
- * Cards for a product rail, in the rail's order. There is no public batch read, so each id is one cached
- * `GET /v1/products/{id}` (admission cost 1 each). Missing, hidden or failing products are skipped silently.
+ * `ProductBatchResponse` (docs/api/v1/openapi.yaml): only the fields that are read are checked. Cards are parsed one by
+ * one afterwards (`parseProductSummary`) so a single malformed card is skipped, like a malformed single read.
+ */
+const batchBody = z.object({
+  resolvedReleaseId: z.string().min(1),
+  items: z.array(z.unknown()).max(PRODUCT_BATCH_MAX_IDS),
+  missing: z.array(z.string().regex(PRODUCT_ID)).max(PRODUCT_BATCH_MAX_IDS),
+})
+
+export type ProductBatchResult =
+  | {
+      ok: true
+      /** Cards in the order the ids were given (first occurrence of a duplicate), without gallery or attributes. */
+      items: ProductSummary[]
+      /** Ids with no card: invalid ids (never sent), and the backend's `missing` (no reason is ever given). */
+      missing: string[]
+    }
+  | { ok: false; reason: 'unavailable' }
+
+/** One batch request for at most 50 distinct canonical ids. A failed or malformed answer is `null`. */
+const fetchBatchChunk = cache(
+  async (
+    idsKey: string,
+    pin: string | null,
+  ): Promise<{ cards: ProductSummary[]; missing: string[] } | null> => {
+    const ids = idsKey.split(',')
+    // Commas and the id alphabet need no escaping (URLSearchParams would send `%2C`, three chars per separator).
+    const path = `/v1/products:batch?ids=${idsKey}${pin !== null && isPin(pin) ? `&pin=${pin}` : ''}`
+    const result = await getJson(path)
+    if (!result.ok) {
+      // 400 cannot happen for validated ids (it would mean contract drift); it is not retried with single reads.
+      if (result.kind === 'bad_request') console.warn('storefront_backend_batch_rejected')
+      return null
+    }
+    const parsed = batchBody.safeParse(result.data)
+    if (!parsed.success) {
+      console.warn('storefront_backend_malformed path=/v1/products:batch')
+      return null
+    }
+    const requested = new Set(ids)
+    const missing = new Set(parsed.data.missing.filter((id) => requested.has(id)))
+    const byId = new Map<string, ProductSummary>()
+    const media = serverEnv().media
+    for (const raw of parsed.data.items) {
+      const card = parseProductSummary(raw, media)
+      // Only a card for an id that was asked for, once, and not also reported missing, is ever shown.
+      if (card === null || !requested.has(card.productId)) continue
+      if (missing.has(card.productId) || byId.has(card.productId)) continue
+      byId.set(card.productId, card)
+    }
+    const cards = ids.flatMap((id) => byId.get(id) ?? [])
+    return { cards, missing: ids.filter((id) => !byId.has(id)) }
+  },
+)
+
+/**
+ * `GET /v1/products:batch?ids=&pin=` (operationId `getProductsBatch`): up to 50 product cards in one call.
+ *
+ * - Ids are validated against the canonical grammar first (`^TZP-[A-Za-z0-9-]{1,40}$`, exact case, nothing folded or
+ *   trimmed); an invalid one is never sent (one bad id would make the backend refuse the whole batch) and is reported
+ *   in `missing`. Duplicates collapse to their first position; more than 50 distinct ids are split into chunks of 50.
+ * - Same transport as every public read (`getJson`: trusted-caller headers, 5 s timeout, 60 s data cache keyed by the
+ *   full URL, so one copy per ids list and per serviceable PIN; a non-canonical PIN is dropped, never sent).
+ * - Cards equal the single read's minus gallery/attributes. A merged id is NOT followed to its survivor and a missing
+ *   id carries no reason (unknown, draft, archived and ineligible look alike).
+ * - Any failure (429, 5xx, timeout, network, 400, malformed body) in any chunk is `unavailable` for the whole call. It
+ *   is never answered with N single reads: that would defeat the batch's rate-limit cost (1 + distinct ids).
+ */
+export async function getProductsBatch(
+  ids: readonly string[],
+  { pin = null }: { pin?: string | null } = {},
+): Promise<ProductBatchResult> {
+  const valid = [...new Set(ids.filter(isProductId))]
+  const invalid = [...new Set(ids.filter((id) => !isProductId(id)))]
+  const chunks: string[][] = []
+  for (let i = 0; i < valid.length; i += PRODUCT_BATCH_MAX_IDS) {
+    chunks.push(valid.slice(i, i + PRODUCT_BATCH_MAX_IDS))
+  }
+  const answers = await Promise.all(chunks.map((chunk) => fetchBatchChunk(chunk.join(','), pin)))
+  const items: ProductSummary[] = []
+  const missing: string[] = []
+  for (const answer of answers) {
+    if (answer === null) return { ok: false, reason: 'unavailable' }
+    items.push(...answer.cards)
+    missing.push(...answer.missing)
+  }
+  return { ok: true, items, missing: [...missing, ...invalid] }
+}
+
+/**
+ * Cards for a product rail, in the rail's order: ONE `getProductsBatch` call per rail (rails hold at most 20 ids), so
+ * a rail costs the backend `1 + distinct ids` admission units in a single request instead of 20 single reads.
+ * Missing ids (unknown, hidden, merged, invalid) are skipped silently, as failed single reads were. If the batch
+ * fails the rail is empty and renders nothing (the same as a rail whose every product failed before); it is never
+ * retried as single reads.
  */
 export async function getRailProducts(
   ids: string[],
   pin: string | null = null,
 ): Promise<ProductSummary[]> {
-  const results = await Promise.all(ids.map((id) => getProduct(id, pin)))
-  return results.filter((p): p is ProductDetail => p !== null && p !== 'unavailable')
+  const result = await getProductsBatch(ids, { pin })
+  return result.ok ? result.items : []
 }
 
 function parseNodes(data: unknown): CategoryNode[] | null {
@@ -138,7 +235,8 @@ export const getCategory = cache(
 )
 
 /**
- * Names for category node ids, one cached `GET /v1/categories/{id}` per distinct id (a grid has at most 12). A node
+ * Names for category node ids, one cached `GET /v1/categories/{id}` per distinct id (a grid has at most 12; the backend has no
+ * categories batch read, a known N+1 documented in the README). A node
  * that is not visible, or whose read fails, is left out: callers skip it or fall back to a generic label.
  */
 export const resolveCategoryNames = cache(async (idsKey: string): Promise<Map<string, string>> => {

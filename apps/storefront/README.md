@@ -8,23 +8,23 @@ confirmation and the customer's orders (`/checkout`, `/orders`, `/orders/[id]`).
 
 ## Routes
 
-| Route                          | Backend reads (all from the Next server, never the browser)                                                                |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `/`                            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile       |
-| `/p/[id]`                      | `GET /v1/products/{id}` (gallery, price, description)                                                                      |
-| `/c/[node]`                    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                                 |
-| `/search?q=`                   | `GET /v1/search` (never cached)                                                                                            |
-| `/login`                       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                      |
-| `/account`                     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`         |
-| `/location`                    | `GET /v1/serviceability?pin=` (via `POST /api/location`); signed in: `GET /v1/customer/addresses`                          |
-| `/account/addresses[/new,/id]` | `GET /v1/customer/addresses[/{id}]`; mutations via `/api/addresses/*`                                                      |
-| `/checkout/delivery`           | `GET /v1/customer/addresses`, `GET /v1/customer/delivery/slots?pin=`                                                       |
-| `/cart`                        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]`   |
-| `/checkout`                    | `GET` cart, address, slots, then `POST /v1/customer/checkout/quote`; the page calls `/api/orders`, `/api/checkout/refresh` |
-| `/orders`                      | `GET /v1/customer/orders?page_size=&cursor=` (bearer; cursor paged)                                                        |
-| `/orders/[id]`                 | `GET /v1/customer/orders/{id}` (`?placed=1` = the confirmation); `/api/orders/cancel` calls `POST .../{id}/cancel`         |
-| `/robots.txt`                  | none                                                                                                                       |
-| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                             |
+| Route                          | Backend reads (all from the Next server, never the browser)                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                            | `GET /v1/content/home?channel=web`; rails: ONE `GET /v1/products:batch?ids=` per rail; grids: `GET /v1/categories/{id}` per tile |
+| `/p/[id]`                      | `GET /v1/products/{id}` (gallery, price, description)                                                                            |
+| `/c/[node]`                    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                                       |
+| `/search?q=`                   | `GET /v1/search` (never cached)                                                                                                  |
+| `/login`                       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                            |
+| `/account`                     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`               |
+| `/location`                    | `GET /v1/serviceability?pin=` (via `POST /api/location`); signed in: `GET /v1/customer/addresses`                                |
+| `/account/addresses[/new,/id]` | `GET /v1/customer/addresses[/{id}]`; mutations via `/api/addresses/*`                                                            |
+| `/checkout/delivery`           | `GET /v1/customer/addresses`, `GET /v1/customer/delivery/slots?pin=`                                                             |
+| `/cart`                        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]`         |
+| `/checkout`                    | `GET` cart, address, slots, then `POST /v1/customer/checkout/quote`; the page calls `/api/orders`, `/api/checkout/refresh`       |
+| `/orders`                      | `GET /v1/customer/orders?page_size=&cursor=` (bearer; cursor paged)                                                              |
+| `/orders/[id]`                 | `GET /v1/customer/orders/{id}` (`?placed=1` = the confirmation); `/api/orders/cancel` calls `POST .../{id}/cancel`               |
+| `/robots.txt`                  | none                                                                                                                             |
+| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                                   |
 
 ### Home content contract
 
@@ -39,7 +39,21 @@ no hardcoded banners. `channel=web` is the only query parameter sent (anything e
   `product:<id> -> /p/<id>`, `category:<node> -> /c/<node>`, `search:<text> -> /search?q=<encoded>`; anything else is
   not clickable. A banner whose image is not under the media base (or with no media base configured) is kept with
   the branded placeholder, like every other image that cannot be shown.
-- `PRODUCT_RAIL`: each id is read with `GET /v1/products/{id}`; missing/hidden/failing products are skipped silently.
+- `PRODUCT_RAIL`: the whole rail (at most 20 ids) is ONE `GET /v1/products:batch?ids=TZP-1,TZP-2,...[&pin=]`
+  (`getProductsBatch` in `src/server/backend/catalog.ts`; admission cost `1 + distinct ids`, not 20 calls). Cards come back in the
+  rail's order; a repeated id shows once, at its first position; ids the backend lists as `missing` (unknown, draft, archived,
+  ineligible, **merged**: the batch does not follow a merge to its survivor, unlike `/p/[id]`) are skipped silently, exactly as a failed
+  single read was. Batch cards have no gallery, so a product without a thumbnail shows the placeholder (the old single read fell back
+  to the first gallery image). Only a card for an id that was asked for, once, and not also reported missing is ever shown.
+  - **Ids** are checked against `^TZP-[A-Za-z0-9-]{1,40}$` (exact case, never folded or trimmed) BEFORE the call: an invalid id is
+    dropped and never sent (the backend refuses a whole batch for one bad id). Ids are deduped, and chunked at the backend cap of 50
+    (a rail never needs more than one chunk; a larger caller gets one call per 50, in parallel, all-or-nothing).
+  - **Failure** (429, 5xx, timeout, network, a 400 that validated ids should never get, a malformed body): the rail is empty and
+    renders nothing, the same as a rail whose every product failed before. It is **never retried as N single reads**: that would
+    cost 20 admission units against the batch's `1 + 20` and defeat the rate-limit model. The failure is logged as one
+    `storefront_backend_error` / `_unreachable` / `_malformed` line (route and status only, no ids).
+  - **Cache and PIN:** same 60 s data cache as every read, keyed by the full URL (the ids list and, only for a serviceable PIN,
+    `&pin=`); a non-canonical PIN is dropped. Trusted-caller headers, 5 s timeout and no redirects as for every read.
 - `CATEGORY_GRID`: tiles link to `/c/<node>`; each tile is named by `GET /v1/categories/{id}` (any depth, cached like
   every read). A node that is not visible (404) or whose read fails is skipped; the rest keep grid order.
 - Unknown block types and malformed blocks are skipped; the rest of the page still renders.
@@ -384,14 +398,17 @@ pnpm --filter storefront build          # standalone output
 
 ## Backend gaps (found while building against the contract)
 
-1. **No batch product read.** Rails need one `GET /v1/products/{id}` per id (up to 20, admission cost 1 each).
+1. ~~No batch product read~~: resolved by `GET /v1/products:batch` (operationId `getProductsBatch`); a rail is one call.
+   **Known N+1 left: `GET /v1/categories/{id}`.** A category grid names each tile with one `GET /v1/categories/{id}` (at most
+   12 per grid, `resolveCategoryNames`), because the backend has no batch/ids read for categories. Cached 60 s per URL, so the
+   steady-state cost is small; a batch category read would remove it.
 2. ~~No category node read by id~~: resolved by `GET /v1/categories/{id}` (tazzzo-backend #109); grid tiles and
    `/c/[node]` titles now use it at any depth.
 3. **No category imagery** in the public `Node` (`id`, `name` only): grid tiles are text.
 4. **Rate-limit identity (decided; deployment gate open).** Without `TAZZZO_CALLER_*` the storefront server's egress IP
    shares one bucket. The storefront caches (60 s), remembers 404s, backs off after a 429 and limits each visitor
    (above, per instance); with the trusted-caller credential (backend #108) it is admitted on its own bucket. Still
-   open: sizing that bucket by load test, and a batch product read. `GET /v1/categories` (sitemap only) costs
+   open: sizing that bucket by load test (every bucket must hold at least 51 units for a full product batch). `GET /v1/categories` (sitemap only) costs
    `1 + sum(scope sizes)` units per call.
 5. ~~Product id shape mismatch~~: resolved by tazzzo-backend #110; OpenAPI, cart and content all use
    `TZP-[A-Za-z0-9-]{1,40}`, as this site does.
