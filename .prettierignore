@@ -3,3 +3,5 @@ node_modules
 .next
 coverage
 next-env.d.ts
+e2e/local-stack/evidence
+e2e/local-stack/run

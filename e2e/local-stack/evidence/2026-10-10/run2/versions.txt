@@ -1,0 +1,16 @@
+date (UTC): 2026-10-10T07:21:34Z
+web repo:     4a02f7710f3e3ecd68b123bcf5605568250a95d1 (branch feature/e2e-local-stack); base origin/main 23daf5a0a2cb77e1e89988ef6b4519d0383a37c5
+backend:      ca84293d6a822cbb7e9e041915945aa7b2d3a683 (clean worktree of origin/main; OpenAPI contract correctness (spec-only) (#123))
+backend jar:  catalog-service-0.1.0-SNAPSHOT.jar 73610485 bytes; Spring-Boot-Version 4.1.1
+java:         openjdk version "21.0.12.1" 2026-08-18
+node:         v22.22.0   pnpm: 12.8.1
+next:         16.3.8   react: 19.3.0
+playwright:   1.63.0   chromium: chromium_headless_shell-1243 ffmpeg-1011 
+docker:       29.8.2
+image:        mongo:7 -> sha256:1f995ad6fdb9
+image:        redis:7-alpine -> sha256:858f009f9709
+image:        versity/versitygw@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499 -> sha256:30292fc2eeac
+mongod:       db version v7.0.43
+redis:        Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=40ff01a501d8e4b6
+migrations applied: V0001,V0002,V0003,V0004,V0005,V0006,V0007,V0008,V0009,V0010,V0011,V0012,V0013,V0014,V0015,V0016,V0017,V0018,V0019
+os:           Linux 6.18.44-fc-v114

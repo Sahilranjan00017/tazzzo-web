@@ -1,0 +1,6 @@
+# generated local secrets, certificates, logs and pids: never committed
+run/
+test-results/
+playwright-report/
+node_modules
+local.env
