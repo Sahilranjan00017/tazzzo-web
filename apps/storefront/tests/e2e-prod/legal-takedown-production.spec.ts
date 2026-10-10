@@ -9,7 +9,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test'
  * about one read per minute (the limiter is why reads are cached), not one per page view.
  */
 const backend = () => process.env.E2E_BACKEND_URL!
-const WINDOW_MS = 75_000
+const WINDOW_MS = 85_000
 
 async function control(query: string): Promise<void> {
   const res = await fetch(`${backend()}/__control/content?${query}`, { method: 'POST' })

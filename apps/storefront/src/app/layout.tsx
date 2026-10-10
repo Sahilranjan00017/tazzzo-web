@@ -25,7 +25,7 @@ export function generateMetadata(): Metadata {
 
 /**
  * Every page renders per request: the nonce-based CSP needs a fresh nonce for each response. Backend data is still
- * cached for 60 s in the server data cache (src/server/backend/client.ts), so per-request rendering does not mean
+ * cached for 60 s in the backend client's per-instance memory (src/server/backend/client.ts), so per-request rendering does not mean
  * per-request backend calls. The server environment is validated here, so a misconfigured deployment fails at once.
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {

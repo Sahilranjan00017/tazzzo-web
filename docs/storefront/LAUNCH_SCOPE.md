@@ -34,9 +34,9 @@ disallows only `/search`, `/login`, `/account` and `/api/`, so all four are craw
 - **Take-down takes effect within about a minute.** Reads are `cache: 'no-store'` at the `fetch` layer on purpose: the Next data cache
   (`next: { revalidate }`) never stores a 404, so once a 200 was cached and the backend started answering 404, it kept serving the old 200 (an
   unpublished Terms stayed on screen for as long as the server ran; found by the post-launch-scope audit, finding M-1). Now an unpublished or
-  archived document shows the "not published yet" page (HTTP 200, `noindex`, out of the sitemap) within ~60 s, a replaced document shows its new
-  text within ~60 s, and the backend still sees one read per URL per minute per instance. If the backend is failing (429, 5xx, timeout) the last
-  good body is shown for at most 5 more minutes; a 404 is an answer and is never masked. Covered by `tests/unit/backend-client.test.ts`,
+  archived document shows the "not published yet" page (HTTP 200, `noindex`, out of the sitemap) within ~60-70 s (after the minute the old body is served for up to 10 s more while one background refresh runs, so no visitor waits; a 404 from that refresh removes it for good), a replaced document shows its new
+  text within the same window, and the backend still sees one read per URL per minute per instance. If the backend is failing (429, 5xx, timeout) the last
+  good body is shown for at most 5 more minutes and that URL is not asked again for 10 s (or the `Retry-After`), so an outage is not hammered; a 404 is an answer and is never masked. Covered by `tests/unit/backend-client.test.ts`,
   `tests/unit/content-backend.test.ts` and, on the production build, `tests/e2e-prod/legal-takedown-production.spec.ts`.
 
 ## Loading states

@@ -25,10 +25,12 @@ import { serverEnv } from '@/server/env'
  * 404 is not stored and the stale 200 is served again, indefinitely (reproduced on a production build: an unpublished
  * legal document kept being shown for as long as the server ran). A take-down (200 -> 404) must show within the
  * minute, so every cacheable read here is `cache: 'no-store'` at the fetch layer and kept per server instance, bounded:
- * - a 200 body for 60 s (concurrent reads of the same URL share one in-flight request);
+ * - a 200 body for 60 s (concurrent reads of the same URL share one in-flight request); for SWR_GRACE_MS after that the old
+ *   body is served at once while ONE background refresh runs, so no visitor waits on the minute boundary;
  * - a 404 for the same 60 s (e.g. a hidden product in a rail), which also drops any remembered 200;
  * - after a 429, 5xx, timeout or network error, the last good body is served for up to STALE_ON_ERROR_S so a backend
- *   hiccup does not blank the site (a 404 or 400 is an answer and is never masked by it);
+ *   hiccup does not blank the site, and that URL is not asked again until BACKOFF_DEFAULT_S (or Retry-After) has
+ *   passed, so page views during an outage do not each hit the backend (a 404 or 400 is an answer, never masked);
  * - a 429 means this server's IP bucket is empty: uncached reads (search, paged lists) are not sent until its
  *   `Retry-After` (capped at 60 s) passes.
  */
@@ -42,6 +44,8 @@ const NOT_FOUND_MAX_ENTRIES = 1_000
 const BODY_TTL_MS = REVALIDATE_SECONDS * 1_000
 const BODY_MAX_ENTRIES = 500
 const STALE_ON_ERROR_S = 300
+/** After a body expires it is still served this long while ONE background refresh runs (a take-down shows by ~70 s). */
+const SWR_GRACE_MS = 10_000
 const BACKOFF_DEFAULT_S = 10
 
 // Next bundles the pages, route handlers and the sitemap separately, each with its own copy of this module: the
@@ -50,28 +54,33 @@ const BACKOFF_DEFAULT_S = 10
 interface ReadMemory {
   notFoundUntil: Map<string, number>
   /** Last good 200 body per cacheable URL: fresh until `freshUntil`, served as a fallback while the backend fails. */
-  bodies: Map<string, { data: unknown; freshUntil: number }>
+  bodies: Map<string, { data: unknown; freshUntil: number; retryNotBefore: number }>
   inFlight: Map<string, Promise<BackendResult<unknown>>>
+  /** After a 429, uncached reads wait (and cacheable reads that still have a last-good body are not refreshed). */
+  state: { backoffUntil: number }
 }
 const memoryHost = globalThis as { __tazzzoBackendReads?: ReadMemory }
-const { notFoundUntil, bodies, inFlight } = (memoryHost.__tazzzoBackendReads ??= {
+const { notFoundUntil, bodies, inFlight, state } = (memoryHost.__tazzzoBackendReads ??= {
   notFoundUntil: new Map(),
   bodies: new Map(),
   inFlight: new Map(),
+  state: { backoffUntil: 0 },
 })
-let backoffUntil = 0
 
 /** Test seam: forget remembered 404s, cached bodies and any 429 backoff. */
 export function resetFailureMemory(): void {
   notFoundUntil.clear()
   bodies.clear()
   inFlight.clear()
-  backoffUntil = 0
+  state.backoffUntil = 0
 }
 
 function rememberBody(url: string, data: unknown, now: number): void {
+  for (const [key, entry] of bodies) {
+    if (now >= entry.freshUntil + STALE_ON_ERROR_S * 1_000) bodies.delete(key) // expired and past the fallback bound
+  }
   bodies.delete(url)
-  bodies.set(url, { data, freshUntil: now + BODY_TTL_MS })
+  bodies.set(url, { data, freshUntil: now + BODY_TTL_MS, retryNotBefore: 0 })
   for (const key of bodies.keys()) {
     if (bodies.size <= BODY_MAX_ENTRIES) break
     bodies.delete(key)
@@ -79,6 +88,7 @@ function rememberBody(url: string, data: unknown, now: number): void {
 }
 
 function rememberNotFound(url: string, now: number): void {
+  for (const [key, until] of notFoundUntil) if (until <= now) notFoundUntil.delete(key)
   notFoundUntil.delete(url)
   notFoundUntil.set(url, now + NOT_FOUND_TTL_MS)
   // Map keeps insertion order: evict the oldest entries beyond the bound.
@@ -108,7 +118,7 @@ export async function getJson(
   const env = serverEnv()
   const url = `${env.apiBaseUrl}${pathAndQuery}`
   if (options.cache === false) {
-    if (backoffUntil > Date.now()) return { ok: false, kind: 'unavailable' }
+    if (state.backoffUntil > Date.now()) return { ok: false, kind: 'unavailable' }
     return fetchJson(url, pathAndQuery, env.caller, false)
   }
   const now = Date.now()
@@ -117,9 +127,28 @@ export async function getJson(
   if (until !== undefined) notFoundUntil.delete(url)
   const body = bodies.get(url)
   if (body !== undefined && body.freshUntil > now) return { ok: true, data: body.data }
+  if (body !== undefined && now < body.freshUntil + STALE_ON_ERROR_S * 1_000) {
+    // An expired body that is still usable is served without waiting when (a) the backend failed recently, so a
+    // storm of page views does not hammer a failing or rate-limited backend, or (b) it is within the short grace
+    // while one background refresh runs. A 404 from that refresh drops the body, so it is never served again.
+    const backingOff = body.retryNotBefore > now || state.backoffUntil > now
+    if (backingOff || now < body.freshUntil + SWR_GRACE_MS) {
+      if (!backingOff) refresh(url, pathAndQuery, env.caller)
+      return { ok: true, data: body.data }
+    }
+  }
+  return refresh(url, pathAndQuery, env.caller)
+}
+
+/** The ONE in-flight cacheable read of a URL (shared by every caller that needs it). */
+function refresh(
+  url: string,
+  pathAndQuery: string,
+  caller: { name: string; secret: string } | null,
+): Promise<BackendResult<unknown>> {
   const pending = inFlight.get(url)
   if (pending !== undefined) return pending
-  const request = fetchJson(url, pathAndQuery, env.caller, true).finally(() => inFlight.delete(url))
+  const request = fetchJson(url, pathAndQuery, caller, true).finally(() => inFlight.delete(url))
   inFlight.set(url, request)
   return request
 }
@@ -130,10 +159,12 @@ async function fetchJson(
   caller: { name: string; secret: string } | null,
   cacheable: boolean,
 ): Promise<BackendResult<unknown>> {
-  const unavailable = (): BackendResult<unknown> => {
-    // A cacheable read that cannot be refreshed falls back to the last good body, for a bounded time.
+  const unavailable = (retryAfterS = BACKOFF_DEFAULT_S): BackendResult<unknown> => {
+    // A cacheable read that cannot be refreshed falls back to the last good body, for a bounded time, and is not
+    // retried before `retryAfterS` has passed.
     const last = cacheable ? bodies.get(url) : undefined
     if (last !== undefined && Date.now() < last.freshUntil + STALE_ON_ERROR_S * 1_000) {
+      last.retryNotBefore = Date.now() + retryAfterS * 1_000
       return { ok: true, data: last.data }
     }
     return { ok: false, kind: 'unavailable' }
@@ -160,12 +191,12 @@ async function fetchJson(
     return { ok: false, kind: 'not_found' }
   }
   if (response.status === 400) return { ok: false, kind: 'bad_request' }
-  if (response.status === 429) backoffUntil = Date.now() + retryAfterSeconds(response) * 1_000
+  if (response.status === 429) state.backoffUntil = Date.now() + retryAfterSeconds(response) * 1_000
   if (!response.ok) {
     console.warn(
       `storefront_backend_error path=${routeLabel(pathAndQuery)} status=${response.status} request_id=${requestId(response)}`,
     )
-    return unavailable()
+    return unavailable(response.status === 429 ? retryAfterSeconds(response) : BACKOFF_DEFAULT_S)
   }
   try {
     const data = (await response.json()) as unknown
