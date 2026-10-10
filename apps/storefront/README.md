@@ -89,7 +89,7 @@ request with a 500 and logs only the variable name). Logs are counts only, at mo
     from the right of `X-Forwarded-For` is the visitor, as the ALB appends what it saw; anything the client wrote to
     the left is ignored. A chain too short or an entry that is not a literal IP falls into one shared, limited bucket.
     IPv6 visitors are keyed by their /64. Only safe if the app is reachable through those proxies alone.
-- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch on a PAGE path (never `/api/*`: route handlers ignore those headers and always run in full, so they are always limited and get the security headers, whatever method or headers they carry):
+- **Prefetches.** The proxy (and so the limit and the CSP) is skipped only for a genuine Next router prefetch on a PAGE path (never `/api/*`, `/robots.txt` or `/sitemap.xml`: route and metadata handlers ignore those headers and always run in full, so they are always limited and get the security headers, whatever method or headers they carry):
   `rsc: 1` **and** `next-router-prefetch: 1`, the Next server's own rule. Next answers those with a small prefetch
   payload without rendering the page body (measured: replayed `/search` and `/c/<node>?cursor=` prefetches with fresh
   queries made no backend call), and charging them would spend a visitor's tokens on `<Link>`s merely scrolled past

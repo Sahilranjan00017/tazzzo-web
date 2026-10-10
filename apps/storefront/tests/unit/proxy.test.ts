@@ -64,6 +64,8 @@ describe('proxy matcher', () => {
       expect(matches(url, genuine), url).toBe(true)
       expect(matches(url), url).toBe(true)
     }
+    expect(matches('/sitemap.xml', genuine)).toBe(true)
+    expect(matches('/robots.txt', genuine)).toBe(true)
     // pages keep the exemption
     expect(matches('/apiary', genuine)).toBe(false)
   })
