@@ -220,6 +220,7 @@ test.describe('addresses and the cart', () => {
   test('create, edit, make default and delete, with idempotency and version headers', async ({
     page,
   }) => {
+    const recordedBefore = (await requests()).length
     await signIn(page)
     await page.goto('/account/addresses')
     await expect(page.getByTestId('address-empty')).toBeVisible()
@@ -233,9 +234,10 @@ test.describe('addresses and the cart', () => {
       State: 'Delhi',
     })
     await expect(page.getByTestId('address-card')).toHaveCount(2)
-    const create = (await requests()).filter(
-      (r) => r.method === 'POST' && r.path === '/v1/customer/addresses',
-    )
+    // Only this test's requests: the recorded log spans the whole run, and other specs create addresses too.
+    const create = (await requests())
+      .slice(recordedBefore)
+      .filter((r) => r.method === 'POST' && r.path === '/v1/customer/addresses')
     expect(create).toHaveLength(2)
     expect(create[0]!.idempotencyKey).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     expect(create[0]!.idempotencyKey).not.toBe(create[1]!.idempotencyKey)

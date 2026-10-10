@@ -143,33 +143,34 @@ test('review, place and confirmation under the strict CSP: Secure cookies, trust
   expect(errors).toEqual([])
 })
 
-test('a double click is one order; the unknown outcome retries the same quote; the price change must be confirmed', async ({
-  page,
-}) => {
+test('a double click is one order and one placement request', async ({ page }) => {
   await visitor(page)
   await toReview(page)
   await page.getByTestId('checkout-place').dblclick()
   await expect(page).toHaveURL(/placed=1$/)
-  let s = await state()
+  const s = await state()
   expect(s.orders).toHaveLength(1)
   expect(s.placements).toHaveLength(1)
-  await control('orders', 'reset=1')
-  await control('cart', 'reset=1')
+  expect(await violations(page)).toEqual([])
+})
 
-  // lost answer after the commit: same quote, same order
-  const second = await page.context().newPage()
-  await visitor(second)
-  await toReview(second)
+test('the answer lost after the order committed: status unknown, then the retry returns the same order', async ({
+  page,
+}) => {
+  await visitor(page)
+  await toReview(page)
   await control('orders', 'fault=after:503')
-  await second.getByTestId('checkout-place').click()
-  await expect(second.getByTestId('checkout-error')).toContainText('could not confirm whether')
-  await second.getByTestId('checkout-place').click()
-  await expect(second).toHaveURL(/placed=1$/)
-  s = await state()
+  await page.getByTestId('checkout-place').click()
+  await expect(page.getByTestId('checkout-error')).toContainText('could not confirm whether')
+  expect((await state()).orders).toHaveLength(1)
+  await page.getByTestId('checkout-place').click()
+  await expect(page).toHaveURL(/placed=1$/)
+  const s = await state()
   expect(s.orders).toHaveLength(1)
   expect(s.placements).toHaveLength(2)
   expect(s.placements[1]!.body.quoteId).toBe(s.placements[0]!.body.quoteId)
-  expect(await violations(second)).toEqual([])
+  expect(page.url()).toContain(s.orders[0]!.orderId)
+  expect(await violations(page)).toEqual([])
 })
 
 test('price change in production: the new total is shown and needs an explicit confirmation', async ({

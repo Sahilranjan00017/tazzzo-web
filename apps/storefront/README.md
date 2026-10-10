@@ -301,7 +301,9 @@ is 409 `CART_VERSION_ALREADY_PURCHASED`. The attempt's identity is therefore the
   delivery choice again. It is **never** changed by an unknown outcome, a 5xx, a timeout, a rate limit or a slot/address problem.
 - **Unknown outcome** (any 5xx including the internal-defect 500, a timeout, a network failure, a 200 that is not a valid order): the screen says the order may
   exist, links to Orders, and "Place order" stays enabled; pressing it sends the SAME `quoteId`, which can only return the order that exists or place the one that
-  does not. The client also ignores presses while a request is in flight and after a success.
+  does not. The cookie also remembers that quote as pending (`placing`): a retry of exactly that quote skips the
+  "cart still as reviewed" check (an order that went through has already emptied the cart, which would otherwise read as "cart changed") and asks the backend; any
+  other quote is still refused if the cart moved. The marker is dropped by any definite outcome. The client also ignores presses while a request is in flight and after a success.
 - Two simultaneous requests for one quote are serialised by the backend (duplicate-key recovery returns the winner), so both get the same order.
 
 **Closed error vocabulary** (`src/lib/checkout/messages.ts`; the backend's text, ids and detail never reach the page or the logs): `unauthenticated` (sign in),
