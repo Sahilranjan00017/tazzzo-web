@@ -110,6 +110,12 @@ describe('no fake or browser-held identity', () => {
         ),
         join('api', 'bff', 'delivery', 'slots', '[serviceAreaId]', '[windowId]', 'route.ts'),
         join('api', 'bff', 'imports', '[kind]', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', '[jobId]', '[action]', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', '[jobId]', 'errors.csv', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', '[jobId]', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', '[jobId]', 'rows', '[row]', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', '[jobId]', 'rows', 'route.ts'),
+        join('api', 'bff', 'imports', 'jobs', 'route.ts'),
         join('api', 'bff', 'media', '[ownerType]', '[ownerId]', 'route.ts'),
         join('api', 'bff', 'media', 'uploads', 'route.ts'),
         join('api', 'bff', 'orders', '[orderId]', 'transition', 'route.ts'),
@@ -118,6 +124,7 @@ describe('no fake or browser-held identity', () => {
         join('api', 'bff', 'support', '[caseId]', 'status', 'route.ts'),
         join('api', 'bff', 'inventory', '[skuId]', '[locationId]', '[action]', 'route.ts'),
         join('api', 'bff', 'inventory', '[skuId]', '[locationId]', 'route.ts'),
+        join('api', 'bff', 'inventory', 'stock', 'route.ts'),
         join('api', 'bff', 'pricing', '[skuId]', 'route.ts'),
         join(
           'api',
@@ -173,6 +180,21 @@ describe('no fake or browser-held identity', () => {
         expect(url, relative(APP, f)).toMatch(/fetch\(\s*[`'"]\/api\//)
       }
     }
+  })
+
+  it('import-job approval: no client file names an approver, and the download/read layers add no new backend fetcher', () => {
+    for (const f of SOURCE.filter((f) => /^['"]use client['"]/m.test(read(f)))) {
+      expect(read(f), relative(APP, f)).not.toMatch(/approvedBy/)
+    }
+    // the BFF read and download layers reach the backend only through backendRead / backendDownload (read.ts)
+    for (const name of ['read.ts', 'download.ts']) {
+      const src = read(APP, 'src', 'server', 'bff', name)
+      expect(src, name).not.toMatch(/\bfetch\(|fetchImpl\(/)
+      expect(src, name).toMatch(/backend(Read|Download)\(/)
+    }
+    expect(read(APP, 'src', 'server', 'backend', 'read.ts')).toMatch(
+      /backendDownload[\s\S]*redirect: 'error'/,
+    )
   })
 
   it('sends bytes to object storage only from the upload module, never with credentials', () => {

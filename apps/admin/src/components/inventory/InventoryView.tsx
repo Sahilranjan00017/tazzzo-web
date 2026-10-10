@@ -9,7 +9,7 @@ import { InventoryEditor } from './InventoryEditor'
 
 type Ok<T> = Exclude<BackendReadResult<T>, { kind: 'unauthenticated' }>
 
-/** SKU + location stock. No stock list and no location registry exist on the backend, so both ids are supplied. */
+/** SKU + location stock (the editor). The list of records is `StockListView`; there is no location registry on the backend. */
 export function InventoryView({
   sku,
   location,
@@ -28,7 +28,7 @@ export function InventoryView({
   const header = (
     <PageHeader
       title="Inventory"
-      description="Stock per product and fulfilment location. The backend has no stock list and no location registry, so enter both ids."
+      description="Stock per product and fulfilment location. Open a record by product and location id, or go back to the full list."
     />
   )
   const lookup = (
@@ -58,9 +58,8 @@ export function InventoryView({
           </p>
         ) : (
           <p className="muted">
-            Low-stock and out-of-stock <strong>counts</strong> are on the{' '}
-            <Link href="/dashboard">Dashboard</Link>; the backend cannot list which products they
-            are. Find a record by product and location.
+            <Link href="/inventory">Back to the stock list</Link>. Stock counts by state are on the{' '}
+            <Link href="/dashboard">Dashboard</Link>.
           </p>
         )}
       </>
@@ -88,6 +87,9 @@ export function InventoryView({
     <>
       {header}
       {lookup}
+      <p className="muted">
+        <Link href="/inventory">Back to the stock list</Link>
+      </p>
       <section className="panel" aria-labelledby="inv-h">
         <h2 id="inv-h">{product.data.title}</h2>
         <p className="muted">

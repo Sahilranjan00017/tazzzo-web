@@ -20,3 +20,16 @@ export function isSameOriginMutation(headers: Headers, cmsBaseUrl: string): bool
     return false
   }
 }
+
+/**
+ * CSRF rule for the few cookie-authenticated BFF READS (JSON GETs fetched by our own pages): the custom header
+ * `X-Tazzzo-CSRF: 1` is required (a cross-site page cannot set it without a CORS preflight, which is never allowed), and an
+ * `Origin`, when the browser sends one, must be the CMS origin. Same-origin GET fetches carry no `Origin`, so unlike a
+ * mutation a missing Origin is accepted here. File downloads (plain navigations) use no such rule: they cannot carry the
+ * header, return only the signed-in human's own data as an attachment, and nothing cross-origin can read the response.
+ */
+export function isSameOriginRead(headers: Headers, cmsBaseUrl: string): boolean {
+  if (headers.get(CSRF_HEADER) !== '1') return false
+  const origin = headers.get('origin')
+  return origin === null || origin === new URL(cmsBaseUrl).origin
+}

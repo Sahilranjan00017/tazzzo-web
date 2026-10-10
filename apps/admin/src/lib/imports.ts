@@ -167,9 +167,21 @@ export const FIELDS: Record<ImportKind, readonly FieldDef[]> = {
 export type CsvResult =
   { ok: true; header: string[]; rows: string[][] } | { ok: false; reason: string }
 
+export interface CsvLimits {
+  /** Maximum text length (UTF-16 units), the practical bound on file size. */
+  maxChars: number
+  maxRows: number
+}
+const SYNC_LIMITS: CsvLimits = { maxChars: MAX_FILE_BYTES, maxRows: MAX_FILE_ROWS }
+
 /** RFC 4180 reader: quotes, escaped quotes, CRLF/LF, UTF-8 BOM. Bounded rows/columns; never evaluates anything. */
-export function parseCsv(text: string): CsvResult {
-  if (text.length > MAX_FILE_BYTES) return { ok: false, reason: 'The file is larger than 2 MiB.' }
+export function parseCsv(text: string, limits: CsvLimits = SYNC_LIMITS): CsvResult {
+  const maxRows = limits.maxRows
+  if (text.length > limits.maxChars)
+    return {
+      ok: false,
+      reason: `The file is larger than ${Math.round(limits.maxChars / (1024 * 1024))} MiB.`,
+    }
   const src = text.replace(/^﻿/, '')
   const table: string[][] = []
   let row: string[] = []
@@ -194,8 +206,8 @@ export function parseCsv(text: string): CsvResult {
       cell = ''
       if (row.some((c) => c.trim() !== '')) table.push(row)
       row = []
-      if (table.length > MAX_FILE_ROWS + 1)
-        return { ok: false, reason: `More than ${MAX_FILE_ROWS} data rows. Split the file.` }
+      if (table.length > maxRows + 1)
+        return { ok: false, reason: `More than ${maxRows} data rows. Split the file.` }
     } else cell += ch
   }
   if (quoted) return { ok: false, reason: 'A quoted value is never closed.' }
@@ -205,8 +217,8 @@ export function parseCsv(text: string): CsvResult {
   if (!header) return { ok: false, reason: 'The file is empty.' }
   if (header.length > MAX_COLUMNS) return { ok: false, reason: `More than ${MAX_COLUMNS} columns.` }
   if (rows.length === 0) return { ok: false, reason: 'The file has a header but no data rows.' }
-  if (rows.length > MAX_FILE_ROWS)
-    return { ok: false, reason: `More than ${MAX_FILE_ROWS} data rows. Split the file.` }
+  if (rows.length > maxRows)
+    return { ok: false, reason: `More than ${maxRows} data rows. Split the file.` }
   return { ok: true, header: header.map((h) => h.trim()), rows }
 }
 

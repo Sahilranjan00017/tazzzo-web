@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NAV, breadcrumbsFor, isActive, navFor } from '@/lib/nav'
+import { NAV, breadcrumbsFor, currentHref, isActive, navFor } from '@/lib/nav'
 import { canWrite, describeRoles } from '@/lib/roles'
 
 const ids = (roles: string[]) => navFor(roles).flatMap((s) => s.items.map((i) => i.id))
@@ -72,5 +72,29 @@ describe('role descriptions', () => {
     expect(unknown).toMatchObject({ known: false, role: 'root' })
     expect(canWrite(['cms-writer'])).toBe(true)
     expect(canWrite(['reader', 'order-ops'])).toBe(false)
+  })
+})
+
+describe('import jobs navigation', () => {
+  it('readers see Import jobs (read-only); only writers see the quick Imports; staff roles see neither', () => {
+    expect(ids(['reader'])).toContain('import-jobs')
+    expect(ids(['reader'])).not.toContain('imports')
+    expect(ids(['cms-writer'])).toEqual(expect.arrayContaining(['imports', 'import-jobs']))
+    for (const role of ['order-ops', 'support-agent', 'audit-reader'])
+      expect(ids([role])).not.toContain('import-jobs')
+  })
+  it('marks only the most specific entry current, so Imports and Import jobs never both are', () => {
+    const hrefs = NAV.flatMap((s) => s.items.map((i) => i.href))
+    expect(currentHref(hrefs, '/catalogue/imports')).toBe('/catalogue/imports')
+    expect(currentHref(hrefs, '/catalogue/imports/jobs')).toBe('/catalogue/imports/jobs')
+    expect(currentHref(hrefs, '/catalogue/imports/jobs/IMPJ-0123456789abcdef01234567')).toBe(
+      '/catalogue/imports/jobs',
+    )
+    expect(currentHref(hrefs, '/nowhere')).toBeUndefined()
+  })
+  it('breadcrumbs read Catalogue > Imports > Import jobs > the job id', () => {
+    expect(
+      breadcrumbsFor('/catalogue/imports/jobs/IMPJ-0123456789abcdef01234567').map((c) => c.label),
+    ).toEqual(['Home', 'Catalogue', 'Imports', 'Import jobs', 'IMPJ-0123456789abcdef01234567'])
   })
 })

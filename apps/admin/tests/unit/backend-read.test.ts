@@ -102,3 +102,92 @@ describe('dashboard schema', () => {
     ).toBe(false)
   })
 })
+
+describe('backendRead failure details and downloads', () => {
+  it('keeps the HTTP status and the stable machine code of a refusal, never its message', async () => {
+    const r = await backendRead(
+      deps(reply(503, { error: { code: 'LIST_TIMEOUT', message: 'internal detail Foo.java:42' } })),
+      '/p',
+      schema,
+    )
+    expect(r).toEqual({
+      kind: 'unavailable',
+      reason: 'status',
+      httpStatus: 503,
+      code: 'LIST_TIMEOUT',
+    })
+    const odd = await backendRead(deps(reply(500, { error: { code: 'not a code' } })), '/p', schema)
+    expect(odd).toEqual({ kind: 'unavailable', reason: 'status', httpStatus: 500 })
+  })
+
+  it('backendDownload hands back a stream of an exact text/csv answer and refuses anything else', async () => {
+    const { backendDownload } = await import('@/server/backend/read')
+    const csv = (type: string, status = 200) =>
+      vi.fn<typeof fetch>(
+        async () => new Response('a,b\r\n', { status, headers: { 'content-type': type } }),
+      )
+    const ok = await backendDownload(
+      { backendUrl: 'https://api.test', idToken: 'tok', fetchImpl: csv('text/csv; charset=utf-8') },
+      '/x.csv',
+    )
+    expect(ok.kind).toBe('ok')
+    if (ok.kind === 'ok') expect(await new Response(ok.body).text()).toBe('a,b\r\n')
+    expect(
+      await backendDownload(
+        { backendUrl: 'https://api.test', idToken: 't', fetchImpl: csv('text/html') },
+        '/x',
+      ),
+    ).toMatchObject({ kind: 'unavailable', reason: 'shape' })
+    expect(
+      await backendDownload(
+        { backendUrl: 'https://api.test', idToken: 't', fetchImpl: csv('text/csv', 500) },
+        '/x',
+      ),
+    ).toMatchObject({ kind: 'unavailable', reason: 'status' })
+    expect(
+      (
+        await backendDownload(
+          { backendUrl: 'https://api.test', idToken: 't', fetchImpl: csv('text/csv', 404) },
+          '/x',
+        )
+      ).kind,
+    ).toBe('not_found')
+  })
+
+  it('backendDownload bounds the wait for headers only, so a long body is never cut by the timeout', async () => {
+    const { backendDownload } = await import('@/server/backend/read')
+    const slowHeaders = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('x', 'AbortError')),
+          ),
+        ),
+    )
+    expect(
+      await backendDownload(
+        { backendUrl: 'https://api.test', idToken: 't', fetchImpl: slowHeaders, timeoutMs: 20 },
+        '/x',
+      ),
+    ).toEqual({ kind: 'unavailable', reason: 'timeout' })
+    // headers arrive at once; the stream then outlives the (tiny) timeout and is still delivered whole
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode('a,b\r\n'))
+        await new Promise((r) => setTimeout(r, 60))
+        controller.enqueue(encoder.encode('1,2\r\n'))
+        controller.close()
+      },
+    })
+    const f = vi.fn<typeof fetch>(
+      async () => new Response(body, { headers: { 'content-type': 'text/csv' } }),
+    )
+    const ok = await backendDownload(
+      { backendUrl: 'https://api.test', idToken: 't', fetchImpl: f, timeoutMs: 20 },
+      '/x',
+    )
+    if (ok.kind !== 'ok') throw new Error('expected ok')
+    expect(await new Response(ok.body).text()).toBe('a,b\r\n1,2\r\n')
+  })
+})

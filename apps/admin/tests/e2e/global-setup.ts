@@ -16,6 +16,11 @@ export default async function globalSetup(): Promise<void> {
       CMS_MEDIA_UPLOAD_ORIGIN: harness.backend.url,
       CMS_MEDIA_PUBLIC_ORIGIN: harness.backend.url,
       NEXT_TELEMETRY_DISABLED: '1',
+      // Production waits 90 s (and gives up after 16 min) to learn the outcome of a lost upload answer; tests use short windows.
+      NEXT_PUBLIC_IMPORT_UPLOAD_TEST_TIMINGS: '1', // without it production floors (poll 1 s, quiet 60 s) ignore these
+      NEXT_PUBLIC_IMPORT_UPLOAD_POLL_MS: '1000',
+      NEXT_PUBLIC_IMPORT_UPLOAD_SETTLE_MS: '6000',
+      NEXT_PUBLIC_IMPORT_UPLOAD_MAXWAIT_MS: '25000',
     },
     detached: true,
     stdio: 'ignore',

@@ -99,6 +99,7 @@ export const ACCESS_MATRIX: readonly MatrixRow[] = [
   row('Products, taxonomy, attributes', 'R', 'R W', '', '', ''),
   row('Pricing, stock, media', 'R', 'R W', '', '', ''),
   row('Bulk imports', '', 'R W', '', '', ''),
+  row('Import jobs (background, any size)', 'R', 'R W', '', '', ''),
   row('Service areas, delivery slots', 'R', 'R W', '', '', ''),
   row('Home content, FAQs, app config', 'R', 'R W', '', '', ''),
   row('Orders', '', '', '', 'R W', 'R'),
