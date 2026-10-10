@@ -4,6 +4,9 @@ import { Unavailable } from '@/components/Unavailable'
 import { groupFaqs } from '@/lib/content/faqs'
 import { getFaqs } from '@/server/backend/content'
 
+// Always rendered per request (the 60 s freshness lives in the backend client), never a prerendered copy.
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Help and FAQ',
   description:
@@ -14,7 +17,7 @@ export const metadata: Metadata = {
 /**
  * Help centre (`GET /v1/content/faqs`, the backend's live FAQ in its own order), grouped by category. Each question is
  * a native `<details>`/`<summary>`: keyboard and screen-reader accessible and it needs no client JavaScript. Question
- * and answer are plain text rendered escaped. Cached like every read (60 s).
+ * and answer are plain text rendered escaped. Read through the 60 s backend cache like every read.
  */
 export default async function FaqPage() {
   const result = await getFaqs()

@@ -110,12 +110,15 @@ describe('chunking at the backend cap', () => {
 
   it('exactly 50 distinct ids is one call; 51 is two; 120 is three; duplicates do not count', async () => {
     expect(BATCH_MAX_IDS).toBe(50)
+    const { resetFailureMemory } = await import('@/server/backend/client') // the 60 s memory would answer repeats
     await catalog.getProductsBatch(ids(50))
     expect(calls()).toHaveLength(1)
     backend.requests.length = 0
+    resetFailureMemory()
     await catalog.getProductsBatch(ids(51))
     expect(calls()).toHaveLength(2)
     backend.requests.length = 0
+    resetFailureMemory()
     const r = await catalog.getProductsBatch([...ids(120), ...ids(30)])
     const sizes = backend.requests.map(
       (q) => new URLSearchParams(q.query).get('ids')!.split(',').length,

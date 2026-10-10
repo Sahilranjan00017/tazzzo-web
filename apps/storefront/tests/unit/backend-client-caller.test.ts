@@ -16,7 +16,9 @@ async function clientWith(env: Record<string, string>) {
   vi.stubEnv('STOREFRONT_SESSION_SECRET', 'q'.repeat(43)) // production requires the session sealing key
   vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true') // production requires it with a caller credential
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
-  return import('@/server/backend/client')
+  const client = await import('@/server/backend/client')
+  client.resetFailureMemory() // the read memory is process-wide (globalThis), so it survives vi.resetModules()
+  return client
 }
 
 beforeEach(() => {

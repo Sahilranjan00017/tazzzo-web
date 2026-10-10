@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 describe('getJson', () => {
-  it('GETs the public API from the server with a 60 s cache, JSON only, no redirects, a timeout', async () => {
+  it('GETs the public API from the server, JSON only, no redirects, a timeout, never the Next data cache', async () => {
     fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { a: 1 } }))
     expect(await getJson('/v1/categories')).toEqual({ ok: true, data: { a: 1 } })
     const [url, init] = fetchMock.mock.calls[0]!
@@ -47,11 +47,164 @@ describe('getJson', () => {
       method: 'GET',
       headers: { Accept: 'application/json' },
       redirect: 'error',
-      next: { revalidate: REVALIDATE_SECONDS },
+      // The Next data cache cannot see a 200 -> 404 flip (it never stores the 404 and keeps serving the stale 200), so the
+      // 60 s is held by the client itself.
+      cache: 'no-store',
     })
+    expect(init).not.toHaveProperty('next')
     expect(init?.signal).toBeInstanceOf(AbortSignal)
-    expect(init).not.toHaveProperty('cache')
     expect(REVALIDATE_SECONDS).toBe(60)
+  })
+
+  it('serves a cacheable read from memory for 60 s: one backend call per URL per minute, shared by concurrent reads', async () => {
+    fetchMock.mockImplementation(async () => reply({ status: 200, body: { a: 1 } }))
+    const [x, y] = await Promise.all([getJson('/v1/categories'), getJson('/v1/categories')])
+    expect(x).toEqual({ ok: true, data: { a: 1 } })
+    expect(y).toEqual(x)
+    expect(await getJson('/v1/categories')).toEqual(x)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await getJson('/v1/categories/TZS-000001') // another URL: its own call
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 59_000)
+      await getJson('/v1/categories')
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      vi.setSystemTime(Date.now() + 2_000)
+      await getJson('/v1/categories')
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a 200 that turns into a 404 is gone within the minute (a take-down is not pinned by the old body)', async () => {
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { title: 'Terms' } }))
+    expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: true, data: { title: 'Terms' } })
+    fetchMock.mockResolvedValue(reply({ status: 404, body: { code: 'NOT_FOUND' } }))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 30_000)
+      expect(await getJson('/v1/content/legal/terms')).toMatchObject({ ok: true }) // still inside the minute
+      vi.setSystemTime(Date.now() + 41_000) // 71 s: past the 10 s grace
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: false, kind: 'not_found' })
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: false, kind: 'not_found' })
+      expect(fetchMock).toHaveBeenCalledTimes(2) // the 404 is remembered too
+      // ... and a replaced document shows up after the next minute.
+      vi.setSystemTime(Date.now() + 61_000)
+      fetchMock.mockResolvedValue(reply({ status: 200, body: { title: 'Terms v2' } }))
+      expect(await getJson('/v1/content/legal/terms')).toEqual({
+        ok: true,
+        data: { title: 'Terms v2' },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('outage: serves the last good body without a refetch storm, retries after the back-off, and stays bounded', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 1 } }))
+    await getJson('/v1/categories')
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValue(reply({ status: 503, body: {} }))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 80_000) // past the grace: a blocking refresh, which fails
+      expect(await getJson('/v1/categories')).toEqual({ ok: true, data: { v: 1 } })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      for (let i = 0; i < 20; i++) await getJson('/v1/categories') // a burst of page views
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      vi.setSystemTime(Date.now() + 11_000) // back-off over: one more try
+      await getJson('/v1/categories')
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      // 429 honours Retry-After (capped at 60 s)
+      fetchMock.mockResolvedValue(
+        reply({ status: 429, body: {}, headers: { 'retry-after': '30' } }),
+      )
+      vi.setSystemTime(Date.now() + 11_000)
+      await getJson('/v1/categories')
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      vi.setSystemTime(Date.now() + 25_000)
+      await getJson('/v1/categories')
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      // bounded: 5 minutes after it expired the body is no longer served
+      vi.setSystemTime(Date.now() + 400_000)
+      expect(await getJson('/v1/categories')).toEqual({ ok: false, kind: 'unavailable' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('outage: a 404 still wins over a backing-off last-good body', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 1 } }))
+    await getJson('/v1/content/legal/terms')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 80_000)
+      fetchMock.mockResolvedValueOnce(reply({ status: 503, body: {} }))
+      expect(await getJson('/v1/content/legal/terms')).toMatchObject({ ok: true })
+      vi.setSystemTime(Date.now() + 11_000) // back-off over
+      fetchMock.mockResolvedValueOnce(reply({ status: 404, body: {} }))
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: false, kind: 'not_found' })
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: false, kind: 'not_found' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stale-while-revalidate: after expiry the old body is served at once while ONE refresh runs; its 404 drops the body for good', async () => {
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 1 } }))
+    await getJson('/v1/content/legal/terms')
+    let release!: (r: Response) => void
+    fetchMock.mockReset()
+    fetchMock.mockImplementation(() => new Promise<Response>((res) => (release = res)))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 65_000) // expired, inside the 10 s grace
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: true, data: { v: 1 } })
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: true, data: { v: 1 } })
+      expect(fetchMock).toHaveBeenCalledTimes(1) // one background refresh, nobody waited
+      release(reply({ status: 404, body: {} }))
+      await new Promise((r) => setTimeout(r, 0))
+      expect(await getJson('/v1/content/legal/terms')).toEqual({ ok: false, kind: 'not_found' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('past the grace the read blocks on the refresh: a 404 is seen at once, a new body replaces the old', async () => {
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 1 } }))
+    await getJson('/v1/categories')
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 2 } }))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 75_000)
+      expect(await getJson('/v1/categories')).toEqual({ ok: true, data: { v: 2 } })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('on a 5xx, 429 or network error serves the last good body for a bounded time, never past it, and never masks a 404', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockResolvedValueOnce(reply({ status: 200, body: { v: 1 } }))
+    await getJson('/v1/categories')
+    fetchMock.mockResolvedValue(reply({ status: 503, body: {} }))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 90_000)
+      expect(await getJson('/v1/categories')).toEqual({ ok: true, data: { v: 1 } })
+      fetchMock.mockRejectedValue(new TypeError('fetch failed'))
+      vi.setSystemTime(Date.now() + 61_000)
+      expect(await getJson('/v1/categories')).toEqual({ ok: true, data: { v: 1 } })
+      vi.setSystemTime(Date.now() + 400_000)
+      expect(await getJson('/v1/categories')).toEqual({ ok: false, kind: 'unavailable' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('uncached reads use no-store and no revalidate', async () => {
@@ -194,7 +347,7 @@ describe('catalog reads', () => {
     expect(init).toMatchObject({
       method: 'GET',
       redirect: 'error',
-      next: { revalidate: REVALIDATE_SECONDS },
+      cache: 'no-store',
     })
     expect(init?.signal).toBeInstanceOf(AbortSignal)
   })
@@ -215,7 +368,9 @@ describe('catalog reads', () => {
       missing: ['tzp-1', 'TZP-', 'TZP-a b', 'TZP-' + 'x'.repeat(41), '../x'],
     })
     fetchMock.mockClear()
+    resetFailureMemory() // the 60 s memory would answer a repeat of the same URL
     await catalog.getProductsBatch(['TZP-1'], { pin: '560001&x=1' })
+    resetFailureMemory()
     await catalog.getProductsBatch(['TZP-1'], { pin: null })
     expect(fetchMock.mock.calls.map(([u]) => u)).toEqual([
       `${API}/v1/products:batch?ids=TZP-1`,
@@ -244,6 +399,7 @@ describe('catalog reads', () => {
     expect(sizes).toEqual([50, 50, 20])
     expect(r.ok && r.items.map((p) => p.productId)).toEqual(ids)
     fetchMock.mockClear()
+    resetFailureMemory()
     await catalog.getProductsBatch(ids.slice(0, 50))
     expect(fetchMock).toHaveBeenCalledTimes(1)
     // The longest allowed query stays under the backend's 2866 character bound.
@@ -307,7 +463,7 @@ describe('catalog reads', () => {
     expect(await catalog.getCategory('TZG-000004')).toEqual({ id: 'TZG-000004', name: 'Basmati' })
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe(`${API}/v1/categories/TZG-000004`)
-    expect(init).toMatchObject({ next: { revalidate: 60 } })
+    expect(init).toMatchObject({ cache: 'no-store' })
     expect(await catalog.getCategory('TZG-000003')).toBeNull()
     expect(await catalog.getCategory('TZG-000005')).toBe('unavailable')
     expect(await catalog.getCategory('TZG-000007')).toBe('unavailable')
@@ -364,9 +520,11 @@ describe('catalog reads', () => {
       reply({ status: 200, body: { items: [], hasMore: false } }),
     )
     await catalog.getCategoryProducts('TZC-000002', null)
+    await catalog.getCategoryProducts('TZC-000002', null)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // first page: memory for the minute
     await catalog.getCategoryProducts('TZC-000002', 'next1')
-    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ next: { revalidate: 60 } })
-    expect(fetchMock.mock.calls[1]![1]).toMatchObject({ cache: 'no-store' })
+    await catalog.getCategoryProducts('TZC-000002', 'next1')
+    expect(fetchMock).toHaveBeenCalledTimes(3) // cursor pages: always fresh
   })
 })
 

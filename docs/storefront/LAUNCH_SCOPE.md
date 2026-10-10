@@ -28,9 +28,16 @@ disallows only `/search`, `/login`, `/account` and `/api/`, so all four are craw
   address (no whitespace, quotes, commas, `?`/`&` parameters, second `@`). Anything else is treated as absent. The public contract nests the values
   (`support.phone`, `support.email`); the CMS form's flat names (`supportPhone`, `supportEmail`) are accepted too.
 - **Caching:** the same rule as every other read: the shared hardened client (`src/server/backend/client.ts`: `/v1/` allow-list, no redirects,
-  trusted-caller headers, 5 s timeout), `revalidate: 60` (the backend sends `Cache-Control: public, max-age=60`), a remembered 404 for 60 s. The
+  trusted-caller headers, 5 s timeout), a per-instance 60 s memory of the answer, 200 body or 404 alike (the backend sends `Cache-Control: public, max-age=60`). The
   allow-list did not need extending (it is the `/v1/` prefix); slugs come from a closed list (`terms`, `privacy`) before a path is built.
-  The pages render per request like all pages (nonce CSP), so there is no change to the proxy matcher or the rate limit.
+  The pages render per request like all pages (nonce CSP; `/terms`, `/privacy` and `/faq` also say `force-dynamic`), so there is no change to the proxy matcher or the rate limit.
+- **Take-down takes effect within about a minute.** Reads are `cache: 'no-store'` at the `fetch` layer on purpose: the Next data cache
+  (`next: { revalidate }`) never stores a 404, so once a 200 was cached and the backend started answering 404, it kept serving the old 200 (an
+  unpublished Terms stayed on screen for as long as the server ran; found by the post-launch-scope audit, finding M-1). Now an unpublished or
+  archived document shows the "not published yet" page (HTTP 200, `noindex`, out of the sitemap) within ~60-70 s (after the minute the old body is served for up to 10 s more while one background refresh runs, so no visitor waits; a 404 from that refresh removes it for good), a replaced document shows its new
+  text within the same window, and the backend still sees one read per URL per minute per instance. If the backend is failing (429, 5xx, timeout) the last
+  good body is shown for at most 5 more minutes and that URL is not asked again for 10 s (or the `Retry-After`), so an outage is not hammered; a 404 is an answer and is never masked. Covered by `tests/unit/backend-client.test.ts`,
+  `tests/unit/content-backend.test.ts` and, on the production build, `tests/e2e-prod/legal-takedown-production.spec.ts`.
 
 ## Loading states
 

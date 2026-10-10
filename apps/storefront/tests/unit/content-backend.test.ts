@@ -12,7 +12,7 @@ beforeAll(() => {
   vi.stubEnv('TAZZZO_CALLER_SECRET', 's'.repeat(40))
 })
 
-const { resetFailureMemory, REVALIDATE_SECONDS } = await import('@/server/backend/client')
+const { resetFailureMemory } = await import('@/server/backend/client')
 const { getFaqs, getLegal, getSupportContacts } = await import('@/server/backend/content')
 
 const fetchMock =
@@ -52,7 +52,7 @@ describe('getLegal', () => {
     expect(init).toMatchObject({
       method: 'GET',
       redirect: 'error',
-      next: { revalidate: REVALIDATE_SECONDS },
+      cache: 'no-store',
       headers: { 'X-Tazzzo-Caller': 'storefront' },
     })
   })
@@ -114,5 +114,52 @@ describe('getSupportContacts', () => {
   it('is null when the config cannot be read', async () => {
     fetchMock.mockResolvedValueOnce(json(503, {}))
     expect(await getSupportContacts()).toBeNull()
+  })
+})
+
+describe('take-down and replacement reach the pages within the 60 s window', () => {
+  const minutes = (n: number) => n * 60_000 // the body is fresh 60 s, then served up to 10 s more while a refresh runs
+  const legal = (title: string) =>
+    json(200, { slug: 'terms', title, body: 'A.', effectiveDate: null, requestId: 'r' })
+
+  it('legal: 200 -> 404 shows "unpublished" after the minute; a replaced document shows its new text', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      fetchMock.mockImplementation(async () => legal('Terms v1'))
+      expect(await getLegal('terms')).toMatchObject({ ok: true, document: { title: 'Terms v1' } })
+      fetchMock.mockImplementation(async () => legal('Terms v2'))
+      expect(await getLegal('terms')).toMatchObject({ ok: true, document: { title: 'Terms v1' } })
+      expect(fetchMock).toHaveBeenCalledTimes(1) // one backend call per URL per minute
+      vi.setSystemTime(Date.now() + minutes(1) + 11_000)
+      expect(await getLegal('terms')).toMatchObject({ ok: true, document: { title: 'Terms v2' } })
+      fetchMock.mockImplementation(async () => json(404, { code: 'NOT_FOUND', requestId: 'r' }))
+      vi.setSystemTime(Date.now() + minutes(1) + 11_000)
+      expect(await getLegal('terms')).toEqual({ ok: false, reason: 'unpublished' })
+      expect(await getLegal('terms')).toEqual({ ok: false, reason: 'unpublished' })
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('FAQs and support contacts follow the backend within the minute too', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const faq = { faqId: 'F1', category: 'DELIVERY', question: 'Q?', answer: 'A.' }
+      fetchMock.mockImplementation(async () => json(200, { faqs: [faq], requestId: 'r' }))
+      expect(await getFaqs()).toMatchObject({ ok: true, faqs: [{ question: 'Q?' }] })
+      fetchMock.mockImplementation(async () => json(200, { faqs: [], requestId: 'r' }))
+      vi.setSystemTime(Date.now() + minutes(1) + 11_000)
+      expect(await getFaqs()).toEqual({ ok: true, faqs: [] })
+
+      const config = (phone: string) => json(200, { support: { phone }, requestId: 'r' })
+      fetchMock.mockImplementation(async () => config('+918012345678'))
+      expect(await getSupportContacts()).toMatchObject({ phone: '+918012345678' })
+      fetchMock.mockImplementation(async () => config('+918099999999'))
+      vi.setSystemTime(Date.now() + minutes(1) + 11_000)
+      expect(await getSupportContacts()).toMatchObject({ phone: '+918099999999' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -112,6 +112,8 @@ const sent = (i = 0) =>
 
 let logs: string[]
 beforeEach(() => {
+  // The backend read memory is process-wide (globalThis) and survives vi.resetModules(): start each test empty.
+  delete (globalThis as { __tazzzoBackendReads?: unknown }).__tazzzoBackendReads
   jar.clear()
   fetchMock.mockReset()
   logs = []
