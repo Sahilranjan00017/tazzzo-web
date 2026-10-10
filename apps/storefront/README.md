@@ -2,20 +2,21 @@
 
 The customer website: home merchandising, product detail, category browse and search, rendered by Next.js from the
 **public** Tazzzo API (`/v1/**`, tazzzo-backend `docs/api/v1/openapi.yaml`), plus customer sign-in with a phone OTP and a
-server-side session (`/login`, `/account`). No cart or checkout yet.
+server-side session (`/login`, `/account`) and the customer cart (`/cart`, Add to cart on `/p/[id]`). No checkout yet.
 
 ## Routes
 
-| Route          | Backend reads (all from the Next server, never the browser)                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `/`            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile |
-| `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                                |
-| `/c/[node]`    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                           |
-| `/search?q=`   | `GET /v1/search` (never cached)                                                                                      |
-| `/login`       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                |
-| `/account`     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`   |
-| `/robots.txt`  | none                                                                                                                 |
-| `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                                       |
+| Route          | Backend reads (all from the Next server, never the browser)                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `/`            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile     |
+| `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                                    |
+| `/c/[node]`    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                               |
+| `/search?q=`   | `GET /v1/search` (never cached)                                                                                          |
+| `/login`       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                    |
+| `/account`     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`       |
+| `/cart`        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]` |
+| `/robots.txt`  | none                                                                                                                     |
+| `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                                           |
 
 ### Home content contract
 
@@ -142,6 +143,63 @@ the stricter `expensive` bucket (`/api/auth/otp/*`).
 **Visitor address.** None is forwarded. The backend takes a client address only from `X-Forwarded-For` of its own trusted proxy and ignores
 it from this server (`ClientIpResolver`), and the trusted-caller credential carries nothing about the visitor, so the OTP per-IP buckets see
 this server's egress address; the per-phone and per-challenge buckets and the storefront's own per-visitor limit still apply.
+
+## Cart (`src/server/backend/cart.ts`, `src/server/cart/*`, `src/app/api/cart/*`, `/cart`)
+
+The customer cart is the backend's (`CartController`); the site stores nothing. Same BFF rules as sign-in: the browser never sees a
+backend token, every call is made by the Next server with the sealed session's bearer token through `sendJson`.
+
+**Contract facts the UI is built on.**
+
+- A line's key is the **product id** (`skuId`, the canonical `^TZP-[A-Za-z0-9-]{1,40}$` grammar, never case-changed: `tzp-1` is refused,
+  `TZP-Mix-7` is kept). `PUT /items/{id}` **sets** an exact quantity (1..20; max 50 distinct lines); there is no "add" call.
+- Every mutation **requires `If-Match: "cart-<version>"`** (428 without, 412 when stale). Every answer is the full cart, enriched with
+  current price, stock and a closed list of `issues` (`PRODUCT_UNAVAILABLE`, `PRICE_UNAVAILABLE`, `LOCATION_REQUIRED`, `UNSERVICEABLE`,
+  `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `STOCK_UNKNOWN`, `ENRICHMENT_UNAVAILABLE`, `PRICE_CHANGED`), `buyable`, `freshness`
+  (`REVALIDATE` after 24 h; carts expire after 7 days and read as empty) and `subtotalPaise` = sum of **priced** lines at **current**
+  prices (not a payable total: no delivery, fees, tax). Nothing is reserved or price-locked. There is no merge/guest cart and no
+  idempotency key; the version is the only concurrency control.
+- **No delivery location is sent** (`addressId` needs a saved-address UI that does not exist yet), so the backend answers
+  `LOCATION_REQUIRED` and stock `UNKNOWN` for every line, `buyable: false`. The site shows that as information ("Stock and delivery are
+  confirmed once a delivery address is chosen"), **not** as a blocking problem, and shows every other issue exactly as reported.
+  The public product read has no location either, so its `stockState` is normally `UNKNOWN`; a known `OUT_OF_STOCK` disables Add to
+  cart up front, otherwise the backend's own answer to the add is what the product page reports.
+
+**Routes** (all `POST` + JSON, body capped at 2 KiB, **exactly** the listed fields, `no-store` JSON out; `GET /api/cart` is read-only):
+
+| Route                   | Body                             | Backend call                                                                                  |
+| ----------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `GET /api/cart`         | none                             | `GET /v1/customer/cart`                                                                       |
+| `POST /api/cart/add`    | `{productId, quantity}`          | `GET` the cart, then `PUT` existing + quantity under its version; one retry after a lost race |
+| `POST /api/cart/update` | `{productId, quantity, version}` | `PUT /items/{id}` with `If-Match` from the version the screen showed                          |
+| `POST /api/cart/remove` | `{productId, version}`           | `DELETE /items/{id}` (a line already gone is success)                                         |
+| `POST /api/cart/clear`  | `{version}`                      | `DELETE /v1/customer/cart`                                                                    |
+
+Order of checks: the S1 CSRF rule first (`X-Tazzzo-CSRF` = the session's token, `Sec-Fetch-Site` same-origin, `Origin` host = `Host`;
+403), then a session (401), then the body (400: not JSON, too big, extra/missing field, id outside the canonical grammar, quantity not an
+integer in 1..20, version not 0..10^15-1), and only then the backend. An expired access token is rotated first (route handlers can set
+the cookie); a token the backend refuses is rotated once and the call repeated; a session the backend will not refresh is cleared.
+
+**Errors** are a closed set (`unauthenticated`, `forbidden`, `bad_request`, `conflict`, `not_found`, `item_limit`, `quantity_limit`,
+`rate_limited`, `unavailable`) chosen from the backend's public error `code`/status; backend text, ids and tokens never reach the page or
+the logs. A **stale version answers 409 with the fresh cart**, which replaces the screen ("Your cart changed in another tab or window");
+the change is never applied on top of a cart the customer has not seen. Adding is commutative, so `add` reads the cart itself and
+retries once; asking for more than 20 of one item is refused (`quantity_limit`), never silently clamped.
+
+**UI.** `/cart` is rendered from the backend cart on the server (signed out: `/login?next=/cart`; expired token: through
+`/api/auth/refresh`; backend down: an alert with "Try again"). Each line: image (media allowlist, else the placeholder), title link,
+unit price and struck-through MRP, quantity stepper (capped at a _known_ stock limit), line total, Remove; a note per backend issue
+(blocking ones in red, `PRICE_CHANGED` / `LOCATION_REQUIRED` as information), a "needs your attention" count, a stale-cart note
+(`REVALIDATE`), a subtotal that says when unpriced lines are left out, and a confirmed "Clear cart". Updates are **pessimistic** (the screen
+shows only what the server answered, so a failed change can never leave a wrong cart on screen; controls ignore presses while one is in
+flight but stay focusable via `aria-disabled`). Results go to a polite live region, failures to an alert; after Remove/Clear focus moves to
+the cart heading; the stepper buttons are 44 px. The header **Cart** link shows the item count: one best-effort cart read per page view for
+signed-in visitors (time-boxed to 1.5 s, shared with the `/cart` page render by React `cache`), nothing when it fails.
+
+**Limits / not done.** No checkout, delivery address or saved-address location (so stock is `UNKNOWN` until that lands), no guest cart or
+merge, no client-side persistence. `/api/cart/*` passes through the per-visitor limiter (page bucket) like every other request. The
+`MAX_QUANTITY_PER_ITEM`/`MAX_DISTINCT_ITEMS` constants (20/50) are the backend's defaults (`tazzzo.customer-cart.*`); if the backend is
+configured lower it answers 400 and the customer sees the quantity message.
 
 ## Images
 

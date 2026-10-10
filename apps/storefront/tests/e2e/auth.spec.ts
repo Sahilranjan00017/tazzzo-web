@@ -100,7 +100,12 @@ test('the backend sees the bearer token only on the profile call, and never a fo
   const calls = (await requests()).filter((r) => /^\/v1\/(auth|customer)\//.test(r.path))
   expect(calls.length).toBeGreaterThanOrEqual(4)
   for (const call of calls) expect(call.forwardedFor, call.path).toBeNull()
-  expect(calls.filter((c) => c.bearer).every((c) => c.path === '/v1/customer/profile')).toBe(true)
+  // The header's cart count is the one other bearer call a signed-in page makes.
+  expect(
+    calls
+      .filter((c) => c.bearer)
+      .every((c) => c.path === '/v1/customer/profile' || c.path === '/v1/customer/cart'),
+  ).toBe(true)
 })
 
 test('a wrong code is announced and recoverable; an expired one asks for a new code', async ({

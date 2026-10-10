@@ -160,22 +160,24 @@ const SEND_RETRY_AFTER_MAX_S = 3_600
 const ERROR_CODE = /^[A-Z][A-Z_]{0,39}$/
 
 /**
- * Customer-session calls: `/v1/auth/**` and `/v1/customer/**`, never cached, never retried. Same transport rules as
+ * Customer-session calls (`GET`/`POST`/`PUT`/`DELETE`; `ifMatch` sets the cart's `If-Match`): `/v1/auth/**` and
+ * `/v1/customer/**`, never cached, never retried. Same transport rules as
  * `getJson` (timeout, redirects refused, trusted-caller headers, only `TAZZZO_API_BASE_URL`), plus an optional bearer
  * access token. No client address or any incoming header is forwarded: the backend takes the visitor address only from
  * its own trusted proxy's `X-Forwarded-For` and ignores it from this server (`ClientIpResolver`), and the trusted-caller
  * credential carries nothing about the visitor. The body and the response body are never logged.
  */
 export async function sendJson(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
-  options: { body?: unknown; bearer?: string } = {},
+  options: { body?: unknown; bearer?: string; ifMatch?: string } = {},
 ): Promise<SendResult> {
   if (!/^\/v1\/(auth|customer)\//.test(path)) throw new Error('customer API paths only')
   const env = serverEnv()
   const headers = requestHeaders(env.caller)
   if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (options.ifMatch) headers['If-Match'] = options.ifMatch
   let response: Response
   try {
     response = await fetch(`${env.apiBaseUrl}${path}`, {

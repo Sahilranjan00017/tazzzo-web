@@ -16,7 +16,11 @@ export interface ProductSummary {
   image: GalleryImage | null
 }
 
+export type StockSignal = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNKNOWN'
+
 export interface ProductDetail extends ProductSummary {
+  /** The public read's stock signal. It is read without a location, so it is normally `UNKNOWN`; never guessed. */
+  stockState: StockSignal
   description: string | null
   highlights: string[]
   images: GalleryImage[]
@@ -57,8 +61,11 @@ export function parseProductDetail(raw: unknown, media: MediaBase | null): Produ
   const highlights = Array.isArray(p.highlights)
     ? p.highlights.map(str).filter((h): h is string => h !== null)
     : []
+  const stock = p.stockState
   return {
     ...summary,
+    stockState:
+      stock === 'IN_STOCK' || stock === 'LOW_STOCK' || stock === 'OUT_OF_STOCK' ? stock : 'UNKNOWN',
     image: summary.image ?? images[0] ?? null,
     description: str(p.description),
     highlights,
