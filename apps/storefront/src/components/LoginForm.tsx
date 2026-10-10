@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { errorMessage } from '@/lib/auth/messages'
 import { isOtp, normalisePhone, safeNext } from '@/lib/auth/validation'
@@ -81,8 +82,10 @@ export function LoginForm({ next, pending, notice }: Props) {
     setMasked(String(reply.maskedPhone ?? ''))
     setResendIn(Number(reply.resendAfterSeconds ?? 30))
     setCode('')
+    // The code step's own hint says where the code went; repeating that in the live region printed it twice. Only a
+    // resend (already on the code step) gets an announcement, and a different one.
+    setStatus(step === 'code' ? 'A new code has been sent.' : null)
     setStep('code')
-    setStatus(`We sent a 6-digit code to ${String(reply.maskedPhone ?? 'your phone')}.`)
   }
 
   async function verify(event: FormEvent) {
@@ -156,11 +159,15 @@ export function LoginForm({ next, pending, notice }: Props) {
           <button type="submit" disabled={busy}>
             {busy ? 'Sending…' : 'Send code'}
           </button>
+          <p className="auth-legal">
+            By continuing you agree to our <Link href="/terms">Terms</Link> and{' '}
+            <Link href="/privacy">Privacy Policy</Link>.
+          </p>
         </form>
       ) : (
         <form onSubmit={verify} noValidate aria-busy={busy}>
           <h1>Enter your code</h1>
-          <p className="auth-hint">
+          <p id="login-code-hint" className="auth-hint">
             We sent a 6-digit code to <strong>{masked}</strong>.
           </p>
           <label htmlFor="login-code">6-digit code</label>
@@ -176,7 +183,7 @@ export function LoginForm({ next, pending, notice }: Props) {
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
             aria-invalid={error !== null}
-            aria-describedby={error ? 'auth-error' : undefined}
+            aria-describedby={error ? 'login-code-hint auth-error' : 'login-code-hint'}
             required
           />
           {live}

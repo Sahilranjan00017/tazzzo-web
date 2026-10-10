@@ -79,6 +79,25 @@ describe('LoginForm phone step', () => {
     expect(screen.getByText('+91 ******3210')).toBeInTheDocument()
   })
 
+  // Mutation note: restoring `setStatus('We sent a 6-digit code to ...')` after a send prints the sentence twice.
+  it('says where the code went exactly once, and the code field is described by that hint', async () => {
+    const user = userEvent.setup()
+    fetchMock.mockResolvedValueOnce(json(200, sent))
+    render(<LoginForm next="/account" pending={null} notice={null} />)
+    await user.type(screen.getByLabelText('Mobile number'), '9876543210{Enter}')
+    const code = await screen.findByLabelText('6-digit code')
+    expect(screen.getAllByText(/We sent a 6-digit code/)).toHaveLength(1)
+    const hint = document.getElementById('login-code-hint')!
+    expect(hint).toHaveTextContent('We sent a 6-digit code to +91 ******3210.')
+    expect(code.getAttribute('aria-describedby')).toContain('login-code-hint')
+  })
+
+  it('links the legal text to /terms and /privacy', () => {
+    render(<LoginForm next="/account" pending={null} notice={null} />)
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/terms')
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy')
+  })
+
   it.each([
     [
       429,

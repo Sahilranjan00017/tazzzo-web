@@ -39,6 +39,8 @@ accepted). Slots: reusable `SlotPicker` + `/checkout/delivery`; the backend take
 validated address + slot are kept in a sealed 30-minute cookie for S4 and nothing is reserved. Not done: payment/order placement (S4), default-address
 auto-selection, lat/lng. Details: `apps/storefront/README.md` (Delivery location, addresses and slots).
 
+**Storefront launch pages (branch `feature/storefront-launch-pages`):** `/faq`, `/terms`, `/privacy`, `/contact` (backend `GET /v1/content/faqs`, `/v1/content/legal/{slug}`, `/v1/app-config`), footer and sign-in legal links, sitemap entries, home/search skeletons (`Suspense`, no `loading.tsx`: see the prefetch rule), narrow-screen header, helpful empty/404 states, favicon, OTP duplicate message fixed. `/offers` is deliberately not a page. Details and decisions: `docs/storefront/LAUNCH_SCOPE.md`.
+
 **Storefront rails use the batch product read:** `getRailProducts` makes ONE `GET /v1/products:batch?ids=` per rail (was up to 20 `GET /v1/products/{id}`),
 through a typed, zod-parsed `getProductsBatch(ids, {pin})` (canonical `TZP-` ids checked first and never case-folded, deduped, chunked at the backend cap of 50, 60 s
 cache keyed by URL incl. a serviceable PIN only, trusted-caller headers, 5 s timeout). `missing` ids (unknown, draft, merged: not followed to a survivor) are omitted like failed

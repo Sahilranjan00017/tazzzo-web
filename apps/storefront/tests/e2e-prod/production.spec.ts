@@ -337,3 +337,39 @@ test("real <Link> prefetching never spends a visitor's page tokens", async ({ pa
   expect(admitted).toBeGreaterThanOrEqual(19)
   expect(admitted).toBeLessThanOrEqual(40) // and the visitor is still limited
 })
+
+test('launch pages under the production policy: 200 + nonce CSP, favicon served, home streams behind a skeleton, zero violations', async ({
+  page,
+  request,
+}) => {
+  const problems = await watch(page)
+  for (const [path, heading] of [
+    ['/faq', 'Help and FAQ'],
+    ['/terms', 'Terms of service'],
+    ['/privacy', 'Privacy policy'],
+    ['/contact', 'Contact us'],
+  ] as const) {
+    const response = await page.goto(path)
+    expect(response?.status(), path).toBe(200)
+    expect(response?.headers()['content-security-policy'], path).toMatch(/'nonce-[^']+'/)
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    expect(await problems.violations(), path).toEqual([])
+  }
+  // The legal text is plain text under the policy too: nothing executed.
+  await page.goto('/terms')
+  expect(
+    await page.evaluate(() => (window as unknown as { __legalXss?: number }).__legalXss),
+  ).toBeUndefined()
+  // Home and search stream their content in behind a skeleton: the final DOM has none left and no violation.
+  await page.goto('/')
+  await expect(page.locator('.banner[data-block-id="CB_web1"]')).toBeVisible()
+  await expect(page.getByTestId('page-skeleton')).toHaveCount(0)
+  await page.goto('/search?q=rice')
+  await expect(page.getByTestId('page-skeleton')).toHaveCount(0)
+  expect(await problems.violations()).toEqual([])
+  expect(problems.page).toEqual([])
+  // The favicon is a static file, outside the limiter and the CSP nonce path, and no longer a 404.
+  const icon = await request.get('/favicon.ico')
+  expect(icon.status()).toBe(200)
+  expect(icon.headers()['content-type']).toMatch(/image\//)
+})
