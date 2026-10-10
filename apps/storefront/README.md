@@ -23,8 +23,13 @@ confirmation and the customer's orders (`/checkout`, `/orders`, `/orders/[id]`).
 | `/checkout`                    | `GET` cart, address, slots, then `POST /v1/customer/checkout/quote`; the page calls `/api/orders`, `/api/checkout/refresh`       |
 | `/orders`                      | `GET /v1/customer/orders?page_size=&cursor=` (bearer; cursor paged)                                                              |
 | `/orders/[id]`                 | `GET /v1/customer/orders/{id}` (`?placed=1` = the confirmation); `/api/orders/cancel` calls `POST .../{id}/cancel`               |
+| `/faq`                         | `GET /v1/content/faqs` (grouped by category; `<details>` accordion, no JS needed)                                                |
+| `/terms`, `/privacy`           | `GET /v1/content/legal/{terms,privacy}` (plain text body -> escaped `<p>`; unpublished = friendly 200 page, `noindex`)           |
+| `/contact`                     | `GET /v1/app-config` (`support.phone` / `support.email`; `tel:`/`mailto:` only for E.164 / plain addresses)                      |
 | `/robots.txt`                  | none                                                                                                                             |
-| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                                   |
+| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories), plus `/faq`, `/contact` and the published legal pages                            |
+
+Launch scope (the help pages, loading states, deliberate non-pages such as `/offers`): `docs/storefront/LAUNCH_SCOPE.md`.
 
 ### Home content contract
 
@@ -115,7 +120,8 @@ request with a 500 and logs only the variable name). Logs are counts only, at mo
   so inside it a prefetch looks like a navigation. Anything else carrying a prefetch-like header (`next-router-prefetch`
   alone, `purpose: prefetch`, `sec-purpose`) is rendered in full by Next and is limited and given the CSP like any
   page; previously all of those skipped the proxy. The exemption is safe only while no route has a `loading.*`
-  boundary and neither PPR nor `cacheComponents` is enabled (Next then renders no components for a prefetch);
+  boundary and neither PPR nor `cacheComponents` is enabled (Next then renders no components for a prefetch; the skeletons are
+  therefore `<Suspense>` inside a page, never a `loading.tsx`);
   `tests/unit/prefetch-exemption-policy.test.ts` fails if that changes.
 
 **Propagation of a CMS change to the website:** the backend reads HOME content live; the storefront caches it for

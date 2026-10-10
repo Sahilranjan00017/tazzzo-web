@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { BannerCarousel } from '@/components/BannerCarousel'
+import { PageSkeleton } from '@/components/Skeleton'
 import { Unavailable } from '@/components/Unavailable'
 import { groupSections } from '@/lib/content/blocks'
 import { getHomeBlocks } from '@/server/backend/catalog'
@@ -23,17 +25,11 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-/**
- * Home: exactly the blocks `GET /v1/content/home?channel=web` returned, in that order. Consecutive banners form one
- * carousel; only the first banner on the page loads eagerly. There is no hardcoded or fallback merchandising: if the
- * backend is unavailable the page says so.
- */
-export default async function HomePage() {
+async function HomeSections() {
   const home = await getHomeBlocks()
   const sections = home.ok ? groupSections(home.blocks) : []
   return (
     <>
-      <h1 className="visually-hidden">Tazzzo</h1>
       {!home.ok && <Unavailable what="today's offers" />}
       {home.ok && sections.length === 0 && (
         <div className="notice" role="status">
@@ -56,6 +52,23 @@ export default async function HomePage() {
             return <GridSection key={section.key} block={section.block} />
         }
       })}
+    </>
+  )
+}
+
+/**
+ * Home: exactly the blocks `GET /v1/content/home?channel=web` returned, in that order. Consecutive banners form one
+ * carousel; only the first banner on the page loads eagerly. There is no hardcoded or fallback merchandising: if the
+ * backend is unavailable the page says so. The blocks stream in behind a skeleton (a route-level `loading.tsx` is not
+ * used: see docs/storefront/LAUNCH_SCOPE.md).
+ */
+export default function HomePage() {
+  return (
+    <>
+      <h1 className="visually-hidden">Tazzzo</h1>
+      <Suspense fallback={<PageSkeleton label="Loading today's offers" />}>
+        <HomeSections />
+      </Suspense>
     </>
   )
 }

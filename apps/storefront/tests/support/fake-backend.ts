@@ -15,6 +15,13 @@ import { deflateSync } from 'node:zlib'
  *   ids (duplicates count), raw query <= 2866 chars, else the flat 400; `items` in request order (duplicates collapsed) without
  *   gallery/attributes, `missing` without a reason (unknown, draft and merged ids alike: `TZP-Merged-1` is merged into `TZP-1002`,
  *   which the single read follows and the batch does not). `POST /__control/batch?down=1` makes it 503.
+ * - help content (PublicContentController): `GET /v1/content/faqs` (`{faqs:[{faqId,category,question,answer}],requestId}`, no
+ *   parameters accepted except `category`), `GET /v1/content/legal/{slug}` (FROZEN: slug `terms`|`privacy`, else 404; 200
+ *   `{slug,title,body,effectiveDate|null,requestId}` with a PLAIN TEXT body of blank-line separated paragraphs; a document that
+ *   is not published is the flat 404 envelope) and `GET /v1/app-config` (`support:{phone,email}`; absent values are omitted).
+ *   All three: `Cache-Control: public, max-age=60`. Defaults: FAQs seeded, `terms` published (its body contains markup-looking
+ *   text on purpose), `privacy` NOT published, valid support phone and email. `POST /__control/content?faqs=none|seed&
+ *   terms=published|unpublished&privacy=...&phone=<value|none>&email=<value|none>` changes them (mind the website's 60 s cache).
  * - `GET /v1/products/{id}`, `/v1/categories`, `/v1/categories/{id}`, `/v1/categories/{id}/children`,
  *   `/v1/categories/{id}/products`, `/v1/search` with the documented shapes; unknown ids are a flat 404.
  * - the customer auth contract (OtpController, SessionController, CustomerProfileController): OTP request/verify,
@@ -148,6 +155,43 @@ const BATCH_MAX_QUERY = 2866
 const MERGED_INTO: Record<string, string> = { 'TZP-Merged-1': 'TZP-1002' }
 const ADDRESS_ID_RE = /^ADDR_[A-Za-z0-9_-]{6,64}$/
 
+const FAQ_CATEGORIES = ['DELIVERY', 'PRODUCT', 'CLUB', 'PAYMENT', 'REFUND', 'ACCOUNT']
+
+const FAKE_FAQS = [
+  {
+    faqId: 'FAQ_1',
+    category: 'DELIVERY',
+    question: 'How long does delivery take?',
+    answer: 'Most orders arrive within a day.\nYou pick a slot at checkout.',
+  },
+  {
+    faqId: 'FAQ_2',
+    category: 'DELIVERY',
+    question: 'Do you deliver to my area <b>today</b>?',
+    answer: 'Enter your PIN code to check. <script>window.__faqXss = 1</script>',
+  },
+  {
+    faqId: 'FAQ_3',
+    category: 'PAYMENT',
+    question: 'How can I pay?',
+    answer: 'Cash on delivery is the only payment method for now.',
+  },
+]
+
+/** Plain-text legal bodies; blank lines separate paragraphs. The markup-looking text must be shown literally. */
+const FAKE_LEGAL: Record<string, { title: string; body: string; effectiveDate: string | null }> = {
+  terms: {
+    title: 'Terms of service',
+    body: 'By using Tazzzo you agree to these terms.\n\nOrders are subject to availability. <script>window.__legalXss = 1</script>\n\nPrices include <b>all taxes</b> unless stated.',
+    effectiveDate: '2026-03-01',
+  },
+  privacy: {
+    title: 'Privacy policy',
+    body: 'We collect only what we need to deliver your order.',
+    effectiveDate: null,
+  },
+}
+
 export class FakeBackend {
   url = ''
   mediaUrl = ''
@@ -182,6 +226,11 @@ export class FakeBackend {
   readonly placements: Array<{ body: unknown }> = []
   private paged = false
   private batchDown = false
+  private faqsOn = true
+  private searchDelayMs = 0
+  private published: Record<string, boolean> = { terms: true, privacy: false }
+  private supportPhone: string | null = '+918012345678'
+  private supportEmail: string | null = 'help@tazzzo.example'
   private slotsFull = false
   private addressDown = false
   private api?: Server
@@ -767,6 +816,27 @@ export class FakeBackend {
         this.batchDown = url.searchParams.get('down') === '1'
         return send(200, { batchDown: this.batchDown })
       }
+      // `POST /__control/search?delay=<ms>`: `GET /v1/search` answers that late (the website's search is never cached), so
+      // the skeleton shown while results stream in can be observed.
+      if (url.pathname === '/__control/search' && req.method === 'POST') {
+        this.searchDelayMs = Math.min(Number(url.searchParams.get('delay') ?? '0') || 0, 10_000)
+        return send(200, { searchDelayMs: this.searchDelayMs })
+      }
+      if (url.pathname === '/__control/content' && req.method === 'POST') {
+        const q = url.searchParams
+        if (q.get('faqs')) this.faqsOn = q.get('faqs') === 'seed'
+        for (const slug of ['terms', 'privacy']) {
+          if (q.get(slug)) this.published[slug] = q.get(slug) === 'published'
+        }
+        if (q.has('phone')) this.supportPhone = q.get('phone') === 'none' ? null : q.get('phone')
+        if (q.has('email')) this.supportEmail = q.get('email') === 'none' ? null : q.get('email')
+        return send(200, {
+          faqsOn: this.faqsOn,
+          published: this.published,
+          phone: this.supportPhone,
+          email: this.supportEmail,
+        })
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -811,6 +881,49 @@ export class FakeBackend {
         // The audience is storage-side only; the public response never carries it.
         .map((b) => Object.fromEntries(Object.entries(b).filter(([key]) => key !== 'audience')))
       return send(200, { blocks, requestId: 'req_home' }, { 'cache-control': 'public, max-age=60' })
+    }
+
+    if (url.pathname === '/v1/content/faqs') {
+      const keys = [...url.searchParams.keys()]
+      const cat = url.searchParams.getAll('category')
+      if (keys.some((k) => k !== 'category') || cat.length > 1) return error(400, 'INVALID_REQUEST')
+      if (cat[0] !== undefined && !FAQ_CATEGORIES.includes(cat[0]))
+        return error(400, 'INVALID_REQUEST')
+      const faqs = this.faqsOn
+        ? FAKE_FAQS.filter((f) => cat[0] === undefined || f.category === cat[0])
+        : []
+      return send(200, { faqs, requestId: 'req_faq' }, { 'cache-control': 'public, max-age=60' })
+    }
+
+    const legal = /^\/v1\/content\/legal\/([^/]+)$/.exec(url.pathname)
+    if (legal) {
+      const slug = legal[1]!
+      const doc = FAKE_LEGAL[slug]
+      if (url.search !== '' || !doc || !this.published[slug]) return error(404, 'NOT_FOUND')
+      return send(
+        200,
+        { slug, ...doc, requestId: 'req_legal' },
+        { 'cache-control': 'public, max-age=60' },
+      )
+    }
+
+    if (url.pathname === '/v1/app-config') {
+      const support: Record<string, string> = {}
+      if (this.supportPhone !== null) support.phone = this.supportPhone
+      if (this.supportEmail !== null) support.email = this.supportEmail
+      return send(
+        200,
+        {
+          storeOpen: true,
+          maintenance: { enabled: false },
+          android: {},
+          ios: {},
+          support,
+          legal: { termsUrl: null, privacyUrl: null, refundPolicyUrl: null },
+          requestId: 'req_cfg',
+        },
+        { 'cache-control': 'public, max-age=60' },
+      )
     }
 
     if (url.pathname === '/v1/serviceability') {
@@ -878,6 +991,7 @@ export class FakeBackend {
       return this.page(Object.values(this.products()), where, url, send, error, 'req_list')
     }
     if (url.pathname === '/v1/search') {
+      if (this.searchDelayMs > 0) await new Promise((r) => setTimeout(r, this.searchDelayMs))
       const q = url.searchParams.get('q') ?? ''
       const tokens = q
         .toLowerCase()

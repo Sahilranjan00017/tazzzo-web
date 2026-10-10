@@ -1152,3 +1152,206 @@ h2 {
     min-width: 280px;
   }
 }
+
+/* Footer links, help pages (FAQ, legal, contact), empty-state links, loading skeleton. */
+.site-footer__nav ul,
+.helpful-links__list,
+.contact__more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.site-footer__nav a,
+.helpful-links__list a,
+.contact__more a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.site-footer p {
+  margin: 0;
+}
+
+.prose {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.prose h1 {
+  margin: 8px 0 12px;
+  font-size: 1.6rem;
+}
+.prose__foot {
+  margin-top: 24px;
+}
+.helpful-links h2 {
+  font-size: 1.05rem;
+}
+
+.faq__group h2 {
+  margin: 28px 0 8px;
+}
+.faq__item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0 0 8px;
+}
+.faq__item summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+.faq__answer {
+  padding: 0 16px 8px;
+  color: var(--muted);
+}
+.faq__answer p {
+  margin: 0 0 8px;
+}
+
+.legal__date {
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+.legal__p {
+  margin: 0 0 14px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.contact__list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.contact__list dt {
+  font-weight: 600;
+}
+.contact__list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.contact__list a {
+  display: inline-block;
+  min-height: 44px;
+  line-height: 44px;
+}
+
+.auth-legal {
+  margin: 16px 0 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.skeleton {
+  min-height: 520px;
+}
+.skeleton__bar,
+.skeleton__card,
+.skeleton__row {
+  background: linear-gradient(90deg, var(--placeholder) 25%, #f6f4fd 50%, var(--placeholder) 75%);
+  background-size: 200% 100%;
+  border-radius: 8px;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.skeleton__bar--title {
+  width: 40%;
+  max-width: 280px;
+  height: 28px;
+  margin: 8px 0 20px;
+}
+.skeleton__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.skeleton__card {
+  aspect-ratio: 4 / 5;
+}
+.skeleton__list {
+  display: grid;
+  gap: 12px;
+}
+.skeleton__row {
+  height: 72px;
+}
+@media (min-width: 768px) {
+  .skeleton__grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__bar,
+  .skeleton__card,
+  .skeleton__row {
+    animation: none;
+  }
+}
+
+/* Narrow screens: the header is two tidy rows (brand + search, then the nav); no label wraps, every target is 44px. */
+@media (max-width: 480px) {
+  .site-header__inner {
+    gap: 8px 10px;
+  }
+  .search-form {
+    flex: 1 1 0;
+  }
+  .search-form input,
+  .search-form button {
+    min-height: 44px;
+  }
+  .account-nav {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    margin-left: 0;
+    gap: 0 12px;
+    justify-content: space-between;
+  }
+  .account-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+  .account-nav a.location-chip {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 48%;
+    height: 44px;
+    line-height: 42px;
+    padding: 0 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip-optional,
+  .nav-optional {
+    display: none;
+  }
+  .nav-main {
+    text-transform: capitalize;
+  }
+}

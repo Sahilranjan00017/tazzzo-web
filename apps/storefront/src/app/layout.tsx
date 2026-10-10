@@ -3,7 +3,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { connection } from 'next/server'
 import { serverEnv } from '@/server/env'
-import { locationChipText } from '@/lib/location/model'
+import { LocationChipLabel } from '@/components/LocationChipLabel'
 import { headerCartCount } from '@/server/cart/service'
 import { currentLocation } from '@/server/location/service'
 import { readSession } from '@/server/session/cookies'
@@ -68,7 +68,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 className={`location-chip${location?.serviceable === false ? ' location-chip--no' : ''}`}
                 data-testid="location-chip"
               >
-                {locationChipText(location)}
+                <LocationChipLabel location={location} />
               </Link>
               <Link
                 href="/cart"
@@ -92,7 +92,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               )}
               {signedIn ? (
                 <Link href="/account" data-testid="account-link">
-                  Your account
+                  <span className="nav-optional">Your </span>
+                  <span className="nav-main">account</span>
                 </Link>
               ) : (
                 <Link href="/login" data-testid="signin-link">
@@ -108,6 +109,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           {children}
         </main>
         <footer className="site-footer">
+          <nav aria-label="Footer" className="site-footer__nav">
+            <ul>
+              <li>
+                <Link href="/faq">FAQ</Link>
+              </li>
+              <li>
+                <Link href="/privacy">Privacy</Link>
+              </li>
+              <li>
+                <Link href="/terms">Terms</Link>
+              </li>
+              <li>
+                <Link href="/contact">Contact</Link>
+              </li>
+            </ul>
+          </nav>
           <p>© Tazzzo</p>
         </footer>
       </body>
