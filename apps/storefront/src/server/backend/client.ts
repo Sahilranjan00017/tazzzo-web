@@ -7,26 +7,30 @@ import { serverEnv } from '@/server/env'
  *
  * Why server-side with a shared cache: the backend admits every public `/v1` read through a token-bucket limiter keyed
  * by the caller's IP (`ConsumerAdmissionGate` / `ClientIpResolver`); from the backend's point of view every visitor of
- * this website IS this server. Cached reads (`revalidate: 60`, matching `Cache-Control: public, max-age=60` on the
- * home content) keep the cost per page view near zero: one backend call per URL per minute per server instance, not
- * one per visitor. Client IPs are not forwarded (the backend ignores `X-Forwarded-For` from an untrusted peer) and no
+ * this website IS this server. Cached reads (60 s, matching `Cache-Control: public, max-age=60` on the home content)
+ * keep the cost per page view near zero: one backend call per URL per minute per server instance, not one per
+ * visitor. Client IPs are not forwarded (the backend ignores `X-Forwarded-For` from an untrusted peer) and no
  * installation id is sent (it would add a second shared bucket, never relieve the IP one).
  *
  * When `TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET` are configured, every read carries them as `X-Tazzzo-Caller` /
  * `X-Tazzzo-Caller-Secret` so the backend can admit this website through its own trusted-caller bucket. They are sent
  * only to `TAZZZO_API_BASE_URL` (https in production; redirects are refused, so they cannot follow one elsewhere)
- * and never logged. Next's data-cache key is a hash that includes request headers, so rotating the secret simply
- * misses the cache once.
+ * and never logged.
  *
  * Failures are typed, never thrown at the page: 404 is `not_found`, 400 is `bad_request`, everything else (429, 5xx,
  * timeout, network, non-JSON) is `unavailable`.
  *
- * The Next data cache stores only 200 responses, so two failure answers are remembered here (per server instance,
- * bounded) to keep them from costing a backend call on every page view:
- * - a 404 on a cacheable read (e.g. a hidden product in a rail) for the same 60 s;
+ * Why the 60 s cache is held HERE and not in the Next data cache (`fetch(..., { next: { revalidate } })`): the Next
+ * data cache only ever writes 200 responses. When a cached 200 goes stale and the revalidating fetch answers 404, the
+ * 404 is not stored and the stale 200 is served again, indefinitely (reproduced on a production build: an unpublished
+ * legal document kept being shown for as long as the server ran). A take-down (200 -> 404) must show within the
+ * minute, so every cacheable read here is `cache: 'no-store'` at the fetch layer and kept per server instance, bounded:
+ * - a 200 body for 60 s (concurrent reads of the same URL share one in-flight request);
+ * - a 404 for the same 60 s (e.g. a hidden product in a rail), which also drops any remembered 200;
+ * - after a 429, 5xx, timeout or network error, the last good body is served for up to STALE_ON_ERROR_S so a backend
+ *   hiccup does not blank the site (a 404 or 400 is an answer and is never masked by it);
  * - a 429 means this server's IP bucket is empty: uncached reads (search, paged lists) are not sent until its
- *   `Retry-After` (capped at 60 s) passes. Cacheable reads still go through `fetch`, which serves the cached (or
- *   stale) copy without waiting for the backend.
+ *   `Retry-After` (capped at 60 s) passes.
  */
 export type BackendResult<T> =
   { ok: true; data: T } | { ok: false; kind: 'not_found' | 'bad_request' | 'unavailable' }
@@ -35,15 +39,43 @@ export const REVALIDATE_SECONDS = 60
 const TIMEOUT_MS = 5_000
 const NOT_FOUND_TTL_MS = REVALIDATE_SECONDS * 1_000
 const NOT_FOUND_MAX_ENTRIES = 1_000
+const BODY_TTL_MS = REVALIDATE_SECONDS * 1_000
+const BODY_MAX_ENTRIES = 500
+const STALE_ON_ERROR_S = 300
 const BACKOFF_DEFAULT_S = 10
 
-const notFoundUntil = new Map<string, number>()
+// Next bundles the pages, route handlers and the sitemap separately, each with its own copy of this module: the
+// memory lives on `globalThis` so the whole server process shares it (one backend call per URL per minute, and a
+// take-down is seen by the sitemap exactly when it is seen by the page).
+interface ReadMemory {
+  notFoundUntil: Map<string, number>
+  /** Last good 200 body per cacheable URL: fresh until `freshUntil`, served as a fallback while the backend fails. */
+  bodies: Map<string, { data: unknown; freshUntil: number }>
+  inFlight: Map<string, Promise<BackendResult<unknown>>>
+}
+const memoryHost = globalThis as { __tazzzoBackendReads?: ReadMemory }
+const { notFoundUntil, bodies, inFlight } = (memoryHost.__tazzzoBackendReads ??= {
+  notFoundUntil: new Map(),
+  bodies: new Map(),
+  inFlight: new Map(),
+})
 let backoffUntil = 0
 
-/** Test seam: forget remembered 404s and any 429 backoff. */
+/** Test seam: forget remembered 404s, cached bodies and any 429 backoff. */
 export function resetFailureMemory(): void {
   notFoundUntil.clear()
+  bodies.clear()
+  inFlight.clear()
   backoffUntil = 0
+}
+
+function rememberBody(url: string, data: unknown, now: number): void {
+  bodies.delete(url)
+  bodies.set(url, { data, freshUntil: now + BODY_TTL_MS })
+  for (const key of bodies.keys()) {
+    if (bodies.size <= BODY_MAX_ENTRIES) break
+    bodies.delete(key)
+  }
 }
 
 function rememberNotFound(url: string, now: number): void {
@@ -75,33 +107,56 @@ export async function getJson(
   if (!pathAndQuery.startsWith('/v1/')) throw new Error('public API paths only')
   const env = serverEnv()
   const url = `${env.apiBaseUrl}${pathAndQuery}`
-  const cacheable = options.cache !== false
+  if (options.cache === false) {
+    if (backoffUntil > Date.now()) return { ok: false, kind: 'unavailable' }
+    return fetchJson(url, pathAndQuery, env.caller, false)
+  }
   const now = Date.now()
-  if (cacheable) {
-    const until = notFoundUntil.get(url)
-    if (until !== undefined && until > now) return { ok: false, kind: 'not_found' }
-    if (until !== undefined) notFoundUntil.delete(url)
-  } else if (backoffUntil > now) {
+  const until = notFoundUntil.get(url)
+  if (until !== undefined && until > now) return { ok: false, kind: 'not_found' }
+  if (until !== undefined) notFoundUntil.delete(url)
+  const body = bodies.get(url)
+  if (body !== undefined && body.freshUntil > now) return { ok: true, data: body.data }
+  const pending = inFlight.get(url)
+  if (pending !== undefined) return pending
+  const request = fetchJson(url, pathAndQuery, env.caller, true).finally(() => inFlight.delete(url))
+  inFlight.set(url, request)
+  return request
+}
+
+async function fetchJson(
+  url: string,
+  pathAndQuery: string,
+  caller: { name: string; secret: string } | null,
+  cacheable: boolean,
+): Promise<BackendResult<unknown>> {
+  const unavailable = (): BackendResult<unknown> => {
+    // A cacheable read that cannot be refreshed falls back to the last good body, for a bounded time.
+    const last = cacheable ? bodies.get(url) : undefined
+    if (last !== undefined && Date.now() < last.freshUntil + STALE_ON_ERROR_S * 1_000) {
+      return { ok: true, data: last.data }
+    }
     return { ok: false, kind: 'unavailable' }
   }
-  const caching = cacheable
-    ? { next: { revalidate: REVALIDATE_SECONDS } }
-    : { cache: 'no-store' as const }
   let response: Response
   try {
     response = await fetch(url, {
       method: 'GET',
-      headers: requestHeaders(env.caller),
+      headers: requestHeaders(caller),
       redirect: 'error',
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      ...caching,
+      // Never the Next data cache (see the header comment): freshness is decided above.
+      cache: 'no-store',
     })
   } catch {
     console.warn(`storefront_backend_unreachable path=${routeLabel(pathAndQuery)}`)
-    return { ok: false, kind: 'unavailable' }
+    return unavailable()
   }
   if (response.status === 404) {
-    if (cacheable) rememberNotFound(url, now)
+    if (cacheable) {
+      bodies.delete(url)
+      rememberNotFound(url, Date.now())
+    }
     return { ok: false, kind: 'not_found' }
   }
   if (response.status === 400) return { ok: false, kind: 'bad_request' }
@@ -110,13 +165,15 @@ export async function getJson(
     console.warn(
       `storefront_backend_error path=${routeLabel(pathAndQuery)} status=${response.status} request_id=${requestId(response)}`,
     )
-    return { ok: false, kind: 'unavailable' }
+    return unavailable()
   }
   try {
-    return { ok: true, data: (await response.json()) as unknown }
+    const data = (await response.json()) as unknown
+    if (cacheable) rememberBody(url, data, Date.now())
+    return { ok: true, data }
   } catch {
     console.warn(`storefront_backend_malformed path=${routeLabel(pathAndQuery)}`)
-    return { ok: false, kind: 'unavailable' }
+    return unavailable()
   }
 }
 

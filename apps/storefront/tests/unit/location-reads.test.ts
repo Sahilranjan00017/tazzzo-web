@@ -182,7 +182,9 @@ describe('public reads carry ?pin= (a canonical PIN only)', () => {
     const m = await load()
     fetchMock.mockImplementation(async () => reply(200, okProduct))
     await m.catalog.getProduct('TZP-1001')
+    m.client.resetFailureMemory() // the 60 s memory would answer a repeat of the same URL
     await m.catalog.getProduct('TZP-1001', '560001&x=1')
+    m.client.resetFailureMemory()
     await m.catalog.getProduct('TZP-1001', '../')
     expect(urls()).toEqual([
       'GET /v1/products/TZP-1001',
