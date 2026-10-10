@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
-import { AUDIT_SUB, OPS_SUB, WRITER_SUB } from '../support/fake-backend'
+import { AUDIT_SUB, OPS_SUB, READER_SUB, WRITER_SUB } from '../support/fake-backend'
+import { control, seedJob } from './helpers'
 
 /**
  * Responsive and basic accessibility sweep over every built module at the target widths. Data comes from the mock backend,
@@ -20,7 +21,10 @@ const GENERAL_PAGES = [
   '/catalogue/taxonomy/releases',
   '/pricing?sku=TZP-REF-1',
   '/inventory?sku=TZP-REF-1&location=LOC-1',
+  '/inventory',
+  '/inventory?location=LOC-BULK&state=LOW_STOCK',
   '/catalogue/imports',
+  '/catalogue/imports/jobs',
   '/catalogue/media?type=product&id=TZP-REF-1',
   '/delivery/service-areas',
   '/delivery/service-areas/560047',
@@ -45,6 +49,35 @@ async function signIn(page: Page, sub: string) {
   await expect(page.getByRole('button', { name: /Account menu/ })).toBeVisible()
 }
 
+/**
+ * What a settled page looks like: the route's loading skeleton (`aria-busy`) is gone and exactly one h1 is in <main>.
+ * `networkidle` alone is NOT enough: in `next dev` a cold route compiles on first visit and streams its content after the
+ * document, and `count()` does not wait, so reading it straight after `goto` can see the skeleton (no h1) or an error
+ * boundary (no h1). Waiting here, and describing the page when it still is not right, keeps that from being a flake while a
+ * genuinely broken page still fails with an explanation.
+ */
+async function settledH1(page: Page): Promise<{ count: number; state: string }> {
+  await page
+    .locator('[aria-busy="true"]')
+    .first()
+    .waitFor({ state: 'detached', timeout: 20_000 })
+    .catch(() => undefined)
+  await expect(page.locator('main h1'))
+    .toHaveCount(1, { timeout: 20_000 })
+    .catch(() => undefined)
+  const count = await page.locator('main h1').count()
+  if (count === 1) return { count, state: '' }
+  const text = (
+    await page
+      .locator('main')
+      .innerText({ timeout: 2_000 })
+      .catch(() => '(no <main>)')
+  )
+    .replace(/\s+/g, ' ')
+    .slice(0, 160)
+  return { count, state: ` [page shows: "${text}"]` }
+}
+
 /** Visits every page at every width and returns ALL layout problems (so one run lists every offender). */
 async function sweep(page: Page, paths: string[]): Promise<string[]> {
   const dir = process.env.CMS_SHOTS
@@ -54,12 +87,13 @@ async function sweep(page: Page, paths: string[]): Promise<string[]> {
     await page.setViewportSize({ width, height: 900 })
     for (const path of paths) {
       await page.goto(path, { waitUntil: 'networkidle' })
+      const h1 = await settledH1(page)
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth,
       )
       if (overflow > 1) problems.push(`${path} @${width}px overflows horizontally by ${overflow}px`)
-      const h1 = await page.locator('main h1').count()
-      if (h1 !== 1) problems.push(`${path} @${width}px has ${h1} h1 elements`)
+      if (h1.count !== 1)
+        problems.push(`${path} @${width}px has ${h1.count} h1 elements${h1.state}`)
       if (dir)
         await page.screenshot({
           path: `${dir}/${width}${path.replace(/[^a-z0-9]+/gi, '_')}.png`,
@@ -74,9 +108,74 @@ test.describe.configure({ timeout: 300_000 })
 
 test('general modules do not overflow horizontally at 360-1440px and have one h1 each', async ({
   page,
+  request,
 }) => {
   await signIn(page, WRITER_SUB)
-  expect(await sweep(page, GENERAL_PAGES)).toEqual([])
+  // data that makes the new pages show their real layout: a full first page of stock with Load more, and jobs in the
+  // states with the widest content (a rejected job with verdicts and Correct buttons, one the worker is running)
+  await control(request, 'seed-stock', { count: 60 })
+  await control(request, 'seed-stock', { count: 6, location: 'LOC-BULK' })
+  const rejected = await seedJob(request, {
+    status: 'REJECTED',
+    rows: 8,
+    invalidRows: [1, 5],
+    note: 'Responsive sweep',
+  })
+  const running = await seedJob(request, { status: 'VALIDATING', rows: 40 })
+  const validated = await seedJob(request, { status: 'VALIDATED', rows: 3 })
+  const paths = [
+    ...GENERAL_PAGES,
+    `/catalogue/imports/jobs/${rejected}`,
+    `/catalogue/imports/jobs/${running}`,
+    `/catalogue/imports/jobs/${validated}?from=1`,
+  ]
+  expect(await sweep(page, paths)).toEqual([])
+})
+
+test('the job correction form, the upload mapping and the stock reader view do not overflow at 360-1440px', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, WRITER_SUB)
+  const rejected = await seedJob(request, { status: 'REJECTED', rows: 4, invalidRows: [1] })
+  const open = await seedJob(request, { status: 'OPEN', rows: 1 })
+  const problems: string[] = []
+  const overflowed = async (label: string, width: number) => {
+    const o = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    if (o > 1) problems.push(`${label} @${width}px overflows horizontally by ${o}px`)
+  }
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/catalogue/imports/jobs/${rejected}`, { waitUntil: 'networkidle' })
+    await settledH1(page)
+    await page.getByRole('button', { name: 'Correct row 1' }).click()
+    await expect(page.getByRole('form', { name: 'Correct row 1' })).toBeVisible()
+    await overflowed('correction form', width)
+    await page.goto(`/catalogue/imports/jobs/${open}`, { waitUntil: 'networkidle' })
+    await settledH1(page)
+    await page.getByLabel('CSV file').setInputFiles({
+      name: 'rows.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        'id,title,brand,vertical,release,internalKey\nTZP-1,A,acme,TZV-000001,REL-1,k\n',
+      ),
+    })
+    await expect(page.getByText('1 ready')).toBeVisible()
+    await overflowed('upload mapping', width)
+  }
+  expect(problems).toEqual([])
+})
+
+test('the reader views of the stock list and the job pages do not overflow at 360-1440px', async ({
+  page,
+  request,
+}) => {
+  await signIn(page, READER_SUB)
+  await control(request, 'seed-stock', { count: 60 })
+  const id = await seedJob(request, { status: 'REJECTED', rows: 6, invalidRows: [2] })
+  expect(
+    await sweep(page, ['/inventory', '/catalogue/imports/jobs', `/catalogue/imports/jobs/${id}`]),
+  ).toEqual([])
 })
 
 test('order and support modules do not overflow horizontally at 360-1440px', async ({ page }) => {

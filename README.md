@@ -17,6 +17,8 @@ Tazzzo web surfaces: the **internal Admin/CMS** (`apps/admin`) and the **custome
   bodies, strict schemas, the human's ID token as the only backend credential, no redirects, 5 s timeout, no retries)
   with one reference route, `PATCH /api/bff/catalog/products/{id}/title`, and Playwright E2E.
 
+- **C1 (in review):** stock list with keyset "Load more" (`/inventory`) and asynchronous import jobs (`/catalogue/imports/jobs`) on the backend's `listStock` and `/api/v1/admin/imports/jobs` contracts; see `docs/ENGINEERING_STATUS.md` (C1).
+
 **Not implemented yet:** CMS business modules, audit read, scheduler, deployment. The backend stays the
 authorization boundary for every request; UI role gating is UX only.
 

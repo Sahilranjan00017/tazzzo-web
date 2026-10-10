@@ -15,6 +15,7 @@ describe('go-to resolution', () => {
     ['CB_abcdefghijklmnop', '/content/faqs/CB_abcdefghijklmnop'],
     ['tzc-000123', '/catalogue/taxonomy?parent=TZC-000123'],
     ['560047', '/delivery/service-areas/560047'],
+    ['IMPJ-0123456789abcdef01234567', '/catalogue/imports/jobs/IMPJ-0123456789abcdef01234567'],
     ['req_0123456789abcdef0123', '/system/audit?requestId=req_0123456789abcdef0123'],
   ])('%s -> %s', (input, href) => {
     expect(resolveGoto(input, all)).toEqual({ ok: true, target: expect.objectContaining({ href }) })
@@ -35,6 +36,9 @@ describe('go-to resolution', () => {
       '560047/../1',
       'javascript:alert(1)',
       'https://evil.example',
+      'IMPJ-0123456789ABCDEF01234567',
+      'IMPJ-0123456789abcdef01234567/../x',
+      'impj-0123456789abcdef01234567',
     ])
       expect(resolveGoto(bad, all).ok, bad).toBe(false)
   })
@@ -44,6 +48,8 @@ describe('go-to resolution', () => {
       reason: expect.stringMatching(/Orders/),
     })
     expect(resolveGoto('TZP-1', ['order-ops'])).toMatchObject({ ok: false })
+    expect(resolveGoto('IMPJ-0123456789abcdef01234567', ['reader']).ok).toBe(true)
+    expect(resolveGoto('IMPJ-0123456789abcdef01234567', ['order-ops'])).toMatchObject({ ok: false })
     expect(resolveGoto('TZP-1', ['reader']).ok).toBe(true)
     expect(resolveGoto('req_0123456789abcdef0123', ['cms-writer']).ok).toBe(false)
     expect(resolveGoto('req_0123456789abcdef0123', ['audit-reader']).ok).toBe(true)
@@ -69,6 +75,7 @@ describe('access matrix', () => {
       products: 'Products, taxonomy, attributes',
       taxonomy: 'Products, taxonomy, attributes',
       imports: 'Bulk imports',
+      'import-jobs': 'Import jobs (background, any size)',
       media: 'Pricing, stock, media',
       pricing: 'Pricing, stock, media',
       inventory: 'Pricing, stock, media',

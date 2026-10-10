@@ -1,9 +1,11 @@
 import type { Metadata } from 'next'
 import { InventoryView } from '@/components/inventory/InventoryView'
+import { StockListView } from '@/components/inventory/StockListView'
 import { LOCATION_ID } from '@/lib/commerce'
 import { PRODUCT_ID } from '@/lib/products'
 import { canWrite } from '@/lib/roles'
-import { readInventory } from '@/server/backend/commerce'
+import { parseStockFilters } from '@/lib/stock-list'
+import { readInventory, readStockList } from '@/server/backend/commerce'
 import { readProduct } from '@/server/backend/products'
 import { requireAdmin } from '@/server/session/require-session'
 
@@ -23,7 +25,12 @@ export default async function InventoryPage({
   const sku = one(raw.sku)
   const location = one(raw.location)
   const writer = canWrite(roles)
-  if (!sku && !location) return <InventoryView canWrite={writer} />
+  if (!sku) {
+    const filters = parseStockFilters(raw)
+    return (
+      <StockListView result={await readStockList(filters)} filters={filters} canWrite={writer} />
+    )
+  }
   if (!sku || !location || !PRODUCT_ID.test(sku) || !LOCATION_ID.test(location)) {
     return <InventoryView canWrite={writer} invalidInput />
   }

@@ -259,6 +259,9 @@ export async function runBffMutation<In, Out, Client>(
         ...trace,
       })
     }
+    case 413:
+      // The backend's own body bound (e.g. 2 MiB on imports) is answered as the same 413 the BFF's bound gives.
+      return respond(413, 'invalid_request', { error: 'payload_too_large', ...trace })
     case 429: {
       const retryAfter = upstream.headers.get('retry-after') ?? ''
       const extra = /^[1-9][0-9]{0,3}$/.test(retryAfter) ? { 'Retry-After': retryAfter } : undefined

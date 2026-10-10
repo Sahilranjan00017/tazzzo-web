@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { breadcrumbsFor, isActive, type NavSection } from '@/lib/nav'
+import { breadcrumbsFor, currentHref, type NavSection } from '@/lib/nav'
 import { Breadcrumbs } from './Breadcrumbs'
 import { LogoutButton } from '@/components/LogoutButton'
 import { GotoBox } from './GotoBox'
@@ -56,6 +56,10 @@ export function ShellChrome({
   }, [menu, drawer])
 
   const initial = (identity.label.trim()[0] ?? '?').toUpperCase()
+  const current = currentHref(
+    sections.flatMap((section) => section.items.map((item) => item.href)),
+    pathname,
+  )
 
   return (
     <ToastProvider>
@@ -85,8 +89,8 @@ export function ShellChrome({
                       ) : (
                         <Link
                           href={item.href}
-                          className={`nav-link${isActive(item.href, pathname) ? ' nav-active' : ''}`}
-                          aria-current={isActive(item.href, pathname) ? 'page' : undefined}
+                          className={`nav-link${item.href === current ? ' nav-active' : ''}`}
+                          aria-current={item.href === current ? 'page' : undefined}
                         >
                           {item.label}
                         </Link>

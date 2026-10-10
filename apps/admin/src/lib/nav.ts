@@ -65,6 +65,13 @@ export const NAV: readonly NavSection[] = [
         roles: ['cms-writer'],
         state: 'available',
       },
+      {
+        id: 'import-jobs',
+        label: 'Import jobs',
+        href: '/catalogue/imports/jobs',
+        roles: GENERAL,
+        state: 'available',
+      },
       { id: 'media', label: 'Media', href: '/catalogue/media', roles: GENERAL, state: 'available' },
     ],
   },
@@ -181,6 +188,14 @@ export function navFor(roles: readonly string[]): NavSection[] {
 
 export function isActive(href: string, pathname: string): boolean {
   return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`)
+}
+
+/**
+ * The ONE entry to mark current: the most specific match, so `/catalogue/imports/jobs/IMPJ-…` highlights "Import jobs"
+ * and not also its parent "Imports" (two `aria-current` links in one menu would be wrong).
+ */
+export function currentHref(hrefs: readonly string[], pathname: string): string | undefined {
+  return hrefs.filter((href) => isActive(href, pathname)).sort((a, b) => b.length - a.length)[0]
 }
 
 export interface Crumb {

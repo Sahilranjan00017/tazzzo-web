@@ -8,5 +8,8 @@ export type BackendReadResult<T> =
   | {
       kind: 'unavailable'
       reason: 'timeout' | 'network' | 'status' | 'shape'
+      /** For `status` only: the backend's HTTP status and its stable machine code (e.g. 503 `LIST_TIMEOUT`), if well-formed. */
+      httpStatus?: number
+      code?: string
       backendRequestId?: string
     }
