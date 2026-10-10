@@ -2,6 +2,7 @@ import 'server-only'
 import { z } from 'zod'
 import { appConfigForm } from '@/lib/appconfig'
 import {
+  LEGAL_REQUEST_MAX_BYTES,
   faqUpdateInput,
   faqWriteInput,
   legalUpdateInput,
@@ -64,6 +65,7 @@ export const createLegalMutation: BffMutationSpec<
 > = {
   routeId: 'content.legal.create',
   method: 'POST',
+  maxBodyBytes: LEGAL_REQUEST_MAX_BYTES,
   input: legalWriteInput,
   backend: (v) => ({
     path: '/api/v1/admin/content/blocks',
@@ -85,6 +87,7 @@ export const updateLegalMutation: BffMutationSpec<
 > = {
   routeId: 'content.legal.update',
   method: 'PUT',
+  maxBodyBytes: LEGAL_REQUEST_MAX_BYTES,
   input: legalUpdateInput,
   backend: ({ blockId, ...rest }) => ({
     path: `/api/v1/admin/content/blocks/${encodeURIComponent(blockId)}`,

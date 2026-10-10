@@ -1811,10 +1811,17 @@ export function validateContent(
           c === 0x3c ||
           c === 0x3e ||
           (c >= 0x80 && c <= 0x9f) ||
+          c === 0x61c ||
+          c === 0x200b ||
+          c === 0x200e ||
+          c === 0x200f ||
           (c >= 0x202a && c <= 0x202e) ||
-          (c >= 0x2066 && c <= 0x2069)
+          c === 0x2060 ||
+          (c >= 0x2066 && c <= 0x2069) ||
+          c === 0xfeff
         )
-      })
+      }) ||
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(body)
     )
       return 'body'
     if (has('effectiveDate')) {

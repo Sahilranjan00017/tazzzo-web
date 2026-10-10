@@ -121,11 +121,20 @@ export function legalBodyProblem(body: string): string | undefined {
       (c < 0x20 && c !== 0x0a) ||
       c === 0x7f ||
       (c >= 0x80 && c <= 0x9f) ||
+      c === 0x061c ||
+      c === 0x200b ||
+      c === 0x200e ||
+      c === 0x200f ||
       (c >= 0x202a && c <= 0x202e) ||
-      (c >= 0x2066 && c <= 0x2069)
+      c === 0x2060 ||
+      (c >= 0x2066 && c <= 0x2069) ||
+      c === 0xfeff
     )
       return 'control'
   }
+  // an unpaired surrogate iterates as itself (the zero-width joiner and non-joiner stay allowed)
+  if (/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(body))
+    return 'control'
   return undefined
 }
 
@@ -233,7 +242,7 @@ const CODE_COPY: Record<string, string> = {
   INVALID_CONTENT:
     'The backend rejected the content (check the text rules and the publication window).',
   STATE_CONFLICT:
-    'That change is not allowed from the current status (an archived entry is final; the 200-entry limit may be reached). For legal documents, only one Terms and one Privacy document may be published for any period: unpublish the other one, or end its window before this one starts. It has been reloaded.',
+    'That change is not allowed from the current status (an archived entry is final; the 200-entry limit may be reached). It has been reloaded.',
   STALE_VERSION:
     'This entry changed since you loaded it. The latest version has been reloaded; review it and try again.',
 }
@@ -242,6 +251,34 @@ export function contentErrorMessage(result: Extract<BffResult<unknown>, { ok: fa
   if (result.code && CODE_COPY[result.code]) return CODE_COPY[result.code]!
   if (result.status === 404) return 'This entry no longer exists.'
   return bffErrorMessage(result, 'content change')
+}
+
+/**
+ * Largest request body the legal routes accept. MUST match the backend's `tazzzo.http.content-block-max-request-body-bytes`
+ * (default 262144) for `POST/PUT /api/v1/admin/content/blocks`: a 60,000-character body is up to 180,000 bytes in UTF-8
+ * (Devanagari, 3 bytes per character) before JSON escapes. Every other BFF route keeps the 16 KiB default.
+ */
+export const LEGAL_REQUEST_MAX_BYTES = 256 * 1024
+
+/**
+ * Operator-facing text for a failed legal write or status change. `editing` is true in the editor, where the typed text
+ * stays on screen after a refusal; false for publish/unpublish/archive, where the page is reloaded.
+ */
+export function legalErrorMessage(
+  result: Extract<BffResult<unknown>, { ok: false }>,
+  editing: boolean,
+): string {
+  if (result.status === 413)
+    return 'This document is too large to save (limit 60,000 characters / 256 KB). Shorten it or split it.'
+  if (result.status === 409 && result.code === 'STATE_CONFLICT')
+    return editing
+      ? 'Another document for this page (Terms or Privacy) is already published for an overlapping period, or this document’s status does not allow the change. Unpublish the other document or end its window before this one starts. Your text is still here.'
+      : 'Only one Terms and one Privacy document can be published for any period, and an archived document is final. Unpublish the other document or end its window before this one starts. The latest version has been reloaded.'
+  if (result.status === 409 && result.code === 'STALE_VERSION')
+    return editing
+      ? 'Someone else changed this document since you loaded it. Your text is still here: copy it, then reload the latest version and apply it again.'
+      : 'This document changed since you loaded it. The latest version has been reloaded; review it and try again.'
+  return contentErrorMessage(result)
 }
 
 /** Disclosed wherever publication changes visibility (decision D5). */

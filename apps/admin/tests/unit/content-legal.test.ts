@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   LEGAL_BODY_MAX,
+  legalErrorMessage,
   legalBodyProblem,
   legalUpdateInput,
   legalWriteInput,
@@ -19,6 +20,8 @@ describe('legal body rules (mirror of the backend LEGAL validation)', () => {
   it('accepts plain paragraphs, Indic text with a joiner, and exactly the maximum length', () => {
     expect(legalBodyProblem('One.\n\nTwo.')).toBeUndefined()
     expect(legalBodyProblem('ताज़ा‍नियम')).toBeUndefined()
+    expect(legalBodyProblem('a\u200Cb\u200Dc')).toBeUndefined()
+    expect(legalBodyProblem('a\uD83D\uDE00b')).toBeUndefined()
     expect(legalBodyProblem('x'.repeat(LEGAL_BODY_MAX))).toBeUndefined()
   })
   it.each([
@@ -35,6 +38,14 @@ describe('legal body rules (mirror of the backend LEGAL validation)', () => {
     ['C1 control', 'a\u0085b', 'control'],
     ['bidi override', 'abc‮def', 'control'],
     ['bidi isolate', 'abc⁦def', 'control'],
+    ['zero-width space', 'a\u200Bb', 'control'],
+    ['left-to-right mark', 'a\u200Eb', 'control'],
+    ['right-to-left mark', 'a\u200Fb', 'control'],
+    ['arabic letter mark', 'a\u061Cb', 'control'],
+    ['word joiner', 'a\u2060b', 'control'],
+    ['BOM', 'a\uFEFFb', 'control'],
+    ['lone high surrogate', 'a\uD800b', 'control'],
+    ['lone low surrogate', 'a\uDC00b', 'control'],
   ])('rejects %s', (_n, body, why) => {
     expect(legalBodyProblem(body)).toBe(why)
   })
@@ -160,5 +171,34 @@ describe('legal BFF specs', () => {
       payload: { legalSlug: 'TERMS', body: 'x' },
       expectedVersion: 3,
     })
+  })
+})
+
+describe('legalErrorMessage', () => {
+  const fail = (status: number, code?: string) => ({
+    ok: false as const,
+    status,
+    error: 'x',
+    ...(code ? { code } : {}),
+  })
+  it('names the size problem specifically', () => {
+    expect(legalErrorMessage(fail(413), true)).toBe(
+      'This document is too large to save (limit 60,000 characters / 256 KB). Shorten it or split it.',
+    )
+  })
+  it('tells STATE_CONFLICT (another document published) from STALE_VERSION (someone else edited)', () => {
+    const state = legalErrorMessage(fail(409, 'STATE_CONFLICT'), true)
+    const stale = legalErrorMessage(fail(409, 'STALE_VERSION'), true)
+    expect(state).toMatch(/already published for an overlapping period/)
+    expect(stale).toMatch(/Someone else changed this document/)
+    expect(state).not.toBe(stale)
+    expect(legalErrorMessage(fail(409, 'STATE_CONFLICT'), false)).toMatch(
+      /Only one Terms and one Privacy document/,
+    )
+    expect(legalErrorMessage(fail(409, 'STALE_VERSION'), false)).toMatch(/reloaded/)
+  })
+  it('everything else keeps the shared copy', () => {
+    expect(legalErrorMessage(fail(403), true)).toMatch(/not permitted/)
+    expect(legalErrorMessage(fail(422, 'INVALID_CONTENT'), true)).toMatch(/rejected the content/)
   })
 })

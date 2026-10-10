@@ -222,6 +222,35 @@ describe('LegalEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Reload the latest version' }))
     expect(refresh).toHaveBeenCalled()
   })
+  const saveWith = async (status: number, body: unknown) => {
+    const user = userEvent.setup()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }))
+    wrap(<LegalEditor block={clean()} />)
+    await user.type(screen.getByLabelText('Text'), ' Extra.')
+    await user.click(screen.getByRole('button', { name: 'Review changes' }))
+    await confirmWith(user, 'Save')
+  }
+  it('a refused save for size says so specifically and keeps the text', async () => {
+    await saveWith(413, { error: 'payload_too_large' })
+    expect(
+      await screen.findByText(/too large to save \(limit 60,000 characters \/ 256 KB\)/),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Text')).toHaveValue('One.\n\nTwo. Extra.')
+  })
+  it('tells another-document-published (STATE_CONFLICT) from someone-else-edited (STALE_VERSION)', async () => {
+    await saveWith(409, { error: 'invalid_request', code: 'STATE_CONFLICT' })
+    expect(
+      await screen.findByText(/already published for an overlapping period/),
+    ).toBeInTheDocument()
+  })
+  it('someone else edited (STALE_VERSION) has its own message', async () => {
+    await saveWith(409, { error: 'invalid_request', code: 'STALE_VERSION' })
+    expect(await screen.findByText(/Someone else changed this document/)).toBeInTheDocument()
+  })
+  it('a role the backend refuses (403) gets the existing forbidden message, not a silent failure', async () => {
+    await saveWith(403, { error: 'forbidden' })
+    expect(await screen.findByText(/Your role is not permitted to make this/)).toBeInTheDocument()
+  })
   it('archived documents are read-only', () => {
     wrap(<LegalEditor block={doc({ status: 'ARCHIVED' })} />)
     expect(screen.getByText(/Archived documents are final/)).toBeInTheDocument()

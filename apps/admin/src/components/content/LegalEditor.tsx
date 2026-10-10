@@ -9,8 +9,8 @@ import {
   LEGAL_SLUGS,
   LEGAL_SLUG_LABEL,
   PUBLICATION_DELAY_NOTE,
-  contentErrorMessage,
   legalBodyProblem,
+  legalErrorMessage,
   legalParagraphs,
   legalUpdateInput,
   legalWriteInput,
@@ -44,7 +44,9 @@ const BODY_COPY: Record<string, string> = {
  */
 export function LegalEditor({ block }: { block?: ContentBlock }) {
   const router = useRouter()
-  const { run, busy } = useBffAction(contentErrorMessage, { refreshOnConflict: false })
+  const { run, busy } = useBffAction((f) => legalErrorMessage(f, true), {
+    refreshOnConflict: false,
+  })
   const p = block?.payload
   const [slug, setSlug] = useState(p?.legalSlug ?? 'TERMS')
   const [title, setTitle] = useState(block?.title ?? '')
@@ -336,7 +338,7 @@ export function LegalStatusActions({
   status: string
   version: number
 }) {
-  const { run, busy } = useBffAction(contentErrorMessage)
+  const { run, busy } = useBffAction((f) => legalErrorMessage(f, false))
   const [pending, setPending] = useState<Action>()
   const actions = ACTIONS[status] ?? []
   if (actions.length === 0) return <p className="muted">This document is archived; it is final.</p>

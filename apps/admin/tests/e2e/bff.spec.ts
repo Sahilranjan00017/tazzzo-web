@@ -999,7 +999,7 @@ test('legal documents (mock backend): the live document per slug, create, publis
   // a second PRIVACY document cannot be published while the first is: the backend refuses, nothing changes
   const second = await create('Privacy Policy v2', 'Newer text.')
   await publish()
-  await expect(page.getByText(/only one Terms and one Privacy document/)).toBeVisible()
+  await expect(page.getByText(/Only one Terms and one Privacy document/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Publish' })).toBeVisible()
 
   // replace it the supported way: unpublish the first, publish the second
@@ -1060,6 +1060,51 @@ test('legal documents (mock backend): a reader sees the text read-only and the s
   await expect(page).toHaveURL(/\/content\/legal\/CB_legalseed00000001$/)
   await page.goto('/content/legal/new')
   await expect(page.getByText('Creating content needs the cms-writer role')).toBeVisible()
+})
+
+test('legal documents (mock backend): the backend refuses a reader write with 403 (no UI-only control), and the editor tells a stale version from an overlap', async ({
+  page,
+  request,
+}) => {
+  // a reader forging the BFF call is refused by the BACKEND, and the refusal is surfaced
+  await signIn(page, READER_SUB)
+  const forged = await page.request.post(`${BASE}/api/bff/content/legal`, {
+    headers: { origin: BASE, 'x-tazzzo-csrf': '1', 'content-type': 'application/json' },
+    data: {
+      title: 'Forged',
+      sort: 0,
+      payload: { legalSlug: 'PRIVACY', body: 'Not allowed.' },
+    },
+  })
+  expect(forged.status()).toBe(403)
+  const attempts = (await backendRequests(request)).filter(
+    (r) => r.method === 'POST' && r.path.endsWith('/content/blocks'),
+  )
+  expect(attempts).toHaveLength(1)
+  expect(attempts[0]!.sub).toBe(READER_SUB)
+
+  // a writer whose open document was changed by someone else sees the stale-version message and keeps the text
+  await page.context().clearCookies()
+  await signIn(page, WRITER_SUB)
+  await page.goto('/content/legal/CB_legalseed00000001')
+  // typing before hydration is lost: retry until React has taken the edit ("Unsaved changes" appears only then)
+  await expect(async () => {
+    const text = page.getByRole('textbox', { name: 'Text', exact: true })
+    await text.focus()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText('My unsaved terms.')
+    await expect(text).toHaveValue('My unsaved terms.', { timeout: 1000 })
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 1000 })
+  }).toPass()
+  await control(request, 'bump-block', { id: 'CB_legalseed00000001' })
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText(/Someone else changed this document/)).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('textbox', { name: 'Text', exact: true })).toHaveValue(
+    'My unsaved terms.',
+  )
 })
 
 test('app config (mock backend): the legal links explain they are overrides of the managed Legal documents', async ({
