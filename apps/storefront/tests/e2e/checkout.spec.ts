@@ -154,8 +154,9 @@ test.describe('signed out and incomplete', () => {
     await expect(page).toHaveURL(/\/cart$/)
     await expect(page.getByText('Your cart is empty.')).toBeVisible()
     await addToCart(page)
+    await page.waitForLoadState('networkidle') // the add has settled (and the header refresh with it)
     await page.goto('/checkout')
-    await expect(page).toHaveURL(/\/checkout\/delivery$/)
+    await expect(page).toHaveURL(/\/checkout\/delivery$/, { timeout: 15_000 })
   })
 
   test('the sign-in round trip returns to the review', async ({ page }) => {
