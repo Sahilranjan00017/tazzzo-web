@@ -11,6 +11,8 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join } from 'node:path'
 import { createHash, createSign, randomUUID } from 'node:crypto'
 import { crc32, deflateSync } from 'node:zlib'
+// @ts-expect-error plain ESM shared with lib/redact-evidence.mjs
+import { redactPii } from '../lib/redact-patterns.mjs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 
 function must(name: string): string {
@@ -80,7 +82,7 @@ export function redact(s: string): string {
     process.env.E2E_OTP_HMAC_KEY,
   ]
   for (const secret of secrets) if (secret) out = out.split(secret).join('<redacted>')
-  return out
+  return redactPii(out) as string
 }
 export function log(line: string) {
   const text = redact(line)

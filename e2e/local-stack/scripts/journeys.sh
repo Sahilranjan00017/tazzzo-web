@@ -24,5 +24,6 @@ START=$(date +%s)
 set +e
 "$PW" test -c playwright.config.ts "$@" 2>&1 | tee "$EVIDENCE_DIR/playwright-output.txt"
 set -e
+node "$HARNESS_DIR/lib/redact-evidence.mjs" --check "$EVIDENCE_DIR" || echo "REDACTION CHECK FAILED"
 node "$HARNESS_DIR/lib/summary.mjs" "$EVIDENCE_DIR/results.json" "$(( $(date +%s) - START ))" | tee "$EVIDENCE_DIR/summary.txt"
 exit "${PIPESTATUS[0]}"

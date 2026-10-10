@@ -7,7 +7,12 @@ import { env, log, sleep } from './support'
 export async function shot(page: Page, name: string) {
   const dir = join(env.evidence, 'screens')
   mkdirSync(dir, { recursive: true })
-  await page.screenshot({ path: join(dir, `${name}.png`), fullPage: true })
+  // mobile numbers on the page (address blocks) are masked in the image
+  await page.screenshot({
+    path: join(dir, `${name}.png`),
+    fullPage: true,
+    mask: [page.getByText(/\+?91[6-9]\d{9}|\b[6-9]\d{9}\b/)],
+  })
   log(`  screenshot: screens/${name}.png`)
 }
 

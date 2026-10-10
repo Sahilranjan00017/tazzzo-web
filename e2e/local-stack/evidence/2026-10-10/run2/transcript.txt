@@ -113,14 +113,14 @@ $ GET /v1/products/TZP-mIx-072137  [anonymous]
   -> 404 {"code":"NOT_FOUND","message":"not found","requestId":"req_e52c8c1fd72c44508630","retryable":false}
   CHECK PASS J03.11 an unregistered case variant is 404, never folded to another product :: 404
   CHECK PASS J03.12 storefront /p/<mixed-case id> -> 200 with the right product
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9589937248"}
-  -> 202 {"challengeId":"OTP_KiH73jsqVMRcWesElv_G5tnHEYg","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_b28b98c936ac4be78c1a"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_KiH73jsqVMRcWesElv_G5tnHEYg","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_KiH73jsqVMRcWesElv_G5tnHEYg","verified":true,"grantId":"GRANT_-gX1vFSDe9pKZFhvC1XKieamLB4","requestId":"req_eadd3cb7ddcc4314bf24"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_-gX1vFSDe9pKZFhvC1XKieamLB4"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX7248"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_b28b98c936ac4be78c1a"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_eadd3cb7ddcc4314bf24"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_Z6cBv9S_kZWX_Y4rTLy0XCuaQIk","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_fd84bbd7961b4e13af12"}
-$ POST /v1/customer/addresses  [customer CUS_Z6cB]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9589937248","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_3Yb5s47_INqaQk_8lydldvXQ3a4","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589937248","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_516cf8ca156f4484af52"}
+$ POST /v1/customer/addresses  [customer CUS_Z6cB]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX7248","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_3Yb5s47_INqaQk_8lydldvXQ3a4","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX7248","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_516cf8ca156f4484af52"}
 $ PUT /v1/customer/cart/items/TZP-Mix-072137?addressId=ADDR_3Yb5s47_INqaQk_8lydldvXQ3a4  [customer CUS_Z6cB]  {"quantity":1}
   -> 200 {"version":1,"items":[{"skuId":"TZP-Mix-072137","quantity":1,"addedAt":"2026-10-10T07:22:44.192Z","updatedAt":"2026-10-10T07:22:44.192Z","product":{"title":"E2E Mixed case 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":10000,"mrpPaise":12000,"currency":"INR"},"availability":{"stockState":"IN_STOCK","maxOrderQuantity":5,"serviceable":true},"lineTotalPaise":10000,"buyable":true,"issues":[]}],"itemCount":1,"distinctItemCount":1,"subtotalPaise":10000,"expiresAt":"2026-10-17T07:22:44.192023672Z","freshness":"FRESH","requestId":"req_5b138c0d2e6e433cb143"}
   CHECK PASS J03.13 cart accepts the mixed-case id and keeps it exactly :: TZP-Mix-072137
@@ -198,14 +198,14 @@ $ POST /api/v1/admin/imports/jobs/IMPJ-6ac9e7c466cad39a32b47b80/cancel  [cms-wri
   -> 200 {"id":"IMPJ-6ac9e7c466cad39a32b47b80","kind":"products","status":"CANCELLED","note":"J04 072137","createdBy":{"type":"SERVICE_ACCOUNT","id":"service:cms-writer"},"approvedBy":null,"rowsTotal":7,"nextRow":7,"counts":{"failed":0,"not_attempted":0,"valid":1,"unchanged":0,"applied":0,"invalid":6,"duplicate":0},"attemptCount":1,"lastError":null,"createdAt":"2026-10-10T07:22:44.528Z","updatedAt":"2026-10-10T07:22:46.201Z","startedAt":null,"finishedAt":"2026-10-10T07:22:46.201Z","version":5}
 
 --- cart (backend customer API) and the storefront cart route
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9208051989"}
-  -> 202 {"challengeId":"OTP_428dwhbQcU0ajspf0m0bVc_vZ00","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_098c3b8d3ace4c748ea0"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_428dwhbQcU0ajspf0m0bVc_vZ00","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_428dwhbQcU0ajspf0m0bVc_vZ00","verified":true,"grantId":"GRANT_48B8hQj6LvDlRY12lOVK792ABE4","requestId":"req_db42bc731c1a4c57b2ef"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_48B8hQj6LvDlRY12lOVK792ABE4"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX1989"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_098c3b8d3ace4c748ea0"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_db42bc731c1a4c57b2ef"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_i8wyygfA1LZLkDm5-g2E-j_uOUE","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_30ae600bdd044abdb2c4"}
-$ POST /v1/customer/addresses  [customer CUS_i8wy]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9208051989","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_YN3Rcbu3c_FiDKLqmyRecacrjs0","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919208051989","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_8912997ca65d4e6b9ef6"}
+$ POST /v1/customer/addresses  [customer CUS_i8wy]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1989","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_YN3Rcbu3c_FiDKLqmyRecacrjs0","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1989","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_8912997ca65d4e6b9ef6"}
 $ PUT /v1/customer/cart/items/tzp-1  [customer CUS_i8wy]  {"quantity":1}
   -> 404 {"code":"NOT_FOUND","message":"not found","requestId":"req_16e13d1e52c240c19e7c"}
   CHECK PASS J04.15 backend cart PUT with lowercase prefix refused (400/404/405, never 5xx, nothing added) :: 404
@@ -230,7 +230,7 @@ $ PUT /v1/customer/cart/items/TZP-a%20b  [customer CUS_i8wy]  {"quantity":1}
 $ GET /v1/customer/cart?addressId=ADDR_YN3Rcbu3c_FiDKLqmyRecacrjs0  [customer CUS_i8wy]
   -> 200 {"version":0,"items":[],"itemCount":0,"distinctItemCount":0,"subtotalPaise":0,"expiresAt":null,"freshness":"FRESH","requestId":"req_0957299168394d4096f1"}
   CHECK PASS J04.22 cart is still empty
-  [browser] signed in as 9006723003 via /login (code read from the gateway stand-in, not logged) -> /p/TZP-E2E-RICE5
+  [browser] signed in as +91XXXXXX3003 via /login (code read from the gateway stand-in, not logged) -> /p/TZP-E2E-RICE5
   CHECK PASS J04.23 storefront /api/cart/add with lowercase prefix -> 400 :: 400
   CHECK PASS J04.24 storefront /api/cart/add with 41-char tail -> 400 :: 400
   CHECK PASS J04.25 storefront /api/cart/add with empty tail -> 400 :: 400
@@ -625,17 +625,17 @@ $ PUT /api/v1/admin/inventory/TZP-E2E-S072137/FL-E2E-1  [reader]  {"onHand":9,"l
 $ PUT /api/v1/admin/inventory/TZP-E2E-S072137/FL-E2E-1  [cms-writer]  {"onHand":-1,"lowStockThreshold":3,"maxPurchasable":1}
   -> 422 {"error":{"code":"INVALID_INVENTORY","message":"onHand must be >= 0: -1","request_id":"req_6698af3aa2034642a8ab"}}
   CHECK PASS J12.8 negative onHand -> 4xx
-  [browser] signed in as 9231833314 via /login (code read from the gateway stand-in, not logged) -> /location
+  [browser] signed in as +91XXXXXX3314 via /login (code read from the gateway stand-in, not logged) -> /location
   website /p/TZP-E2E-S072137: "PDP says Only 2 left for delivery to 560001" observed after 0 s
   CHECK PASS J12.9 browser PDP (PIN set): "Only 2 left for delivery to 560001."
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9814556059"}
-  -> 202 {"challengeId":"OTP_vPJ35QqWGeAgKuBG5SqjcmK9JXs","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_57b10b431fd64393b32e"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_vPJ35QqWGeAgKuBG5SqjcmK9JXs","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_vPJ35QqWGeAgKuBG5SqjcmK9JXs","verified":true,"grantId":"GRANT_PBLx8oHN7rBmNz5a2PIpQViVwgc","requestId":"req_99200727c684498b84ae"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_PBLx8oHN7rBmNz5a2PIpQViVwgc"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX6059"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_57b10b431fd64393b32e"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_99200727c684498b84ae"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_mSgkOozPuozOPSjIRBYhvNSh97Q","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_64fae709fec540e1b576"}
-$ POST /v1/customer/addresses  [customer CUS_mSgk]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9814556059","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_YsdX3My9L4HHoWamJld8qBgDlNI","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919814556059","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_b1f598be13824655a673"}
+$ POST /v1/customer/addresses  [customer CUS_mSgk]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6059","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_YsdX3My9L4HHoWamJld8qBgDlNI","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6059","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_b1f598be13824655a673"}
 $ PUT /v1/customer/cart/items/TZP-E2E-S072137?addressId=ADDR_YsdX3My9L4HHoWamJld8qBgDlNI  [customer CUS_mSgk]  {"quantity":2}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-S072137","quantity":2,"addedAt":"2026-10-10T07:26:32.614Z","updatedAt":"2026-10-10T07:26:32.614Z","product":{"title":"E2E Stocked 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":12000,"mrpPaise":15000,"currency":"INR"},"availability":{"stockState":"LOW_STOCK","maxOrderQuantity":2,"serviceable":true},"lineTotalPaise":24000,"buyable":true,"issues":[]}],"itemCount":2,"distinctItemCount":1,"subtotalPaise":24000,"expiresAt":"2026-10-17T07:26:32.614292112Z","freshness":"FRESH","requestId":"req_ef1d55e3540b4ea8bf9a"}
 $ GET /api/v1/admin/inventory/TZP-E2E-S072137/FL-E2E-1  [cms-writer]
@@ -1172,7 +1172,7 @@ $ PUT /api/v1/admin/prices/TZP-E2E-KR072137  [cms-writer]  {"sellingPricePaise":
   -> 201 {"skuId":"TZP-E2E-KR072137","currency":"INR","sellingPricePaise":5000,"mrpPaise":6000,"version":1,"active":true,"status":"ACTIVE"}
 $ PUT /api/v1/admin/inventory/TZP-E2E-KR072137/FL-E2E-1  [cms-writer]  {"onHand":10,"lowStockThreshold":3,"maxPurchasable":10}
   -> 201 {"skuId":"TZP-E2E-KR072137","fulfillmentLocationId":"FL-E2E-1","onHand":10,"reserved":0,"available":10,"lowStockThreshold":3,"maxPurchasable":10,"version":1,"active":true}
-  [browser] signed in as 9360099166 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
+  [browser] signed in as +91XXXXXX9166 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
   CHECK PASS J25.1 cart page shows both lines and subtotal ₹250 :: ₹250
   CHECK PASS J25.2 update quantity to 2 via the stepper -> subtotal ₹450
   screenshot: screens/j25-cart-1.png
@@ -1244,11 +1244,11 @@ $ PUT /api/v1/admin/prices/TZP-E2E-KP072137  [cms-writer]  {"sellingPricePaise":
   CHECK PASS J25.13 placing with a stale price is refused with "A price changed" and nothing is ordered :: A price changed, so we refreshed your total. Please review it and confirm to place your order.
   CHECK PASS J25.14 the review states the change from ₹200 to ₹230 :: The total changed from ₹200 to ₹230. Your order is not placed until you confirm the new total.
   CHECK PASS J25.15 after the explicit second click the order is placed at the NEW total ₹230
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9884985611"}
-  -> 202 {"challengeId":"OTP_JJFm3VBz22rrUIpvHitOeyYbzTE","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_7aa9fc630f2d4407a462"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_JJFm3VBz22rrUIpvHitOeyYbzTE","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_JJFm3VBz22rrUIpvHitOeyYbzTE","verified":true,"grantId":"GRANT_hgLB467jtlGI8nd4YiLeeX6hNI4","requestId":"req_88bc8aeccd1b4c07babb"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_hgLB467jtlGI8nd4YiLeeX6hNI4"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX5611"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_7aa9fc630f2d4407a462"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_88bc8aeccd1b4c07babb"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_T0GxAboizvqPMj6TfXExvs_z5IM","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_ef86ba6eef5048c481da"}
 $ GET /v1/customer/cart  [customer CUS_T0Gx]
   -> 200 {"version":0,"items":[],"itemCount":0,"distinctItemCount":0,"subtotalPaise":0,"expiresAt":null,"freshness":"FRESH","requestId":"req_b800a4116fac4111b3e4"}
@@ -1270,8 +1270,8 @@ $ GET /api/v1/admin/inventory/TZP-E2E-O072137/FL-E2E-1  [cms-writer]
 $ PUT /api/v1/admin/service-areas/562137  [cms-writer]  {"serviceAreaId":"SA-E2E-BLR","routes":[{"fulfillmentLocationId":"FL-E2E-1","priority":1,"active":true}]}
   -> 201 {"pincode":"562137","serviceAreaId":"SA-E2E-BLR","active":true,"version":1,"routes":[{"fulfillmentLocationId":"FL-E2E-1","priority":1,"active":true}]}
   CHECK PASS J26.2 admin serviceability API adds that PIN to the area (201) :: 201
-  [browser] signed in as 9232971629 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
-  CHECK PASS J26.3 signed in through /login with a code delivered via the backend HTTP OTP adapter, address saved for the new PIN :: 9232971629
+  [browser] signed in as +91XXXXXX1629 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
+  CHECK PASS J26.3 signed in through /login with a code delivered via the backend HTTP OTP adapter, address saved for the new PIN :: +91XXXXXX1629
   CHECK PASS J26.4 PIN 562137 is now serviceable (location chip)
   CHECK PASS J26.5 PIN 400001 stays not serviceable ("do not deliver")
   CHECK PASS J26.6 review page: total ₹600, Cash on delivery :: ₹600
@@ -1301,7 +1301,7 @@ $ PUT /api/v1/admin/prices/TZP-E2E-D072137  [cms-writer]  {"sellingPricePaise":1
   -> 201 {"skuId":"TZP-E2E-D072137","currency":"INR","sellingPricePaise":15000,"mrpPaise":18000,"version":1,"active":true,"status":"ACTIVE"}
 $ PUT /api/v1/admin/inventory/TZP-E2E-D072137/FL-E2E-1  [cms-writer]  {"onHand":30,"lowStockThreshold":3,"maxPurchasable":10}
   -> 201 {"skuId":"TZP-E2E-D072137","fulfillmentLocationId":"FL-E2E-1","onHand":30,"reserved":0,"available":30,"lowStockThreshold":3,"maxPurchasable":10,"version":1,"active":true}
-  [browser] signed in as 9317168601 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
+  [browser] signed in as +91XXXXXX8601 via /login (code read from the gateway stand-in, not logged) -> /account/addresses/new
   CHECK PASS J27.1 the double click produced one placement request to the backend :: 1
 $ docker exec tazzzo-e2e-mongo mongosh --quiet mongodb://localhost:27117/tazzzo_e2e?replicaSet=rs0 --eval db.orders.countDocuments({ 'lines.skuId': 'TZP-E2E-D072137' })
   1
@@ -1310,14 +1310,14 @@ $ docker exec tazzzo-e2e-mongo mongosh --quiet mongodb://localhost:27117/tazzzo_
   CHECK PASS J27.2 exactly one order exists for the product (datastore count) :: {"lines":"1","items":"0"}
 
 --- replay at the API: same quote placed twice returns the same order; same Idempotency-Key returns the same quote
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9756201585"}
-  -> 202 {"challengeId":"OTP_pWobkLTyLtm-AgW-TMRBivQNQZw","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_f75bab537e6a4968abb6"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_pWobkLTyLtm-AgW-TMRBivQNQZw","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_pWobkLTyLtm-AgW-TMRBivQNQZw","verified":true,"grantId":"GRANT_JKRpyMwvcHKK8wBGywEvPcOZobI","requestId":"req_04e07a82d451477c9fd7"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_JKRpyMwvcHKK8wBGywEvPcOZobI"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX1585"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_f75bab537e6a4968abb6"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_04e07a82d451477c9fd7"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_zHNvDD5J1yOGjwtOKfFFrUzPILk","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_c9cc6d6f961b4e0b940e"}
-$ POST /v1/customer/addresses  [customer CUS_zHNv]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9756201585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_ve9ptHzcArGQDq6-BKzjv1dgOSc","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919756201585","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_f0cae0b533814513bf9e"}
+$ POST /v1/customer/addresses  [customer CUS_zHNv]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_ve9ptHzcArGQDq6-BKzjv1dgOSc","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_f0cae0b533814513bf9e"}
 $ PUT /v1/customer/cart/items/TZP-E2E-D072137?addressId=ADDR_ve9ptHzcArGQDq6-BKzjv1dgOSc  [customer CUS_zHNv]  {"quantity":3}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-D072137","quantity":3,"addedAt":"2026-10-10T07:32:50.217Z","updatedAt":"2026-10-10T07:32:50.217Z","product":{"title":"E2E Dbl Rice 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":15000,"mrpPaise":18000,"currency":"INR"},"availability":{"stockState":"IN_STOCK","maxOrderQuantity":10,"serviceable":true},"lineTotalPaise":45000,"buyable":true,"issues":[]}],"itemCount":3,"distinctItemCount":1,"subtotalPaise":45000,"expiresAt":"2026-10-17T07:32:50.217784453Z","freshness":"FRESH","requestId":"req_acc6505c522b4aca8192"}
 $ POST /v1/customer/checkout/quote  [customer CUS_zHNv]  {"addressId":"ADDR_ve9ptHzcArGQDq6-BKzjv1dgOSc"}
@@ -1328,14 +1328,14 @@ $ POST /v1/customer/checkout/quote  [customer CUS_zHNv]  {"addressId":"ADDR_ve9p
 $ GET /api/v1/admin/inventory/TZP-E2E-D072137/FL-E2E-1  [cms-writer]
   -> 200 {"skuId":"TZP-E2E-D072137","fulfillmentLocationId":"FL-E2E-1","onHand":29,"reserved":0,"available":29,"lowStockThreshold":3,"maxPurchasable":10,"version":3,"active":true}
 $ POST /v1/customer/orders  [customer CUS_zHNv]  {"quoteId":"CHKQ_yS-xc5EW9-UOgIyGlDbRXuJy0Dk","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919756201585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
+  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
 $ POST /v1/customer/orders  [customer CUS_zHNv]  {"quoteId":"CHKQ_yS-xc5EW9-UOgIyGlDbRXuJy0Dk","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919756201585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
+  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
 $ POST /v1/customer/orders  [customer CUS_zHNv]  {"quoteId":"CHKQ_yS-xc5EW9-UOgIyGlDbRXuJy0Dk","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919756201585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
+  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
   CHECK PASS J27.4 three concurrent placements of the SAME quote: every success is the same order id :: ["200:ORD_FA0pv1eEgjne_76t9KbB7euZdsI","200:ORD_FA0pv1eEgjne_76t9KbB7euZdsI","200:ORD_FA0pv1eEgjne_76t9KbB7euZdsI"]
 $ POST /v1/customer/orders  [customer CUS_zHNv]  {"quoteId":"CHKQ_yS-xc5EW9-UOgIyGlDbRXuJy0Dk","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919756201585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
+  -> 200 {"orderId":"ORD_FA0pv1eEgjne_76t9KbB7euZdsI","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-D072137","title":"E2E Dbl Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":15000,"lineTotalPaise":45000}],"itemCount":3,"subtotalPaise":45000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1585","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.374Z","confirmedAt":"2026-10-10T07:32:50.419Z","money":{"merchandiseSubtotalPaise":45000,"benefitDiscountPaise":0,"payablePaise":45000},"deliverySlot":{"slotId":"even
   CHECK PASS J27.5 a later replay returns the same order again (200/201) :: 200 ORD_FA0pv1eEgjne_76t9KbB7euZdsI
 $ GET /api/v1/admin/inventory/TZP-E2E-D072137/FL-E2E-1  [cms-writer]
   -> 200 {"skuId":"TZP-E2E-D072137","fulfillmentLocationId":"FL-E2E-1","onHand":26,"reserved":0,"available":26,"lowStockThreshold":3,"maxPurchasable":10,"version":5,"active":true}
@@ -1353,22 +1353,22 @@ $ PUT /api/v1/admin/prices/TZP-E2E-Z072137  [cms-writer]  {"sellingPricePaise":9
   -> 201 {"skuId":"TZP-E2E-Z072137","currency":"INR","sellingPricePaise":9900,"mrpPaise":9900,"version":1,"active":true,"status":"ACTIVE"}
 $ PUT /api/v1/admin/inventory/TZP-E2E-Z072137/FL-E2E-1  [cms-writer]  {"onHand":1,"lowStockThreshold":3,"maxPurchasable":1}
   -> 201 {"skuId":"TZP-E2E-Z072137","fulfillmentLocationId":"FL-E2E-1","onHand":1,"reserved":0,"available":1,"lowStockThreshold":3,"maxPurchasable":1,"version":1,"active":true}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9901950056"}
-  -> 202 {"challengeId":"OTP_sqgzgIYFzeXB8wHdFAIFYL3gJVk","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_e334fb8bf2544cd7a8bb"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_sqgzgIYFzeXB8wHdFAIFYL3gJVk","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_sqgzgIYFzeXB8wHdFAIFYL3gJVk","verified":true,"grantId":"GRANT_KzCrwXWOAxn1z_9jlGJqiNynxPU","requestId":"req_b2d54ca573154257a26e"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_KzCrwXWOAxn1z_9jlGJqiNynxPU"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX0056"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_e334fb8bf2544cd7a8bb"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_b2d54ca573154257a26e"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_CRsxIEhVYmn3zn7ArvNaaD_EZs8","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_5cf9adaffb1a42ae8e28"}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9197285423"}
-  -> 202 {"challengeId":"OTP_TEakHf262zbiTa11tAZUVeeBIlk","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_c0a9943a0d2d45568525"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_TEakHf262zbiTa11tAZUVeeBIlk","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_TEakHf262zbiTa11tAZUVeeBIlk","verified":true,"grantId":"GRANT_lqerzp02qiXJp50vRPniUp524j0","requestId":"req_2d43b878b89b40fc93fd"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_lqerzp02qiXJp50vRPniUp524j0"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX5423"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_c0a9943a0d2d45568525"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_2d43b878b89b40fc93fd"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_ibAAAG6fNBhku7zu3e9Un9V6Sq4","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_7005b48f9db749e4b51c"}
-$ POST /v1/customer/addresses  [customer CUS_CRsx]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9901950056","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_2G8NgqEb5mTxzWKwas5HnmFoCn4","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919901950056","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_bba0cb6a404646dc9a96"}
-$ POST /v1/customer/addresses  [customer CUS_ibAA]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9197285423","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_YLbxu2MHjPSYV44AUmzRL4suoic","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919197285423","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_ec3a70373e1b4da3a5eb"}
+$ POST /v1/customer/addresses  [customer CUS_CRsx]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX0056","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_2G8NgqEb5mTxzWKwas5HnmFoCn4","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX0056","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_bba0cb6a404646dc9a96"}
+$ POST /v1/customer/addresses  [customer CUS_ibAA]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX5423","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_YLbxu2MHjPSYV44AUmzRL4suoic","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX5423","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_ec3a70373e1b4da3a5eb"}
 $ PUT /v1/customer/cart/items/TZP-E2E-Z072137?addressId=ADDR_2G8NgqEb5mTxzWKwas5HnmFoCn4  [customer CUS_CRsx]  {"quantity":1}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-Z072137","quantity":1,"addedAt":"2026-10-10T07:32:50.800Z","updatedAt":"2026-10-10T07:32:50.800Z","product":{"title":"E2E Last Unit 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":9900,"mrpPaise":9900,"currency":"INR"},"availability":{"stockState":"LOW_STOCK","maxOrderQuantity":1,"serviceable":true},"lineTotalPaise":9900,"buyable":true,"issues":[]}],"itemCount":1,"distinctItemCount":1,"subtotalPaise":9900,"expiresAt":"2026-10-17T07:32:50.800409920Z","freshness":"FRESH","requestId":"req_987043dc8c654f0fa7b6"}
 $ PUT /v1/customer/cart/items/TZP-E2E-Z072137?addressId=ADDR_YLbxu2MHjPSYV44AUmzRL4suoic  [customer CUS_ibAA]  {"quantity":1}
@@ -1380,7 +1380,7 @@ $ POST /v1/customer/checkout/quote  [customer CUS_ibAA]  {"addressId":"ADDR_YLbx
   -> 200 {"quoteId":"CHKQ_5zGYKgwYpI_lC8MbXCvcrHGo6bM","cartVersion":1,"addressId":"ADDR_YLbxu2MHjPSYV44AUmzRL4suoic","items":[{"skuId":"TZP-E2E-Z072137","quantity":1,"unitPricePaise":9900,"lineTotalPaise":9900}],"itemCount":1,"distinctItemCount":1,"subtotalPaise":9900,"currency":"INR","createdAt":"2026-10-10T07:32:50.912Z","expiresAt":"2026-10-10T07:37:50.912Z","benefitPreview":{"applied":false},"moneyPreview":{"merchandiseSubtotalPaise":9900,"benefitDiscountPaise":0,"payablePaise":9900},"requestId":"req_3eac9965c27a4d69b3f5"}
   quotes: a=200 b=200
 $ POST /v1/customer/orders  [customer CUS_ibAA]  {"quoteId":"CHKQ_5zGYKgwYpI_lC8MbXCvcrHGo6bM","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_TkVYqE7ZqAjVUEy1wLIhNioRMCc","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-Z072137","title":"E2E Last Unit 072137","brandCode":"E2E","quantity":1,"unitPricePaise":9900,"lineTotalPaise":9900}],"itemCount":1,"subtotalPaise":9900,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919197285423","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.973Z","confirmedAt":"2026-10-10T07:32:51.010Z","money":{"merchandiseSubtotalPaise":9900,"benefitDiscountPaise":0,"payablePaise":9900},"deliverySlot":{"slotId":"evening~
+  -> 200 {"orderId":"ORD_TkVYqE7ZqAjVUEy1wLIhNioRMCc","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-Z072137","title":"E2E Last Unit 072137","brandCode":"E2E","quantity":1,"unitPricePaise":9900,"lineTotalPaise":9900}],"itemCount":1,"subtotalPaise":9900,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX5423","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:50.973Z","confirmedAt":"2026-10-10T07:32:51.010Z","money":{"merchandiseSubtotalPaise":9900,"benefitDiscountPaise":0,"payablePaise":9900},"deliverySlot":{"slotId":"evening~
 $ POST /v1/customer/orders  [customer CUS_CRsx]  {"quoteId":"CHKQ_kIJyn3CvDP3LNd7Ebn-OEfWzGQ8","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
   -> 409 {"code":"STOCK_UNAVAILABLE","message":"one or more items are out of stock","requestId":"req_5963edab2d1e48568853"}
   CHECK PASS J27.9 exactly ONE of the two placements wins :: [409,200]
@@ -1402,20 +1402,20 @@ $ PUT /api/v1/admin/prices/TZP-E2E-T072137  [cms-writer]  {"sellingPricePaise":2
   -> 201 {"skuId":"TZP-E2E-T072137","currency":"INR","sellingPricePaise":20000,"mrpPaise":22000,"version":1,"active":true,"status":"ACTIVE"}
 $ PUT /api/v1/admin/inventory/TZP-E2E-T072137/FL-E2E-1  [cms-writer]  {"onHand":10,"lowStockThreshold":3,"maxPurchasable":10}
   -> 201 {"skuId":"TZP-E2E-T072137","fulfillmentLocationId":"FL-E2E-1","onHand":10,"reserved":0,"available":10,"lowStockThreshold":3,"maxPurchasable":10,"version":1,"active":true}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9589571149"}
-  -> 202 {"challengeId":"OTP_lI3n2NvW4mQXSI-CZdlsCaDeioE","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_098446e0efc34f8b9ae6"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_lI3n2NvW4mQXSI-CZdlsCaDeioE","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_lI3n2NvW4mQXSI-CZdlsCaDeioE","verified":true,"grantId":"GRANT_a5pKYhAC2grMLZe1bae_uHWEeak","requestId":"req_49ac8149f34d461c8c93"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_a5pKYhAC2grMLZe1bae_uHWEeak"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX1149"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_098446e0efc34f8b9ae6"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_49ac8149f34d461c8c93"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_c0d630a17a1a4d1f8998"}
-$ POST /v1/customer/addresses  [customer CUS_KFmw]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9589571149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_0RfzjwBcq2kcFaOL3Hp4Yfs4014","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_20168522603e4f86b708"}
+$ POST /v1/customer/addresses  [customer CUS_KFmw]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_0RfzjwBcq2kcFaOL3Hp4Yfs4014","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_20168522603e4f86b708"}
 $ PUT /v1/customer/cart/items/TZP-E2E-T072137?addressId=ADDR_0RfzjwBcq2kcFaOL3Hp4Yfs4014  [customer CUS_KFmw]  {"quantity":2}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-T072137","quantity":2,"addedAt":"2026-10-10T07:32:51.983Z","updatedAt":"2026-10-10T07:32:51.983Z","product":{"title":"E2E Staff Rice 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":20000,"mrpPaise":22000,"currency":"INR"},"availability":{"stockState":"IN_STOCK","maxOrderQuantity":10,"serviceable":true},"lineTotalPaise":40000,"buyable":true,"issues":[]}],"itemCount":2,"distinctItemCount":1,"subtotalPaise":40000,"expiresAt":"2026-10-17T07:32:51.983962466Z","freshness":"FRESH","requestId":"req_980245df58a640c79199"}
 $ POST /v1/customer/checkout/quote  [customer CUS_KFmw]  {"addressId":"ADDR_0RfzjwBcq2kcFaOL3Hp4Yfs4014"}
   -> 200 {"quoteId":"CHKQ_nbCe6tr41uaeq6CdDHWUVE3fCWs","cartVersion":1,"addressId":"ADDR_0RfzjwBcq2kcFaOL3Hp4Yfs4014","items":[{"skuId":"TZP-E2E-T072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"distinctItemCount":1,"subtotalPaise":40000,"currency":"INR","createdAt":"2026-10-10T07:32:52.018Z","expiresAt":"2026-10-10T07:37:52.018Z","benefitPreview":{"applied":false},"moneyPreview":{"merchandiseSubtotalPaise":40000,"benefitDiscountPaise":0,"payablePaise":40000},"requestId":"req_833054eca9884cf2a8a2"}
 $ POST /v1/customer/orders  [customer CUS_KFmw]  {"quoteId":"CHKQ_nbCe6tr41uaeq6CdDHWUVE3fCWs","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:52.057Z","confirmedAt":"2026-10-10T07:32:52.080Z","money":{"merchandiseSubtotalPaise":40000,"benefitDiscountPaise":0,"payablePaise":40000},"deliverySlot":{"slotId":"ev
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:52.057Z","confirmedAt":"2026-10-10T07:32:52.080Z","money":{"merchandiseSubtotalPaise":40000,"benefitDiscountPaise":0,"payablePaise":40000},"deliverySlot":{"slotId":"ev
   CHECK PASS J28.1 customer placed a COD order :: {"status":200,"oid":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU"}
 
 --- who may read orders
@@ -1429,13 +1429,13 @@ $ GET /api/v1/admin/orders  [anonymous]
   -> 401 {"error":{"request_id":"req_23d94f60f2bf49378d43","message":"missing or unknown bearer token","code":"UNAUTHENTICATED"}}
   CHECK PASS J28.4 anonymous -> 401
 $ GET /api/v1/admin/orders?status=CONFIRMED&page_size=50  [order-ops]
-  -> 200 {"items":[{"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt
+  -> 200 {"items":[{"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt
   CHECK PASS J28.5 order-ops sees the order in the CONFIRMED queue :: 6
 $ GET /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU  [order-ops]
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
-  CHECK PASS J28.6 staff detail: lines, ₹400 payable, delivery address snapshot, slot :: {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":nu
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
+  CHECK PASS J28.6 staff detail: lines, ₹400 payable, delivery address snapshot, slot :: {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":nu
 $ GET /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU  [support-agent]
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
   CHECK PASS J28.7 support-agent may read orders (read-only)
 
 --- transitions
@@ -1446,35 +1446,35 @@ $ POST /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU/transition  [cms-wri
   -> 403 {"error":{"request_id":"req_f9ed0295c5b94fc484f9","message":"role may not perform writes here","code":"FORBIDDEN"}}
   CHECK PASS J28.9 cms-writer token may NOT transition (403) :: 403
 $ POST /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU/transition  [order-ops]  {"to":"OUT_FOR_DELIVERY","expectedVersion":2}
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"OUT_FOR_DELIVERY","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"OUT_FOR_DELIVERY","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"
   CHECK PASS J28.10 order-ops: CONFIRMED -> OUT_FOR_DELIVERY :: OUT_FOR_DELIVERY
 $ POST /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU/transition  [order-ops]  {"to":"DELIVERED","expectedVersion":2}
   -> 409 {"error":{"code":"STALE_VERSION","message":"request could not be completed","request_id":"req_8fbf9932d72b48d6a655"}}
   CHECK PASS J28.11 stale expectedVersion -> 409 :: 409
 $ GET /v1/customer/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU  [customer CUS_KFmw]
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","status":"OUT_FOR_DELIVERY","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:52.057Z","confirmedAt":"2026-10-10T07:32:52.080Z","money":{"merchandiseSubtotalPaise":40000,"benefitDiscountPaise":0,"payablePaise":40000},"deliverySlot":{"slot
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","status":"OUT_FOR_DELIVERY","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:52.057Z","confirmedAt":"2026-10-10T07:32:52.080Z","money":{"merchandiseSubtotalPaise":40000,"benefitDiscountPaise":0,"payablePaise":40000},"deliverySlot":{"slot
   CHECK PASS J28.12 customer API now shows OUT_FOR_DELIVERY with the timestamp :: OUT_FOR_DELIVERY
 $ POST /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU/transition  [order-ops]  {"to":"DELIVERED","expectedVersion":3}
-  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"DELIVERED","version":4,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919589571149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
+  -> 200 {"orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","customerId":"CUS_KFmwonDEkjwPy3jHt4eLRMcsahE","status":"DELIVERED","version":4,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":2,"unitPricePaise":20000,"lineTotalPaise":40000}],"itemCount":2,"subtotalPaise":40000,"payablePaise":40000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX1149","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
   CHECK PASS J28.13 OUT_FOR_DELIVERY -> DELIVERED
 $ POST /api/v1/admin/orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU/transition  [order-ops]  {"to":"CANCELLED","reason":"OTHER","expectedVersion":4}
   -> 409 {"error":{"code":"INVALID_TRANSITION","message":"request could not be completed","request_id":"req_413585c2c5324ecab226"}}
   CHECK PASS J28.14 DELIVERED -> CANCELLED is an illegal transition (409) :: 409
 
 --- the customer sees it in the browser (storefront /orders/<id>), signed in as the same phone
-  [browser] signed in as 9589571149 via /login (code read from the gateway stand-in, not logged) -> /orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU
+  [browser] signed in as +91XXXXXX1149 via /login (code read from the gateway stand-in, not logged) -> /orders/ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU
   CHECK PASS J28.15 browser order page shows DELIVERED
   screenshot: screens/j28-order-delivered.png
 
 --- staff cancellation releases the reservation
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9688002893"}
-  -> 202 {"challengeId":"OTP_6B0KBH7rtFfiBdNn-gLXFj10plA","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_00b7e0867b0043edbd97"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_6B0KBH7rtFfiBdNn-gLXFj10plA","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_6B0KBH7rtFfiBdNn-gLXFj10plA","verified":true,"grantId":"GRANT_5N9KWDVo7ECBoL4sBaJ3kJYbf-E","requestId":"req_864ee2c965a6408fac05"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_5N9KWDVo7ECBoL4sBaJ3kJYbf-E"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX2893"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_00b7e0867b0043edbd97"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_864ee2c965a6408fac05"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_36c9cc1b182f43efbb87"}
-$ POST /v1/customer/addresses  [customer CUS_bPRm]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9688002893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_oQVn1gcUMdXwxlqRm2q1zKNe_Gc","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_1e3eb0dd69984342b472"}
+$ POST /v1/customer/addresses  [customer CUS_bPRm]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_oQVn1gcUMdXwxlqRm2q1zKNe_Gc","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_1e3eb0dd69984342b472"}
 $ PUT /v1/customer/cart/items/TZP-E2E-T072137?addressId=ADDR_oQVn1gcUMdXwxlqRm2q1zKNe_Gc  [customer CUS_bPRm]  {"quantity":3}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-T072137","quantity":3,"addedAt":"2026-10-10T07:32:53.246Z","updatedAt":"2026-10-10T07:32:53.246Z","product":{"title":"E2E Staff Rice 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":20000,"mrpPaise":22000,"currency":"INR"},"availability":{"stockState":"IN_STOCK","maxOrderQuantity":8,"serviceable":true},"lineTotalPaise":60000,"buyable":true,"issues":[]}],"itemCount":3,"distinctItemCount":1,"subtotalPaise":60000,"expiresAt":"2026-10-17T07:32:53.246483686Z","freshness":"FRESH","requestId":"req_a88fdb74b01444db9430"}
 $ GET /api/v1/admin/inventory/TZP-E2E-T072137/FL-E2E-1  [cms-writer]
@@ -1482,22 +1482,22 @@ $ GET /api/v1/admin/inventory/TZP-E2E-T072137/FL-E2E-1  [cms-writer]
 $ POST /v1/customer/checkout/quote  [customer CUS_bPRm]  {"addressId":"ADDR_oQVn1gcUMdXwxlqRm2q1zKNe_Gc"}
   -> 200 {"quoteId":"CHKQ_spSRceT9gqHs5cZZrnDPNublz48","cartVersion":1,"addressId":"ADDR_oQVn1gcUMdXwxlqRm2q1zKNe_Gc","items":[{"skuId":"TZP-E2E-T072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"distinctItemCount":1,"subtotalPaise":60000,"currency":"INR","createdAt":"2026-10-10T07:32:53.284Z","expiresAt":"2026-10-10T07:37:53.284Z","benefitPreview":{"applied":false},"moneyPreview":{"merchandiseSubtotalPaise":60000,"benefitDiscountPaise":0,"payablePaise":60000},"requestId":"req_366255e8c5c441489186"}
 $ POST /v1/customer/orders  [customer CUS_bPRm]  {"quoteId":"CHKQ_spSRceT9gqHs5cZZrnDPNublz48","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:53.324Z","confirmedAt":"2026-10-10T07:32:53.345Z","money":{"merchandiseSubtotalPaise":60000,"benefitDiscountPaise":0,"payablePaise":60000},"deliverySlot":{"slotId":"ev
+  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:53.324Z","confirmedAt":"2026-10-10T07:32:53.345Z","money":{"merchandiseSubtotalPaise":60000,"benefitDiscountPaise":0,"payablePaise":60000},"deliverySlot":{"slotId":"ev
 $ GET /api/v1/admin/inventory/TZP-E2E-T072137/FL-E2E-1  [cms-writer]
   -> 200 {"skuId":"TZP-E2E-T072137","fulfillmentLocationId":"FL-E2E-1","onHand":5,"reserved":0,"available":5,"lowStockThreshold":3,"maxPurchasable":10,"version":5,"active":true}
 $ GET /api/v1/admin/orders/ORD_Za24dSNtAo7T71iwH3L1FbDpo_0  [order-ops]
-  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
+  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CONFIRMED","version":2,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
 $ POST /api/v1/admin/orders/ORD_Za24dSNtAo7T71iwH3L1FbDpo_0/transition  [order-ops]  {"to":"CANCELLED","expectedVersion":2}
   -> 400 {"error":{"code":"INVALID_REQUEST","message":"request could not be completed","request_id":"req_61d8531b83674aa28274"}}
   CHECK PASS J28.16 cancelling without a reason is refused (4xx) :: 400
 $ POST /api/v1/admin/orders/ORD_Za24dSNtAo7T71iwH3L1FbDpo_0/transition  [order-ops]  {"to":"CANCELLED","reason":"CUSTOMER_REQUEST","expectedVersion":2}
-  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CANCELLED","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
+  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CANCELLED","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Evening","startsAt":"2026-10
 $ GET /api/v1/admin/inventory/TZP-E2E-T072137/FL-E2E-1  [cms-writer]
   -> 200 {"skuId":"TZP-E2E-T072137","fulfillmentLocationId":"FL-E2E-1","onHand":8,"reserved":0,"available":8,"lowStockThreshold":3,"maxPurchasable":10,"version":6,"active":true}
-  CHECK PASS J28.17 staff cancel -> CANCELLED with reason :: {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CANCELLED","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":nu
+  CHECK PASS J28.17 staff cancel -> CANCELLED with reason :: {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","customerId":"CUS_bPRmE6MvBaZd0LQiKcBP9EQMvzg","status":"CANCELLED","version":3,"paymentMethod":"COD","paymentCondition":"COD_DUE","lines":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"payablePaise":60000,"deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":nu
   CHECK PASS J28.18 stock: reserved by the order (-3 available) and given back on cancel :: {"start":8,"afterOrder":5,"afterCancel":8}
 $ GET /v1/customer/orders/ORD_Za24dSNtAo7T71iwH3L1FbDpo_0  [customer CUS_bPRm]
-  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","status":"CANCELLED","paymentMethod":"COD","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919688002893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:53.324Z","confirmedAt":"2026-10-10T07:32:53.345Z","money":{"merchandiseSubtotalPaise":60000,"benefitDiscountPaise":0,"payablePaise":60000},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Ev
+  -> 200 {"orderId":"ORD_Za24dSNtAo7T71iwH3L1FbDpo_0","status":"CANCELLED","paymentMethod":"COD","items":[{"skuId":"TZP-E2E-T072137","title":"E2E Staff Rice 072137","brandCode":"E2E","quantity":3,"unitPricePaise":20000,"lineTotalPaise":60000}],"itemCount":3,"subtotalPaise":60000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX2893","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:53.324Z","confirmedAt":"2026-10-10T07:32:53.345Z","money":{"merchandiseSubtotalPaise":60000,"benefitDiscountPaise":0,"payablePaise":60000},"deliverySlot":{"slotId":"evening~2026-10-10","label":"Ev
   CHECK PASS J28.19 the customer sees CANCELLED
 
 --- support case: customer opens, staff replies and resolves, customer sees the thread
@@ -1523,11 +1523,11 @@ $ POST /v1/customer/support/cases/SUP_JUJtNSaMKeROBm4jaxnEDtag/messages  [custom
 $ GET /v1/customer/support/cases/SUP_JUJtNSaMKeROBm4jaxnEDtag  [customer CUS_KFmw]
   -> 200 {"caseId":"SUP_JUJtNSaMKeROBm4jaxnEDtag","category":"ORDER_ISSUE","orderId":"ORD_Sokw6Ew9kx_cVxj4vF_4gQPciCU","subject":"E2E: item missing","status":"OPEN","messages":[{"id":1,"author":"CUSTOMER","text":"One bag was missing.","at":"2026-10-10T07:32:53.407Z"},{"id":2,"author":"STAFF","text":"Sorry, we will send it.","at":"2026-10-10T07:32:53.452Z"},{"id":3,"author":"CUSTOMER","text":"Thanks, received.","at":"2026-10-10T07:32:53.495Z"}],"createdAt":"2026-10-10T07:32:53.407Z","updatedAt":"2026-10-10T07:32:53.495Z","requestId":"req_867ab344cf244c608adf"}
   CHECK PASS J28.25 customer sees both messages and the resolved status :: {"status":"OPEN","messages":["CUSTOMER","STAFF","CUSTOMER"]}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9320508924"}
-  -> 202 {"challengeId":"OTP_9a1V-rQ3XKorET1qjZe8eHl4vV8","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_3466092c86c34c4a963a"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_9a1V-rQ3XKorET1qjZe8eHl4vV8","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_9a1V-rQ3XKorET1qjZe8eHl4vV8","verified":true,"grantId":"GRANT_1x5Pus0njcqlfnAkJLaMx8Lr29w","requestId":"req_d4bfaca294894c11a104"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_1x5Pus0njcqlfnAkJLaMx8Lr29w"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX8924"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_3466092c86c34c4a963a"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_d4bfaca294894c11a104"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_X1WpEFSUsphXdP5EOGZY8luv6pg","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_998bba99903a4da1acb1"}
 $ GET /v1/customer/support/cases/SUP_JUJtNSaMKeROBm4jaxnEDtag  [customer CUS_X1Wp]
   -> 404 {"code":"NOT_FOUND","message":"request could not be completed","requestId":"req_187a9dace5074865a6a0"}
@@ -1571,11 +1571,11 @@ $ POST /api/v1/admin/imports/jobs  [anonymous]  {}
 $ GET /api/v1/admin/me  [customer]
   -> 401 {"error":{"request_id":"req_62d94f4f7d24415aadb5","message":"missing or unknown bearer token","code":"UNAUTHENTICATED"}}
   CHECK PASS C1.12 garbage bearer -> 401 :: 401
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9372205345"}
-  -> 202 {"challengeId":"OTP_UrhX9OhEWHDCGnxcjujxlQWwwSM","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_916fc1ce14fc4ffea582"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_UrhX9OhEWHDCGnxcjujxlQWwwSM","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_UrhX9OhEWHDCGnxcjujxlQWwwSM","verified":true,"grantId":"GRANT_NEUTwTfRKomwZDyOvDbOS9a9KJI","requestId":"req_9eb39280aff047e4a33b"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_NEUTwTfRKomwZDyOvDbOS9a9KJI"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX5345"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_916fc1ce14fc4ffea582"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_9eb39280aff047e4a33b"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS__-W2D-k-lJm7ufJ138yl9kX9CjQ","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_838e8f71daf04e34ab92"}
 $ GET /api/v1/admin/orders  [customer]
   -> 401 {"error":{"request_id":"req_6b4024baf0064aa1bd68","message":"missing or unknown bearer token","code":"UNAUTHENTICATED"}}
@@ -1625,30 +1625,30 @@ $ PUT /api/v1/admin/prices/TZP-E2E-X072137  [cms-writer]  {"sellingPricePaise":1
   -> 201 {"skuId":"TZP-E2E-X072137","currency":"INR","sellingPricePaise":10000,"mrpPaise":12000,"version":1,"active":true,"status":"ACTIVE"}
 $ PUT /api/v1/admin/inventory/TZP-E2E-X072137/FL-E2E-1  [cms-writer]  {"onHand":10,"lowStockThreshold":3,"maxPurchasable":10}
   -> 201 {"skuId":"TZP-E2E-X072137","fulfillmentLocationId":"FL-E2E-1","onHand":10,"reserved":0,"available":10,"lowStockThreshold":3,"maxPurchasable":10,"version":1,"active":true}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9554486215"}
-  -> 202 {"challengeId":"OTP_mW_FeD7O8tit43Jm0Q3gzlRdZvw","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_2e579bb50aba48ea8f5a"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_mW_FeD7O8tit43Jm0Q3gzlRdZvw","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_mW_FeD7O8tit43Jm0Q3gzlRdZvw","verified":true,"grantId":"GRANT_0impRPopcXWSHlaPecGO4pJ38r0","requestId":"req_ed96f6750da34931a544"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_0impRPopcXWSHlaPecGO4pJ38r0"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX6215"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_2e579bb50aba48ea8f5a"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_ed96f6750da34931a544"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_oINUNJ9IkGeB1WJH3WXMIyTnE-s","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_9f8259a287e840398143"}
-$ POST /v1/auth/otp/request  [anonymous]  {"phone":"9830889347"}
-  -> 202 {"challengeId":"OTP_iOBQMO9-N90qGjps558DHP2kbPo","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_9214de8ef234403194f9"}
-$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"OTP_iOBQMO9-N90qGjps558DHP2kbPo","otp":"<redacted>"}
-  -> 200 {"challengeId":"OTP_iOBQMO9-N90qGjps558DHP2kbPo","verified":true,"grantId":"GRANT_MDbb_eOn8Ld-Zj3_DJy0rZZgFX0","requestId":"req_d6590796c89c4bfca5db"}
-$ POST /v1/auth/session  [anonymous]  {"grantId":"GRANT_MDbb_eOn8Ld-Zj3_DJy0rZZgFX0"}
+$ POST /v1/auth/otp/request  [anonymous]  {"phone":"+91XXXXXX9347"}
+  -> 202 {"challengeId":"<redacted>","expiresInSeconds":299,"resendAfterSeconds":1,"requestId":"req_9214de8ef234403194f9"}
+$ POST /v1/auth/otp/verify  [anonymous]  {"challengeId":"<redacted>","otp":"<redacted>"}
+  -> 200 {"challengeId":"<redacted>","verified":true,"grantId":"<redacted>","requestId":"req_d6590796c89c4bfca5db"}
+$ POST /v1/auth/session  [anonymous]  {"grantId":"<redacted>"}
   -> 200 {"customerId":"CUS_qSulP4Qw1Xs9bhMXibscapM-D4w","accessToken":"<redacted>","accessTokenExpiresIn":900,"refreshToken":"<redacted>","requestId":"req_6cc37d5c732f47559898"}
-$ POST /v1/customer/addresses  [customer CUS_oINU]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9554486215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919554486215","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_c9e38618022f41da9872"}
-$ POST /v1/customer/addresses  [customer CUS_qSul]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"9830889347","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
-  -> 201 {"addressId":"ADDR_sVHLWGqFfvJ0lRPZklKVVauRR5w","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919830889347","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_6e6be04c195748cc8502"}
+$ POST /v1/customer/addresses  [customer CUS_oINU]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6215","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_c9e38618022f41da9872"}
+$ POST /v1/customer/addresses  [customer CUS_qSul]  {"label":"Home","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX9347","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+  -> 201 {"addressId":"ADDR_sVHLWGqFfvJ0lRPZklKVVauRR5w","label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX9347","addressLine1":"12 MG Road","addressLine2":null,"landmark":null,"city":"Bengaluru","state":"Karnataka","postalCode":"560001","latitude":null,"longitude":null,"isDefault":true,"version":1,"serviceability":{"serviceable":true},"requestId":"req_6e6be04c195748cc8502"}
 $ PUT /v1/customer/cart/items/TZP-E2E-X072137?addressId=ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY  [customer CUS_oINU]  {"quantity":1}
   -> 200 {"version":1,"items":[{"skuId":"TZP-E2E-X072137","quantity":1,"addedAt":"2026-10-10T07:32:54.184Z","updatedAt":"2026-10-10T07:32:54.184Z","product":{"title":"E2E Isolation 072137","brandCode":"E2E","imageUrl":null},"price":{"unitPricePaise":10000,"mrpPaise":12000,"currency":"INR"},"availability":{"stockState":"IN_STOCK","maxOrderQuantity":10,"serviceable":true},"lineTotalPaise":10000,"buyable":true,"issues":[]}],"itemCount":1,"distinctItemCount":1,"subtotalPaise":10000,"expiresAt":"2026-10-17T07:32:54.184131621Z","freshness":"FRESH","requestId":"req_ece71617546447b59b91"}
 $ POST /v1/customer/checkout/quote  [customer CUS_oINU]  {"addressId":"ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY"}
   -> 200 {"quoteId":"CHKQ_nJLuYjvesgfdg6l_PwIIi7g-mVg","cartVersion":1,"addressId":"ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY","items":[{"skuId":"TZP-E2E-X072137","quantity":1,"unitPricePaise":10000,"lineTotalPaise":10000}],"itemCount":1,"distinctItemCount":1,"subtotalPaise":10000,"currency":"INR","createdAt":"2026-10-10T07:32:54.209Z","expiresAt":"2026-10-10T07:37:54.209Z","benefitPreview":{"applied":false},"moneyPreview":{"merchandiseSubtotalPaise":10000,"benefitDiscountPaise":0,"payablePaise":10000},"requestId":"req_fa15f730bc6d4f719701"}
 $ POST /v1/customer/orders  [customer CUS_oINU]  {"quoteId":"CHKQ_nJLuYjvesgfdg6l_PwIIi7g-mVg","paymentMethod":"COD","deliverySlotId":"evening~2026-10-10"}
-  -> 200 {"orderId":"ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-X072137","title":"E2E Isolation 072137","brandCode":"E2E","quantity":1,"unitPricePaise":10000,"lineTotalPaise":10000}],"itemCount":1,"subtotalPaise":10000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919554486215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:54.244Z","confirmedAt":"2026-10-10T07:32:54.267Z","money":{"merchandiseSubtotalPaise":10000,"benefitDiscountPaise":0,"payablePaise":10000},"deliverySlot":{"slotId":"eve
+  -> 200 {"orderId":"ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-X072137","title":"E2E Isolation 072137","brandCode":"E2E","quantity":1,"unitPricePaise":10000,"lineTotalPaise":10000}],"itemCount":1,"subtotalPaise":10000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:54.244Z","confirmedAt":"2026-10-10T07:32:54.267Z","money":{"merchandiseSubtotalPaise":10000,"benefitDiscountPaise":0,"payablePaise":10000},"deliverySlot":{"slotId":"eve
 $ GET /v1/customer/orders/ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM  [customer CUS_oINU]
-  -> 200 {"orderId":"ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-X072137","title":"E2E Isolation 072137","brandCode":"E2E","quantity":1,"unitPricePaise":10000,"lineTotalPaise":10000}],"itemCount":1,"subtotalPaise":10000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+919554486215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:54.244Z","confirmedAt":"2026-10-10T07:32:54.267Z","money":{"merchandiseSubtotalPaise":10000,"benefitDiscountPaise":0,"payablePaise":10000},"deliverySlot":{"slotId":"eve
+  -> 200 {"orderId":"ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM","status":"CONFIRMED","paymentMethod":"COD","paymentCondition":"COD_DUE","items":[{"skuId":"TZP-E2E-X072137","title":"E2E Isolation 072137","brandCode":"E2E","quantity":1,"unitPricePaise":10000,"lineTotalPaise":10000}],"itemCount":1,"subtotalPaise":10000,"currency":"INR","deliveryAddress":{"label":"HOME","recipientName":"E2E Tester","recipientPhone":"+91XXXXXX6215","addressLine1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"},"createdAt":"2026-10-10T07:32:54.244Z","confirmedAt":"2026-10-10T07:32:54.267Z","money":{"merchandiseSubtotalPaise":10000,"benefitDiscountPaise":0,"payablePaise":10000},"deliverySlot":{"slotId":"eve
   CHECK PASS C3.1 A's order exists for A
 $ GET /v1/customer/orders/ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM  [customer CUS_qSul]
   -> 404 {"code":"NOT_FOUND","message":"not found","requestId":"req_a0f26c836a0843189e24"}
@@ -1662,7 +1662,7 @@ $ POST /v1/customer/orders/ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM/cancel  [customer CUS
 $ GET /v1/customer/addresses/ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY  [customer CUS_qSul]
   -> 404 {"code":"NOT_FOUND","message":"address not found","requestId":"req_ce64ede89cbd4d208317"}
   CHECK PASS C3.5 B reading A's address -> 404
-$ PATCH /v1/customer/addresses/ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY  [customer CUS_qSul]  {"label":"HOME","recipientName":"Mallory","recipientPhone":"9830889347","addressLine1":"1 Evil Rd","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
+$ PATCH /v1/customer/addresses/ADDR_K8-0Ls9MhgZitU70QTYjR_3bTGY  [customer CUS_qSul]  {"label":"HOME","recipientName":"Mallory","recipientPhone":"+91XXXXXX9347","addressLine1":"1 Evil Rd","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}
   -> 404 {"code":"NOT_FOUND","message":"address not found","requestId":"req_a3ae1785c4d04c2980c7"}
   CHECK PASS C3.6 B patching A's address -> 404
 $ PUT /v1/customer/cart/items/TZP-E2E-X072137?addressId=ADDR_sVHLWGqFfvJ0lRPZklKVVauRR5w  [customer CUS_qSul]  {"quantity":1}
@@ -1709,7 +1709,7 @@ $ GET /api/v1/admin/orders/ORD_5yS7j9P_wmeJkBiZSnPiNFM7swM  [customer]
   RESULT C4 FAIL checks=6 failed=1 lines 1694-1708 40s
 
 --- ==================== C5 CSRF refusal on storefront mutations (no token, foreign origin, wrong method); signed-out is 401 ====================
-  [browser] signed in as 9656620713 via /login (code read from the gateway stand-in, not logged) -> /p/TZP-E2E-RICE5
+  [browser] signed in as +91XXXXXX0713 via /login (code read from the gateway stand-in, not logged) -> /p/TZP-E2E-RICE5
   CHECK PASS C5.1 the page itself sends a CSRF token header on its mutation
   CHECK PASS C5.2 cart add without the CSRF header -> 403 :: 403
   CHECK PASS C5.3 cart add with a valid token but a foreign Origin -> 403 :: 403
