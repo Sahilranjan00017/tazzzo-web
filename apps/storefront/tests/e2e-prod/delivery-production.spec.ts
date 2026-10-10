@@ -212,3 +212,21 @@ test('prefetch headers do not exempt route handlers: a POST carrying them is lim
     expect(limited!.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-")
   }
 })
+
+test('a GET to /robots.txt or /sitemap.xml carrying prefetch headers is limited like any page', async ({
+  request,
+}) => {
+  counter += 1
+  for (const path of ['/robots.txt', '/sitemap.xml']) {
+    const headers = {
+      'x-forwarded-for': `198.51.100.${120 + counter + path.length}`,
+      rsc: '1',
+      'next-router-prefetch': '1',
+    }
+    let limited = false
+    for (let i = 0; i < 40 && !limited; i++) {
+      limited = (await request.get(path, { headers })).status() === 429
+    }
+    expect(limited, path).toBe(true)
+  }
+})
