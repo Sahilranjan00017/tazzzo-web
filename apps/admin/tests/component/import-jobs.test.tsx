@@ -7,7 +7,7 @@ import { JobActions } from '@/components/imports/jobs/JobActions'
 import { JobDetailView } from '@/components/imports/jobs/JobDetailView'
 import { JobPoller } from '@/components/imports/jobs/JobPoller'
 import { JobRowsTable } from '@/components/imports/jobs/JobRowsTable'
-import { JobUpload } from '@/components/imports/jobs/JobUpload'
+import { JobUpload, resetUploadGuards } from '@/components/imports/jobs/JobUpload'
 import { JobsListView } from '@/components/imports/jobs/JobsListView'
 import { ToastProvider } from '@/components/ui/Toast'
 import type { ImportJob, JobRow } from '@/lib/import-jobs'
@@ -438,7 +438,11 @@ function jobBackend(
   })
 }
 
+const FAST = { pollMs: 0, settleMs: 0, maxWaitMs: 5_000 }
+
 describe('JobUpload', () => {
+  beforeEach(() => resetUploadGuards())
+
   const header = 'id,title,brand,vertical,release,internalKey'
   const line = (i: number) => `TZP-u-${i},Item ${i},acme,TZV-000001,REL-1,k${i}`
   const csvOf = (n: number) => [header, ...Array.from({ length: n }, (_, i) => line(i))].join('\n')
@@ -449,7 +453,7 @@ describe('JobUpload', () => {
 
   it('refuses a non-CSV file and a file with missing required columns', async () => {
     const user = userEvent.setup({ applyAccept: false })
-    wrap(<JobUpload job={job()} />)
+    wrap(<JobUpload timingOverride={FAST} job={job()} />)
     await choose(user, file('x', 'rows.xlsx'))
     expect(await screen.findByRole('alert')).toHaveTextContent(/Only .csv files/)
     await choose(user, file('id,title\nTZP-1,A'))
@@ -459,7 +463,7 @@ describe('JobUpload', () => {
 
   it('previews valid and invalid rows and blocks until the invalid ones are explicitly skipped', async () => {
     const user = userEvent.setup()
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(
       user,
       file([header, line(0), 'tzp-lower,Bad id,acme,TZV-000001,REL-1,kx'].join('\n')),
@@ -476,7 +480,7 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored = { n: 0 }
     const f = jobBackend(stored, [], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205).replaceAll('TZP-u-', 'TZP-Mix-')))
     await user.click(await addButton(205))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
@@ -489,16 +493,16 @@ describe('JobUpload', () => {
     expect(screen.getByText(/205 of 205 rows sent \(100%\)/)).toBeInTheDocument()
   })
 
-  it('a DEFINITE failure (409) stored nothing: it is said so, and Retry resends only that request after checking the job', async () => {
+  it('a DEFINITE failure (422) stored nothing: it is said so, and Retry resends only that request after checking the job', async () => {
     const user = userEvent.setup()
     const posts: number[] = []
     const stored = { n: 0 }
-    jobBackend(stored, ['ok', { fail: 409, code: 'IMPORT_JOB_STATE' }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    jobBackend(stored, ['ok', { fail: 422, code: 'INVALID_IMPORT' }], posts)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/not in a state that allows this upload/)
+    expect(alert).toHaveTextContent(/none of it was stored/)
     expect(alert).toHaveTextContent(
       /Request 2 of 2 stored nothing; 200 rows from the earlier requests are stored/,
     )
@@ -518,7 +522,7 @@ describe('JobUpload', () => {
       const posts: number[] = []
       const stored = { n: 0 }
       jobBackend(stored, ['ok', { lost }], posts)
-      wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+      wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
       await choose(user, file(csvOf(405)))
       await user.click(await addButton(405))
       const alert = await screen.findByRole('alert')
@@ -539,7 +543,7 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored = { n: 0 }
     jobBackend(stored, [{ lost: 504 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(3)))
     await user.click(await addButton(3))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
@@ -553,11 +557,13 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored = { n: 0 }
     jobBackend(stored, ['ok', { fail: 502 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/unknown outcome, and the job was checked: it did not land/)
+    expect(alert).toHaveTextContent(
+      /unknown outcome. The job was watched for 0 s: nothing was published/,
+    )
     await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
     await waitFor(() => expect(posts).toEqual([200, 5, 5]))
     expect(stored.n).toBe(205)
@@ -568,10 +574,10 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored = { n: 0 }
     jobBackend(stored, ['ok', { fail: 504 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
-    await screen.findByText(/it did not land/)
+    await screen.findByText(/nothing was published/)
     stored.n += 5 // the slow request commits after the check
     await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
@@ -584,10 +590,10 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored = { n: 0 }
     jobBackend(stored, ['ok', { fail: 504 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
-    await screen.findByText(/it did not land/)
+    await screen.findByText(/nothing was published/)
     stored.n += 37 // another uploader
     await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
     const alert = await screen.findByText(/The job holds 237 rows but this upload expected 200/)
@@ -600,10 +606,10 @@ describe('JobUpload', () => {
     const posts: number[] = []
     const stored: { n: number; status?: string } = { n: 0 }
     jobBackend(stored, ['ok', { fail: 504 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
-    await screen.findByText(/it did not land/)
+    await screen.findByText(/nothing was published/)
     stored.status = 'CANCELLED'
     await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
     expect(await screen.findByText(/The job is now CANCELLED/)).toBeInTheDocument()
@@ -614,10 +620,10 @@ describe('JobUpload', () => {
     const user = userEvent.setup()
     const posts: number[] = []
     const f = jobBackend({ n: 0 }, ['ok', { fail: 504 }], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(205)))
     await user.click(await addButton(205))
-    await screen.findByText(/it did not land/)
+    await screen.findByText(/nothing was published/)
     f.mockImplementation(async () => fail(502))
     await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
     expect(await screen.findByText(/could not be read to check what it holds/)).toBeInTheDocument()
@@ -632,7 +638,7 @@ describe('JobUpload', () => {
     async (status, body, text) => {
       const user = userEvent.setup()
       jobBackend({ n: 0 }, [{ fail: status, code: (body as { code?: string }).code }])
-      wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+      wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
       await choose(user, file(csvOf(1)))
       await user.click(await addButton(1))
       expect(await screen.findByRole('alert')).toHaveTextContent(text)
@@ -642,7 +648,7 @@ describe('JobUpload', () => {
   it('a 401 mid-upload goes to sign in', async () => {
     const user = userEvent.setup()
     jobBackend({ n: 0 }, [{ fail: 401 }])
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(1)))
     await user.click(await addButton(1))
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/login?error=expired'))
@@ -652,7 +658,13 @@ describe('JobUpload', () => {
     const user = userEvent.setup()
     const posts: number[] = []
     jobBackend({ n: 3 }, [], posts)
-    wrap(<JobUpload job={job({ rowsTotal: 3 })} firstIds={['TZP-u-0', 'TZP-u-1', 'TZP-u-2']} />)
+    wrap(
+      <JobUpload
+        timingOverride={FAST}
+        job={job({ rowsTotal: 3 })}
+        firstIds={['TZP-u-0', 'TZP-u-1', 'TZP-u-2']}
+      />,
+    )
     await choose(user, file(csvOf(3)))
     const add = await addButton(3)
     expect(add).toBeDisabled()
@@ -668,7 +680,7 @@ describe('JobUpload', () => {
 
   it('a different file on a non-empty job gets the plain confirmation (no overlap claim)', async () => {
     const user = userEvent.setup()
-    wrap(<JobUpload job={job({ rowsTotal: 3 })} firstIds={['TZP-other-1']} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 3 })} firstIds={['TZP-other-1']} />)
     await choose(user, file(csvOf(2)))
     const add = await addButton(2)
     expect(add).toBeDisabled()
@@ -684,12 +696,193 @@ describe('JobUpload', () => {
     const imports = await import('@/lib/import-jobs')
     const spy = vi.spyOn(imports, 'buildUploadRows')
     jobBackend({ n: 0 }, [])
-    wrap(<JobUpload job={job({ rowsTotal: 0 })} />)
+    wrap(<JobUpload timingOverride={FAST} job={job({ rowsTotal: 0 })} />)
     await choose(user, file(csvOf(450)))
     await user.click(await addButton(450))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
     expect(spy.mock.calls.length).toBeGreaterThan(0)
     expect(spy.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+})
+
+describe('JobUpload: waiting out an unknown outcome', () => {
+  // Real (short) timers: poll every 20 ms, quiet for 300 ms means idle, give up after 2 s.
+  const T = { pollMs: 20, settleMs: 300, maxWaitMs: 2_000 }
+  const header = 'id,title,brand,vertical,release,internalKey'
+  const csvOf = (n: number) =>
+    [
+      header,
+      ...Array.from({ length: n }, (_, i) => `TZP-w-${i},Item,acme,TZV-000001,REL-1,k${i}`),
+    ].join('\n')
+  const slow = { timeout: 4_000 }
+  beforeEach(() => resetUploadGuards())
+
+  async function start(script: Parameters<typeof jobBackend>[1], rows = 205) {
+    const posts: number[] = []
+    const stored = { n: 0 }
+    const f = jobBackend(stored, script, posts)
+    const user = userEvent.setup()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(rows)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: `Add ${rows} rows to the job` }))
+    return { user, posts, stored, f }
+  }
+
+  it('one read showing the old count is NOT enough: it waits, visibly, and only then offers a send', async () => {
+    const { user, posts } = await start(['ok', { fail: 504 }])
+    expect(
+      await screen.findByText(/Waiting to learn whether request 2 reached the job/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stop waiting' })).toBeInTheDocument()
+    expect(screen.queryByText(/nothing was published/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Retry from request 2/ })).toBeNull()
+    expect(
+      await screen.findByText(/watched for 0 s: nothing was published/, undefined, slow),
+    ).toBeInTheDocument()
+    expect(posts).toEqual([200, 5])
+    await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
+    await waitFor(() => expect(posts).toEqual([200, 5, 5]))
+  })
+
+  it('the request finishes while we wait (count reaches expected + size): it landed, and is skipped', async () => {
+    const { posts, stored } = await start(['ok', { fail: 504 }], 405)
+    await screen.findByText(/Waiting to learn/)
+    stored.n += 200 // the zombie publishes
+    expect(await screen.findByText(/it DID land/, undefined, slow)).toBeInTheDocument()
+    expect(screen.queryByText(/stored nothing/)).toBeNull()
+    expect(posts).toEqual([200, 200])
+    expect(screen.queryByRole('button', { name: /Retry from request 2/ })).toBeNull()
+  })
+
+  it('a 409 on the rows endpoint is never "stored nothing": it enters the wait, and resolves to landed', async () => {
+    const { posts, stored } = await start(['ok', { fail: 409, code: 'IMPORT_JOB_STATE' }], 405)
+    expect(await screen.findByText(/Waiting to learn whether request 2/)).toBeInTheDocument()
+    expect(screen.getByText(/An upload on this job is still running/)).toBeInTheDocument()
+    stored.n += 200
+    expect(await screen.findByText(/it DID land/, undefined, slow)).toBeInTheDocument()
+    expect(screen.queryByText(/stored nothing/)).toBeNull()
+    expect(posts).toEqual([200, 200])
+  })
+
+  it('if the wait ends idle but the backend lock is still held, the retry gets a 409 and waits again instead of claiming nothing was stored', async () => {
+    const { user, posts, stored } = await start(
+      ['ok', { fail: 504 }, { fail: 409, code: 'IMPORT_JOB_STATE' }],
+      405,
+    )
+    await user.click(await screen.findByRole('button', { name: 'Retry from request 2' }, slow))
+    await waitFor(() => expect(posts).toEqual([200, 200, 200]))
+    expect(await screen.findByText(/Waiting to learn whether request 2/)).toBeInTheDocument()
+    expect(screen.queryByText(/stored nothing/)).toBeNull()
+    stored.n += 200 // the first request finally publishes
+    expect(await screen.findByText(/it DID land/, undefined, slow)).toBeInTheDocument()
+    expect(posts).toEqual([200, 200, 200]) // never a fourth
+  })
+
+  it('after a lock 409 quiet alone never means idle: it waits for an outcome or the maximum, then blocks', async () => {
+    const { posts } = await start(['ok', { fail: 409, code: 'IMPORT_JOB_STATE' }], 405)
+    // the quiet window (300 ms) passes, but the lock was seen held, so no "nothing was published" verdict and no retry
+    expect(
+      await screen.findByText(/Still no answer after/, undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/nothing was published/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry from request 2' })).toBeDisabled()
+    expect(posts).toEqual([200, 200])
+  })
+
+  it('an unreadable job never counts as quiet: the wait is bounded and then blocks with no retry', async () => {
+    const { f } = await start(['ok', { fail: 504 }])
+    await screen.findByText(/Waiting to learn/)
+    f.mockImplementation(async () => fail(502))
+    expect(
+      await screen.findByText(/Still no answer after/, undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry from request 2' })).toBeDisabled()
+  })
+
+  it('"Stop waiting" ends the wait without sending; a later retry waits again from scratch', async () => {
+    const { user, posts } = await start(['ok', { fail: 504 }])
+    await user.click(await screen.findByRole('button', { name: 'Stop waiting' }))
+    expect(await screen.findByText(/You stopped waiting/)).toBeInTheDocument()
+    expect(posts).toEqual([200, 5])
+    await user.click(screen.getByRole('button', { name: 'Retry from request 2' }))
+    expect(await screen.findByText(/Waiting to learn whether request 2/)).toBeInTheDocument()
+    expect(posts).toEqual([200, 5]) // waiting again, nothing sent
+  })
+
+  it('a successful request that reports an unexpected row count (someone else appended) stops the upload', async () => {
+    const posts: number[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      posts.push(1)
+      return ok({ rowsAdded: 200, rowsTotal: 777, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(405)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 405 rows to the job' }))
+    expect(
+      await screen.findByText(/job now holds 777 rows but this upload expected 200/),
+    ).toBeInTheDocument()
+    expect(posts).toHaveLength(1)
+    expect(screen.getByRole('button', { name: /Retry from request/ })).toBeDisabled()
+  })
+
+  it('leaving the page stops the upload: no further request is sent', async () => {
+    const posts: number[] = []
+    let release: () => void = () => undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      posts.push(1)
+      await new Promise<void>((r) => (release = r))
+      return ok({ rowsAdded: 200, rowsTotal: 200 * posts.length, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    const view = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(405)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 405 rows to the job' }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    view.unmount()
+    release()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(posts).toHaveLength(1) // the loop noticed and stopped before request 2
+  })
+
+  it('a second mount for the same job cannot start a concurrent upload while one is running', async () => {
+    let release: () => void = () => undefined
+    const posts: number[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      posts.push(1)
+      await new Promise<void>((r) => (release = r))
+      return ok({ rowsAdded: 3, rowsTotal: 3, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    first.unmount()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: /Add 3 rows to the job/ }))
+    expect(await screen.findByText(/already running in this tab/)).toBeInTheDocument()
+    expect(posts).toHaveLength(1)
+    release()
   })
 })
 

@@ -352,11 +352,13 @@ export function buildCorrection(
 
 /**
  * A failure that proves the request stored NOTHING: the backend (or the BFF, before calling it) refused it with a 4xx.
+ * 409 is NOT in the list for the rows endpoint: the shared code IMPORT_JOB_STATE also means "another upload holds the append
+ * lock", which can be this upload's own earlier request still running after the BFF gave up on it.
  * Status 0 (network), 5xx, timeouts and anything else are AMBIGUOUS: the backend may have committed the request before the
  * answer was lost, so the outcome has to be checked on the job, never assumed.
  */
 export function isDefiniteFailure(result: { status: number }): boolean {
-  return [400, 403, 404, 409, 413, 415, 422, 429].includes(result.status)
+  return [400, 403, 404, 413, 415, 422, 429].includes(result.status)
 }
 
 const CODE_COPY: Record<string, string> = {
@@ -426,4 +428,25 @@ export function countCsvRecords(text: string): number {
     } else content = true
   }
   return content ? records + 1 : records
+}
+
+/**
+ * How long the upload waits to learn the outcome of a request whose answer was lost. Production defaults are the long,
+ * conservative ones: poll every 5 s; call the job idle after 90 s without a change (the BFF gives up after 60 s); stop waiting
+ * after 16 minutes (the backend's append lock lasts 15). Tests shorten them with NEXT_PUBLIC_IMPORT_UPLOAD_* (read literally
+ * so Next inlines them); a value that is not a whole number of milliseconds in range falls back to the default.
+ */
+export interface UploadTiming {
+  pollMs: number
+  settleMs: number
+  maxWaitMs: number
+}
+const num = (v: string | undefined, fallback: number, min: number, max: number) =>
+  v && /^\d{1,9}$/.test(v) && Number(v) >= min && Number(v) <= max ? Number(v) : fallback
+export function uploadTiming(): UploadTiming {
+  return {
+    pollMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_POLL_MS, 5_000, 0, 60_000),
+    settleMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_SETTLE_MS, 90_000, 0, 600_000),
+    maxWaitMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_MAXWAIT_MS, 16 * 60_000, 1_000, 3_600_000),
+  }
 }

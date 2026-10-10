@@ -337,12 +337,19 @@ test('upload failures are explained without backend text and never retried by th
     const before = await posts()
     await attempt()
     const alert = page.locator('main').getByRole('alert').filter({ hasText: text })
-    await expect(alert).toBeVisible()
+    // 409 and 5xx are AMBIGUOUS: the job is watched (6 s in tests) before anything is concluded
+    const ambiguous = status === 409 || status === 503
+    await expect(alert).toBeVisible({ timeout: 30_000 })
     await expect(alert).toContainText(
-      status === 503
-        ? 'Request 1 of 1 had an unknown outcome, and the job was checked: it did not land'
-        : 'Request 1 of 1 stored nothing; 0 rows',
+      status === 409
+        ? // a lock 409 never counts as idle: it waits for an outcome or the maximum (25 s in tests)
+          'Request 1 of 1 had an unknown outcome. Still no answer after 25 seconds'
+        : ambiguous
+          ? 'Request 1 of 1 had an unknown outcome. The job was watched for 6 s: nothing was published'
+          : 'Request 1 of 1 stored nothing; 0 rows',
+      { timeout: 30_000 },
     )
+    await expect(alert).not.toContainText(ambiguous ? 'stored nothing' : 'unknown outcome')
     await expect(page.getByText(/Foo\.java|stack trace/)).toHaveCount(0)
     await page.waitForTimeout(800)
     expect(await posts()).toBe(before + 1)
@@ -373,8 +380,8 @@ test('a failure in the middle keeps the earlier requests, says how many rows are
   await control(request, 'force', [
     {
       match: 'POST /api/v1/admin/imports/jobs',
-      status: 409,
-      code: 'IMPORT_JOB_STATE',
+      status: 422,
+      code: 'INVALID_IMPORT',
       skip: 1,
       count: 1,
     },
@@ -659,7 +666,7 @@ test('ambiguous failure, NOT committed: reported as unknown, checked as not land
   ])
   await page.getByRole('button', { name: 'Add 205 rows to the job' }).click()
   const alert = page.locator('main').getByRole('alert').filter({ hasText: 'unknown outcome' })
-  await expect(alert).toContainText('it did not land')
+  await expect(alert).toContainText('nothing was published', { timeout: 30_000 })
   await expect(rowsCell(page)).toHaveText('200')
   await page.getByRole('button', { name: 'Retry from request 2' }).click()
   await expect(rowsCell(page)).toHaveText('205')
@@ -681,8 +688,8 @@ test('the job was changed by someone else meanwhile: the retry is blocked and no
   ])
   await page.getByRole('button', { name: 'Add 205 rows to the job' }).click()
   await expect(
-    page.locator('main').getByRole('alert').filter({ hasText: 'it did not land' }),
-  ).toBeVisible()
+    page.locator('main').getByRole('alert').filter({ hasText: 'nothing was published' }),
+  ).toBeVisible({ timeout: 30_000 })
   const other = await page.request.post(`/api/bff/imports/jobs/${id}/rows`, {
     headers: {
       origin: 'http://localhost:3988',
@@ -748,4 +755,82 @@ test('an invalid stock filter in the address is dropped and the person is told',
   await expect(
     page.getByText(/location and state filter in the address was not a valid value/),
   ).toBeVisible()
+})
+
+for (const [label, zombieMs] of [
+  ['finishes inside the wait', 3_000],
+  ['outlives the wait (the retry meets the lock)', 12_000],
+] as const) {
+  test(`ZOMBIE request (the BFF gave up, the backend keeps going) that ${label}: no duplicates, never "stored nothing"`, async ({
+    page,
+    request,
+  }) => {
+    await signInFresh(page, WRITER_SUB)
+    const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+    await openJob(page, id)
+    await page
+      .getByLabel('CSV file')
+      .setInputFiles({ name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(405, 'TZP-zom') })
+    await control(request, 'force', [
+      { match: 'POST /api/v1/admin/imports/jobs', status: 0, zombie: zombieMs, skip: 1, count: 1 },
+    ])
+    await page.getByRole('button', { name: 'Add 405 rows to the job' }).click()
+    // the wait is visible, announced, cancellable, and nothing is sent during it
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: 'Waiting to learn whether request 2 reached the job' }),
+    ).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop waiting' })).toBeVisible()
+    const alert = page.locator('main').getByRole('alert')
+    if (zombieMs > 6_000) {
+      // the quiet window passes while the zombie still holds the lock: a retry is offered...
+      await expect(alert).toContainText('nothing was published', { timeout: 20_000 })
+      await page.getByRole('button', { name: 'Retry from request 2' }).click()
+      // ...and the backend refuses it (lock): that is NOT "stored nothing"; we go back to waiting
+      await expect(page.getByText('An upload on this job is still running')).toBeVisible({
+        timeout: 10_000,
+      })
+      await expect(alert).not.toContainText('stored nothing')
+    }
+    await expect(alert).toContainText('it DID land', { timeout: 30_000 })
+    await expect(alert).not.toContainText('stored nothing')
+    await expect(rowsCell(page)).toHaveText('400')
+    await page.getByRole('button', { name: 'Retry from request 3' }).click()
+    await expect(rowsCell(page)).toHaveText('405')
+    // request 2 reached the backend exactly once as stored rows; the retry (if any) was refused by the lock
+    const posts = await rowPosts(request)
+    expect(posts.length).toBe(zombieMs > 6_000 ? 4 : 3)
+    await page.getByRole('button', { name: 'Validate rows' }).click()
+    await expect(page.getByRole('progressbar', { name: 'Validating progress' })).toBeVisible()
+    await tick(request, id)
+    await expect(page.getByText('Validated, ready to approve').first()).toBeVisible({
+      timeout: 20_000,
+    })
+    await expect(page.getByText('Duplicate').locator('xpath=following-sibling::dd[1]')).toHaveText(
+      '0',
+    )
+  })
+}
+
+test('ZOMBIE request that never finishes: the wait is bounded and the upload is blocked with a clear message', async ({
+  page,
+  request,
+}) => {
+  await signInFresh(page, WRITER_SUB)
+  const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+  await openJob(page, id)
+  await page
+    .getByLabel('CSV file')
+    .setInputFiles({ name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(405, 'TZP-nev') })
+  await control(request, 'force', [
+    { match: 'POST /api/v1/admin/imports/jobs', status: 0, zombie: 120_000, skip: 1, count: 1 },
+  ])
+  await page.getByRole('button', { name: 'Add 405 rows to the job' }).click()
+  // production waits 90 s of quiet, then offers one guarded retry; give up after 16 min. Tests: 6 s and 25 s.
+  await page.getByRole('button', { name: 'Retry from request 2' }).click({ timeout: 20_000 })
+  const alert = page.locator('main').getByRole('alert')
+  await expect(alert).toContainText('Still no answer after 25 seconds', { timeout: 45_000 })
+  await expect(page.getByRole('button', { name: 'Retry from request 2' })).toBeDisabled()
+  expect((await rowPosts(request)).length).toBe(3) // first, zombie, the one refused retry: nothing else was sent
 })

@@ -40,6 +40,8 @@ export interface Ctx {
   byteLength: number
   roles: string[]
   sub?: string
+  /** Set by the zombie mode: keep the append lock and publish after this many ms. */
+  deferMs?: number
 }
 
 const err = (status: number, code: string, message: string): Reply => ({
@@ -141,6 +143,12 @@ export interface Forced {
   skip?: number
   /** Process the request for real (state changes), THEN fail the answer: status 0 drops the connection. */
   commit?: boolean
+  /**
+   * ZOMBIE: the connection is dropped at once (the BFF gave up), but the request keeps running on the backend for this many
+   * ms: it holds the append lock (concurrent appends and validations get 409 IMPORT_JOB_STATE) and publishes its rows
+   * (rowsTotal) only at the end, as `finishAppend` does.
+   */
+  zombie?: number
   delayMs?: number
 }
 
@@ -149,6 +157,9 @@ export class FakeAdminLists {
   readonly rows = new Map<string, RowDoc[]>()
   /** Stock rows that break the record invariants: they occupy cursor positions but are never listed. */
   readonly corrupt: { sku: string; loc: string }[] = []
+  /** Jobs whose append lock is held by a running (possibly abandoned) upload. */
+  readonly locks = new Set<string>()
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>()
   forced: Forced[] = []
   maxRowsPerJob = 250_000
   maxActiveJobs = 10
@@ -163,6 +174,9 @@ export class FakeAdminLists {
     this.jobs.clear()
     this.rows.clear()
     this.corrupt.length = 0
+    this.locks.clear()
+    for (const t of this.timers) clearTimeout(t)
+    this.timers.clear()
     this.forced = []
     this.maxRowsPerJob = 250_000
     this.maxActiveJobs = 10
@@ -187,6 +201,10 @@ export class FakeAdminLists {
     )
     if (forced?.skip) {
       forced.skip -= 1
+    } else if (forced?.zombie) {
+      if (forced.count !== undefined) forced.count -= 1
+      await this.jobsRoute({ ...ctx, deferMs: forced.zombie })
+      return { status: 0 }
     } else if (forced?.commit) {
       if (forced.count !== undefined) forced.count -= 1
       if (isList) this.listStock(ctx)
@@ -453,6 +471,12 @@ export class FakeAdminLists {
           'IMPORT_JOB_STATE',
           `rows can be added only while the job is OPEN (it is ${job.status})`,
         )
+      if (this.locks.has(id))
+        return err(
+          409,
+          'IMPORT_JOB_STATE',
+          'another upload or correction is in progress, or the job is no longer OPEN; reload it and retry',
+        )
       const b = json()
       if (!b) return err(400, 'MALFORMED_REQUEST', 'request body is malformed or unreadable')
       const incoming = b.rows
@@ -496,9 +520,26 @@ export class FakeAdminLists {
         }
         staged.push(doc)
       }
-      rows.splice(job.rowsTotal, rows.length, ...staged)
-      job.rowsTotal += staged.length
-      this.bump(job)
+      const publish = () => {
+        rows.splice(job.rowsTotal, rows.length, ...staged)
+        job.rowsTotal += staged.length
+        this.bump(job)
+        this.locks.delete(id)
+      }
+      if (ctx.deferMs) {
+        this.locks.add(id)
+        const t = setTimeout(() => {
+          this.timers.delete(t)
+          if (this.jobs.get(id) === job && job.status === 'OPEN') publish()
+          else this.locks.delete(id)
+        }, ctx.deferMs)
+        this.timers.add(t)
+        return {
+          status: 200,
+          body: { rowsAdded: staged.length, rowsTotal: job.rowsTotal + staged.length, duplicates },
+        }
+      }
+      publish()
       return {
         status: 200,
         body: { rowsAdded: staged.length, rowsTotal: job.rowsTotal, duplicates },
@@ -560,6 +601,8 @@ export class FakeAdminLists {
       }
       if (action === 'validate' && job.rowsTotal === 0)
         return err(422, 'INVALID_IMPORT', 'the job has no rows')
+      if (action === 'validate' && this.locks.has(id))
+        return this.stateConflict('validation cannot start while an upload is in progress', job)
       if (expected !== job.version || !fromOk[action]!.includes(job.status)) {
         const rule: Record<string, string> = {
           validate: 'validation can start only from OPEN or REJECTED, with no upload in progress',

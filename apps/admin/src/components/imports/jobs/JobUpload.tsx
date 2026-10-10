@@ -12,6 +12,8 @@ import {
   buildUploadRows,
   chunkRows,
   isDefiniteFailure,
+  uploadTiming,
+  type UploadTiming,
   jobErrorMessage,
   jobSchema,
   prepareUpload,
@@ -36,7 +38,25 @@ type Progress = { sent: number; total: number; added: number; duplicates: number
  * 5xx, timeout) has an UNKNOWN outcome, so the job is re-read and its row count compared with what this upload has sent
  * before anything is re-sent (the backend does not de-duplicate a repeated request). Nothing is retried automatically.
  */
-export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readonly string[] }) {
+/** Uploads running in this tab, by job: a remounted component can never start a second concurrent upload for the same job. */
+const running_ = new Set<string>()
+/** Jobs of this tab whose last upload ended with an unknown outcome (survives navigation within the app, not a reload). */
+const unresolved_ = new Set<string>()
+/** Test seam: the two guards above are module state, so tests start each case from a clean slate. */
+export function resetUploadGuards() {
+  running_.clear()
+  unresolved_.clear()
+}
+
+export function JobUpload({
+  job,
+  firstIds,
+  timingOverride,
+}: {
+  job: ImportJob
+  firstIds?: readonly string[]
+  timingOverride?: UploadTiming
+}) {
   const router = useRouter()
   const { toast } = useToast()
   const [prepared, setPrepared] = useState<Prepared>()
@@ -44,7 +64,13 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
   const [problem, setProblem] = useState<string>()
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<Progress>()
-  const [resumeAt, setResumeAt] = useState(0)
+  const [resumeAt, setResumeAt] = useState<number>()
+  const [locked, setLocked] = useState(false)
+  const [waiting, setWaiting] = useState<{ request: number; elapsed: number; unchanged: number }>()
+  /** The outcome of the last failed request is not known yet: a retry must first WAIT (not just look once). */
+  const needSettle = useRef(false)
+  const alive = useRef(true)
+  const timing = useMemo(() => timingOverride ?? uploadTiming(), [timingOverride])
   const [appendAnyway, setAppendAnyway] = useState(false)
   /** Rows the job held before the first request of THIS upload: every later check is arithmetic on it. */
   const base = useRef(0)
@@ -62,7 +88,10 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
     const known = new Set(firstIds)
     return built.sendable.slice(0, 50).filter((b) => known.has(String(b.value.id))).length
   }, [prepared, built, firstIds])
-  const needsConfirm = prepared !== undefined && prepared.existing > 0 && resumeAt === 0
+  const needsConfirm =
+    prepared !== undefined &&
+    (prepared.existing > 0 || unresolved_.has(job.id)) &&
+    resumeAt === undefined
   const blocked =
     !built ||
     built.missing.length > 0 ||
@@ -73,7 +102,9 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
   async function onFile(file: File | undefined) {
     setProblem(undefined)
     setProgress(undefined)
-    setResumeAt(0)
+    setResumeAt(undefined)
+    setLocked(false)
+    needSettle.current = false
     setAppendAnyway(false)
     if (!file) return setPrepared(undefined)
     if (!/\.csv$/i.test(file.name))
@@ -100,6 +131,15 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Leaving the page stops the upload loop at its next step; nothing keeps sending in the background.
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+      stop.current = true
+    }
+  }, [])
+
   /** Fresh, uncached read of the job: how many rows does the backend really hold, and can it still take rows? */
   async function readJob() {
     const r = await getBff<unknown>(`/api/bff/imports/jobs/${encodeURIComponent(job.id)}`)
@@ -108,13 +148,17 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
     return parsed.success ? ({ job: parsed.data } as const) : ({} as const)
   }
 
+  const sleep = async (ms: number) => {
+    // short slices so "Stop waiting" and leaving the page are noticed quickly
+    for (let left = ms; left > 0 && !stop.current; left -= 250)
+      await new Promise((r) => setTimeout(r, Math.min(250, left)))
+  }
+
   /**
-   * Before any request (and after any ambiguous failure) compare what the backend holds with what this upload has sent.
-   * The backend appends atomically per request but does not de-duplicate a re-sent one, so an unknown outcome must never be
-   * answered by blindly sending the same rows again.
-   *   rows == expected                 -> the request did not land: send it
-   *   rows == expected + request size  -> it DID land: skip it
-   *   anything else                    -> someone else changed the job (or a partial state): stop and say so
+   * One look: what does the backend hold, compared with what this upload has sent?
+   *   rows == expected                 -> nothing published (NOT proof that nothing is running: see settle)
+   *   rows == expected + request size  -> the request landed
+   *   anything else                    -> someone else changed the job
    */
   async function reconcile(
     chunks: readonly (readonly unknown[])[],
@@ -138,15 +182,90 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
     }
   }
 
-  async function upload(from = 0) {
+  /**
+   * After an AMBIGUOUS failure (network, 5xx, timeout, or an "upload in progress" 409) the request may still be RUNNING on the
+   * backend: it holds the append lock and publishes its rows (the job's row count) only when it finishes. One read that shows
+   * the old count therefore proves nothing. So: re-read the job every few seconds until it is provably resolved:
+   *   - the count reached expected + size  -> it landed (skip it)
+   *   - the count stayed at expected for the whole stability window (default 90 s, longer than the BFF's 60 s timeout) -> idle,
+   *     except after a lock 409 (the lock was just seen held): then only an outcome or the maximum wait ends the wait
+   *   - anything else (other count, not OPEN) or the maximum wait (default 16 min, the lock lifetime) -> blocked
+   * The wait is visible, and "Stop waiting" or leaving the page ends it (a later retry waits again).
+   */
+  async function settle(
+    chunks: readonly (readonly unknown[])[],
+    i: number,
+    lockHeld = false,
+  ): Promise<'landed' | 'idle' | 'login' | { stop: string; blocked: boolean }> {
+    const started = Date.now()
+    let lastChange = started
+    let last: number | undefined
+    for (;;) {
+      if (stop.current)
+        return {
+          stop: 'You stopped waiting. The outcome of the last request is still unknown; retrying waits again before anything is sent.',
+          blocked: false,
+        }
+      const read = await readJob()
+      const now = Date.now()
+      if ('unauthenticated' in read && read.unauthenticated) return 'login'
+      if (read.job) {
+        if (read.job.status !== 'OPEN')
+          return {
+            stop: `The job is now ${read.job.status}, so it no longer accepts rows.`,
+            blocked: true,
+          }
+        const before = chunks.slice(0, i).reduce((n, c) => n + c.length, 0)
+        const expected = base.current + before
+        const stored = read.job.rowsTotal
+        if (stored === expected + chunks[i]!.length) return 'landed'
+        if (stored !== expected)
+          return {
+            stop: `The job holds ${stored} rows but this upload expected ${expected} (or ${expected + chunks[i]!.length} if request ${i + 1} had landed). Someone else may have changed the job, so nothing more is sent from here. Check the job's rows, and cancel the job if they are not what you expect.`,
+            blocked: true,
+          }
+        if (last !== undefined && stored !== last) lastChange = now
+        last = stored
+        // A 409 proves the append lock was held a moment ago: quiet alone no longer proves it is free, only an outcome does.
+        if (!lockHeld && now - lastChange >= timing.settleMs) return 'idle'
+      } else lastChange = now // an unreadable job proves nothing: the quiet period starts over
+      if (now - started >= timing.maxWaitMs)
+        return {
+          stop: `Still no answer after ${timing.maxWaitMs >= 120_000 ? `${Math.round(timing.maxWaitMs / 60_000)} minutes` : `${Math.round(timing.maxWaitMs / 1000)} seconds`}. Check the job's rows and cancel the job if they look wrong; nothing more is sent from here.`,
+          blocked: true,
+        }
+      if (alive.current)
+        setWaiting({ request: i, elapsed: now - started, unchanged: now - lastChange })
+      await sleep(timing.pollMs)
+    }
+  }
+
+  async function upload(from = 0, resuming = false) {
     if (!built) return
+    if (running_.has(job.id)) {
+      return setProblem('An upload for this job is already running in this tab.')
+    }
+    running_.add(job.id)
+    try {
+      await runUpload(from, resuming, built)
+    } finally {
+      running_.delete(job.id)
+      if (alive.current) setWaiting(undefined)
+    }
+  }
+
+  async function runUpload(
+    from: number,
+    resuming: boolean,
+    built: ReturnType<typeof buildUploadRows>,
+  ) {
     const chunks = chunkRows(built.sendable.map((b) => b.value))
     stop.current = false
     setProblem(undefined)
     setRunning(true)
     const total = built.sendable.length
     const done = { added: progress?.added ?? 0, duplicates: progress?.duplicates ?? 0 }
-    if (from === 0) {
+    if (!resuming) {
       done.added = 0
       done.duplicates = 0
       const start = await readJob()
@@ -165,33 +284,71 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
     }
     let sent = chunks.slice(0, from).reduce((n, c) => n + c.length, 0)
     setProgress({ sent, total, ...done })
-    const halt = (message: string, at: number, refresh = true) => {
+    const halt = (
+      message: string,
+      at: number,
+      opts: { refresh?: boolean; lock?: boolean } = {},
+    ) => {
+      if (!alive.current) return
       setResumeAt(at)
       setRunning(false)
-      if (refresh) router.refresh()
+      setLocked(opts.lock ?? false)
+      if (opts.refresh ?? true) router.refresh()
       setProblem(message)
+    }
+    const login = () => {
+      setRunning(false)
+      router.replace('/login?error=expired')
+      router.refresh()
+    }
+    /** The request just failed or is being resumed with an unknown outcome: wait it out, then act on the answer. */
+    const resolveUnknown = async (i: number, head: string, lockHeld = false) => {
+      unresolved_.add(job.id)
+      needSettle.current = true
+      const verdict = await settle(chunks, i, lockHeld)
+      if (verdict === 'login') return (login(), 'end' as const)
+      if (!alive.current) return 'end' as const
+      if (typeof verdict === 'object') {
+        if (verdict.blocked) needSettle.current = true
+        halt(`${head}${verdict.stop}`, i, { lock: verdict.blocked })
+        return 'end' as const
+      }
+      needSettle.current = false
+      if (verdict === 'landed') {
+        unresolved_.delete(job.id)
+        return 'landed' as const
+      }
+      return 'idle' as const
     }
     for (let i = from; i < chunks.length; i++) {
       if (stop.current)
         return halt(
           `Stopped before request ${i + 1} of ${chunks.length}. ${done.added} rows are stored in the job; continue to add the rest.`,
           i,
-          false,
+          { refresh: false },
         )
-      if (i === from && from > 0) {
+      const landed = () => {
+        done.added += chunks[i]!.length
+        sent += chunks[i]!.length
+        setProgress({ sent, total, ...done })
+      }
+      if (resuming && i === from) {
         // a retry or continue: the answer to "did it land?" comes from the backend, never from the screen
-        const verdict = await reconcile(chunks, i)
-        if (verdict === 'login') {
-          router.replace('/login?error=expired')
-          router.refresh()
-          return
-        }
-        if (typeof verdict === 'object') return halt(verdict.stop, i)
-        if (verdict === 'landed') {
-          done.added += chunks[i]!.length
-          sent += chunks[i]!.length
-          setProgress({ sent, total, ...done })
-          continue
+        if (needSettle.current) {
+          const r = await resolveUnknown(i, `Request ${i + 1} of ${chunks.length}: `)
+          if (r === 'end') return
+          if (r === 'landed') {
+            landed()
+            continue
+          }
+        } else {
+          const verdict = await reconcile(chunks, i)
+          if (verdict === 'login') return login()
+          if (typeof verdict === 'object') return halt(verdict.stop, i, { lock: true })
+          if (verdict === 'landed') {
+            landed()
+            continue
+          }
         }
       }
       const result = await callBff<unknown>(
@@ -199,32 +356,31 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
         'POST',
         { rows: chunks[i] },
       )
+      if (!alive.current) return
       if (!result.ok) {
-        if (result.status === 401) {
-          setRunning(false)
-          router.replace('/login?error=expired')
-          router.refresh()
-          return
-        }
+        if (result.status === 401) return login()
         const head = `${jobErrorMessage(result, 'upload')} Request ${i + 1} of ${chunks.length}`
         if (isDefiniteFailure(result))
           return halt(
             `${head} stored nothing; ${done.added} rows from the earlier requests are stored in the job. You can retry from request ${i + 1}, or cancel the job and start again.`,
             i,
           )
-        // Ambiguous: the request may have been committed before the answer was lost. Look, do not guess.
-        const verdict = await reconcile(chunks, i)
-        if (verdict === 'send')
-          return halt(
-            `${head} had an unknown outcome, and the job was checked: it did not land. ${done.added} rows from the earlier requests are stored. You can retry from request ${i + 1}; the job is checked again first.`,
-            i,
-          )
-        if (verdict === 'landed') {
-          done.added += chunks[i]!.length
+        // Ambiguous (including every 409 here: "another upload is in progress" may be our own earlier request still running).
+        setProblem(
+          result.status === 409
+            ? `An upload on this job is still running (possibly your previous request ${i + 1}). Waiting to see whether it finishes…`
+            : `${head} had an unknown outcome. Waiting to see what the job ends up holding…`,
+        )
+        const r = await resolveUnknown(i, `${head} had an unknown outcome. `, result.status === 409)
+        if (r === 'end') return
+        if (r === 'landed') {
+          landed()
           if (i + 1 >= chunks.length) {
             // it was the last request: the upload is complete although its answer was lost
+            unresolved_.delete(job.id)
+            setProblem(undefined)
             setRunning(false)
-            setResumeAt(0)
+            setResumeAt(undefined)
             toast(
               'success',
               `${done.added} rows added to the job (the last answer was lost, the job was checked).`,
@@ -233,30 +389,36 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
             router.refresh()
             return
           }
-          setProgress({ sent: sent + chunks[i]!.length, total, ...done })
           return halt(
-            `${head} had an unknown outcome, and the job was checked: it DID land (its rows are stored). Continue from request ${i + 2}; do not re-send request ${i + 1}.`,
+            `${head} had an unknown outcome, and the job was watched: it DID land (its rows are stored). Continue from request ${i + 2}; do not re-send request ${i + 1}.`,
             i + 1,
           )
         }
-        if (verdict === 'login') {
-          router.replace('/login?error=expired')
-          router.refresh()
-          return
-        }
         return halt(
-          `${head} had an unknown outcome. ${verdict.stop} Do not re-send the file until you know what the job holds.`,
+          `${head} had an unknown outcome. The job was watched for ${Math.round(timing.settleMs / 1000)} s: nothing was published and no other upload held it. You can retry from request ${i + 1} (the job is checked again first, and the backend refuses it while an upload still runs).`,
           i,
         )
       }
       const appended = appendedSchema.safeParse(result.data)
-      sent += chunks[i]!.length
+      const expectedAfter = base.current + sent + chunks[i]!.length
+      if (appended.success && appended.data.rowsTotal !== expectedAfter) {
+        // someone else appended meanwhile: stop before anything else is added
+        landed()
+        return halt(
+          `The job now holds ${appended.data.rowsTotal} rows but this upload expected ${expectedAfter}. Someone else added rows at the same time, so nothing more is sent from here. Check the job's rows, and cancel the job if they are not what you expect.`,
+          i + 1,
+          { lock: true },
+        )
+      }
       done.added += appended.success ? appended.data.rowsAdded : chunks[i]!.length
       done.duplicates += appended.success ? appended.data.duplicates : 0
+      sent += chunks[i]!.length
       setProgress({ sent, total, ...done })
     }
+    unresolved_.delete(job.id)
+    setProblem(undefined)
     setRunning(false)
-    setResumeAt(0)
+    setResumeAt(undefined)
     toast('success', `${done.added} rows added to the job.`)
     setPrepared(undefined)
     router.refresh()
@@ -300,7 +462,7 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
                 {f.required ? ' *' : ''}
                 <select
                   value={prepared.map[f.key] ?? -1}
-                  disabled={running || resumeAt > 0}
+                  disabled={running || resumeAt !== undefined}
                   onChange={(e) =>
                     setPrepared({
                       ...prepared,
@@ -346,7 +508,7 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
                     <input
                       type="checkbox"
                       checked={skipInvalid}
-                      disabled={running || resumeAt > 0}
+                      disabled={running || resumeAt !== undefined}
                       onChange={(e) => setSkipInvalid(e.target.checked)}
                     />
                     Skip the {built.invalid.length} rows with errors and add only the{' '}
@@ -381,10 +543,10 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
             <button
               type="button"
               className="btn btn-primary"
-              disabled={blocked || running}
-              onClick={() => void upload(resumeAt)}
+              disabled={blocked || running || locked}
+              onClick={() => void upload(resumeAt ?? 0, resumeAt !== undefined)}
             >
-              {resumeAt > 0
+              {resumeAt !== undefined
                 ? `Retry from request ${resumeAt + 1}`
                 : `Add ${built.sendable.length} rows to the job`}
             </button>
@@ -410,6 +572,19 @@ export function JobUpload({ job, firstIds }: { job: ImportJob; firstIds?: readon
               ? ` ${progress.duplicates} were flagged as duplicates of earlier rows in this job.`
               : ''}
           </p>
+        </div>
+      ) : null}
+      {waiting ? (
+        <div className="stack">
+          <p role="status">
+            Waiting to learn whether request {waiting.request + 1} reached the job:{' '}
+            {Math.round(waiting.elapsed / 1000)} s so far, row count unchanged for{' '}
+            {Math.round(waiting.unchanged / 1000)} of {Math.round(timing.settleMs / 1000)} s.
+            Nothing is sent while waiting.
+          </p>
+          <button type="button" className="btn" onClick={() => (stop.current = true)}>
+            Stop waiting
+          </button>
         </div>
       ) : null}
     </section>

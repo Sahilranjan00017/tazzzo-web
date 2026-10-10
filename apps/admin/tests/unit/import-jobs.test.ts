@@ -16,6 +16,7 @@ import {
   effectiveVerdict,
   isCorrectable,
   isDefiniteFailure,
+  uploadTiming,
   isTerminal,
   isWorking,
   jobActions,
@@ -375,9 +376,35 @@ describe('request sizing and failure classes', () => {
     expect(JSON.stringify(wide[0]).length).toBeLessThan(CHUNK_MAX_BYTES)
   })
   it('only a 4xx refusal proves a request stored nothing; network, 5xx and timeouts are ambiguous', () => {
-    for (const s of [400, 403, 404, 409, 413, 415, 422, 429])
+    for (const s of [400, 403, 404, 413, 415, 422, 429])
       expect(isDefiniteFailure({ status: s }), String(s)).toBe(true)
-    for (const s of [0, 500, 502, 503, 504, 418, 302])
+    // 409 is NOT definite on the rows endpoint: IMPORT_JOB_STATE also means "another upload holds the append lock"
+    for (const s of [0, 409, 500, 502, 503, 504, 418, 302])
       expect(isDefiniteFailure({ status: s }), String(s)).toBe(false)
+  })
+})
+
+describe('upload wait timing', () => {
+  it('defaults to the long, conservative windows; test overrides must be whole milliseconds in range', () => {
+    const keys = ['POLL_MS', 'SETTLE_MS', 'MAXWAIT_MS'].map((k) => `NEXT_PUBLIC_IMPORT_UPLOAD_${k}`)
+    const saved = keys.map((k) => process.env[k])
+    try {
+      for (const k of keys) delete process.env[k]
+      expect(uploadTiming()).toEqual({ pollMs: 5_000, settleMs: 90_000, maxWaitMs: 16 * 60_000 })
+      process.env[keys[0]!] = '1000'
+      process.env[keys[1]!] = '6000'
+      process.env[keys[2]!] = '25000'
+      expect(uploadTiming()).toEqual({ pollMs: 1_000, settleMs: 6_000, maxWaitMs: 25_000 })
+      process.env[keys[0]!] = 'abc'
+      process.env[keys[1]!] = '-5'
+      process.env[keys[2]!] = '999999999999'
+      expect(uploadTiming()).toEqual({ pollMs: 5_000, settleMs: 90_000, maxWaitMs: 16 * 60_000 })
+      // the 60 s BFF timeout must be inside the default quiet window
+      expect(uploadTiming().settleMs).toBeGreaterThan(60_000)
+    } finally {
+      keys.forEach((k, i) =>
+        saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i]),
+      )
+    }
   })
 })
