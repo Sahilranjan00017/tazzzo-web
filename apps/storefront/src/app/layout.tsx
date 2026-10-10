@@ -83,6 +83,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   </span>
                 )}
               </Link>
+              {signedIn && (
+                <Link href="/orders" data-testid="orders-link">
+                  Orders
+                </Link>
+              )}
               {signedIn ? (
                 <Link href="/account" data-testid="account-link">
                   Your account

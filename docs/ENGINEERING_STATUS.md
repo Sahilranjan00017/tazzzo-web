@@ -1,14 +1,14 @@
 # Engineering status
 
-| Area                                                | State       | Record                                                                                                                                                                         |
-| --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28                                                                                    |
-| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97                                                                             |
-| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716                                                                        |
-| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                                                                                          |
-| CMS business modules                                | NOT STARTED |                                                                                                                                                                                |
-| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                                                                                        |
-| Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; customer cart (S2); delivery location, addresses and slots (S3); see README |
+| Area                                                | State       | Record                                                                                                                                                                                                                                             |
+| --------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W1 CMS foundation scaffold (`apps/admin`)           | COMPLETE    | PR #1, squash `ddcec0ac3be4a806f66bb8c61e849c8164015c01`, merged-main CI 37102719951, 28/28                                                                                                                                                        |
+| W2 Google OIDC + server-side CMS session + `/me`    | COMPLETE    | PR #2, squash `85b1cfc664a622b1eb2cb08649fd526321badbd5`, merged-main CI 37111882071, 67 + 30 = 97                                                                                                                                                 |
+| W3 narrow BFF mutation layer + auth/audit hardening | COMPLETE    | PR #3, merged 2026-10-03, squash `e1a105619b09b431bd4c47c29ec16b6042412bb6`, merged-main CI 37114859716                                                                                                                                            |
+| W4 CMS shell (nav, roles, toasts, dialogs, states)  | IN REVIEW   | Profile & access page is BACKEND_CONNECTED (`/me`); every other module is NOT STARTED                                                                                                                                                              |
+| CMS business modules                                | NOT STARTED |                                                                                                                                                                                                                                                    |
+| Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                                                                                                                                                            |
+| Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; customer cart (S2); delivery location, addresses and slots (S3); checkout review, COD order placement, confirmation and Orders (S4); see README |
 
 **Storefront cart (S2, stacked on S1 = PR #29):** the customer cart on the existing backend (`/v1/customer/cart*`): typed client
 (`server/backend/cart.ts`), BFF routes `/api/cart/{add,update,remove,clear}` + `GET /api/cart` (S1 CSRF guard, strict bodies, canonical
@@ -25,6 +25,17 @@ mirror `AddressService`, `Idempotency-Key` on create, `If-Match: "address-<n>"` 
 accepted). Slots: reusable `SlotPicker` + `/checkout/delivery`; the backend takes a slot only when the ORDER is placed (`deliverySlotId`), so the
 validated address + slot are kept in a sealed 30-minute cookie for S4 and nothing is reserved. Not done: payment/order placement (S4), default-address
 auto-selection, lat/lng. Details: `apps/storefront/README.md` (Delivery location, addresses and slots).
+
+**Storefront checkout and orders (S4, stacked on S3):** the order step on the existing backend. `/checkout` renders the backend's checkout QUOTE
+(`POST /v1/customer/checkout/quote`: `{addressId}`, `If-Match: "cart-<n>"`, `Idempotency-Key`) on every request, with the cart, address and slot re-read;
+`POST /api/orders` `{quoteId, cartVersion, addressId, slotId}` places the Cash on Delivery order (`POST /v1/customer/orders`, slot from the sealed choice, nothing
+priced by the browser); `/orders/[id]?placed=1` is the confirmation; `/orders` and `/orders/[id]` read the caller's orders (cursor paged, ids checked against the backend
+grammar, ownership by the bearer token only, no-store). **The backend has no `Idempotency-Key` on placement** (`(customer, quoteId)` is unique): the attempt identity is the
+quote, whose creation key is derived from a seed in the sealed checkout cookie + cart version + address and replaced only when a quote ends definitively (expired, price or
+stock changed), never on an unknown outcome; a retry after "status unknown" re-places the same quote and can only return the same order. Closed error vocabulary (stock, price
+-> re-confirmation, slot full, unserviceable, cart changed, rate limit, 5xx -> "check Orders"); Cancel is offered only where `STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS` mirrors a
+backend window (default 0 = closed) and refusals read gracefully. The backend adds no delivery fee/tax/tip, so none is shown. Not done: support cases UI
+(`/v1/customer/support/*` exists), payment methods other than COD (none exist), reorder. Details: `apps/storefront/README.md` (Checkout, Cash on Delivery orders and Orders).
 
 **W3 (merged, PR #3):** a narrow BFF mutation layer (`src/server/bff/mutation.ts`). There is no generic proxy: every route
 declares its one backend path, method, strict request schema, response schema and header allowlist. Each mutation

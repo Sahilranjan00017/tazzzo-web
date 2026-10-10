@@ -18,6 +18,7 @@ describe('parseServerEnv', () => {
       media: { base: 'https://cdn.tazzzo.test/assets', origin: 'https://cdn.tazzzo.test' },
       caller: null,
       sessionKeys: [Buffer.from('q'.repeat(43) + '=', 'base64')],
+      orderCancelWindowSeconds: 0,
     })
   })
 
@@ -193,6 +194,32 @@ describe('customer session key', () => {
     const rest = { ...valid, STOREFRONT_SESSION_SECRET: undefined }
     for (const NODE_ENV of ['development', 'test']) {
       expect(parseServerEnv({ ...rest, NODE_ENV }).sessionKeys).toBeNull()
+    }
+  })
+
+  it('mirrors the backend customer cancellation window: unset or empty is 0 (closed), 0..604800 is accepted', () => {
+    expect(parseServerEnv(valid).orderCancelWindowSeconds).toBe(0)
+    expect(
+      parseServerEnv({ ...valid, STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS: '' })
+        .orderCancelWindowSeconds,
+    ).toBe(0)
+    for (const [raw, seconds] of [
+      ['0', 0],
+      ['900', 900],
+      ['604800', 604800],
+    ] as const) {
+      expect(
+        parseServerEnv({ ...valid, STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS: raw })
+          .orderCancelWindowSeconds,
+      ).toBe(seconds)
+    }
+  })
+
+  it('refuses a cancellation window the backend would refuse, naming only the variable', () => {
+    for (const bad of ['604801', '-1', '1.5', '10m', '9999999', ' 5']) {
+      expect(() =>
+        parseServerEnv({ ...valid, STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS: bad }),
+      ).toThrow('invalid server environment: STOREFRONT_ORDER_CANCEL_WINDOW_SECONDS')
     }
   })
 

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { z } from 'zod'
 import { serverEnv } from '@/server/env'
+import { isQuoteId } from '@/lib/checkout/model'
 import { isAddressId, isPin, isSlotId } from '@/lib/location/validation'
 import { seal, unseal, type SealPurpose } from '@/server/session/seal'
 
@@ -15,7 +16,8 @@ import { seal, unseal, type SealPurpose } from '@/server/session/seal'
  *   code is valid;
  * - location: the delivery location (PIN, whether it is serviceable and, for a signed-in customer who picked a saved
  *   address, that address's id with the customer it belongs to), same attributes, 90 days. Signed-out visitors have one too;
- * - checkout: the delivery address and slot a signed-in customer picked, kept for the order step (30 minutes).
+ * - checkout: the delivery address and slot a signed-in customer picked, kept for the order step (30 minutes), and the
+ *   random `quoteKey` of the checkout attempt (the seed of the quote's `Idempotency-Key`, see `server/checkout/key.ts`).
  * Plain-http local development cannot use `__Host-`/`Secure` in every browser, so it uses separate `*_dev` names
  * without `Secure`; nothing else is relaxed (the admin app follows the same rule).
  */
@@ -82,6 +84,14 @@ export interface CheckoutChoice {
   customerId: string
   addressId: string
   slotId: string
+  /** The checkout attempt's secret seed (32 random bytes, base64url); see `deriveQuoteKey`. */
+  quoteKey: string
+  /**
+   * The quote whose placement ended with an UNKNOWN outcome (it may have been placed). A repeat for exactly this quote is
+   * the customer's retry of that attempt, not a new decision, so it skips the "cart still as reviewed" check (the order,
+   * if it exists, has already emptied the cart) and asks the backend, which can only return that one order.
+   */
+  placing?: string
   expiresAt: number
 }
 
@@ -89,6 +99,8 @@ const checkoutSchema = z.object({
   customerId: z.string().min(1).max(128),
   addressId: z.string().refine(isAddressId),
   slotId: z.string().refine(isSlotId),
+  quoteKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  placing: z.string().refine(isQuoteId).optional(),
   expiresAt: z.number().int(),
 })
 
@@ -217,16 +229,58 @@ export function readCheckoutChoice(now = Date.now()): Promise<CheckoutChoice | n
   return read('checkout', 'checkout', checkoutSchema, now)
 }
 
+/** Saving a delivery choice starts a NEW checkout attempt: it gets a fresh `quoteKey` (unless one is given). */
 export async function writeCheckoutChoice(
-  choice: Omit<CheckoutChoice, 'expiresAt'>,
+  choice: Omit<CheckoutChoice, 'expiresAt' | 'quoteKey'> & { quoteKey?: string },
   now = Date.now(),
 ): Promise<void> {
   const keys = serverEnv().sessionKeys
   if (!keys) throw new Error('customer sessions are not configured')
   const expiresAt = now + CHECKOUT_CHOICE_MAX_AGE_SECONDS * 1000
-  const sealed = seal('checkout', { ...choice, expiresAt }, expiresAt, keys)
+  const sealed = seal(
+    'checkout',
+    { ...choice, quoteKey: choice.quoteKey ?? newCsrfToken(), expiresAt },
+    expiresAt,
+    keys,
+  )
   const p = policy()
   ;(await cookies()).set(p.checkout, sealed, attributes(p.secure, CHECKOUT_CHOICE_MAX_AGE_SECONDS))
+}
+
+/**
+ * A definitive end of the current quote (it expired, or the price or stock moved under it): the next review must get a
+ * NEW quote, which needs a new `Idempotency-Key`, which needs a new seed. The choice and its expiry are unchanged, and
+ * no placement is pending any more. Route handlers only.
+ */
+export async function rotateCheckoutQuoteKey(
+  choice: CheckoutChoice,
+  now = Date.now(),
+): Promise<void> {
+  await rewriteCheckoutChoice({ ...choice, quoteKey: newCsrfToken(), placing: undefined }, now)
+}
+
+/** Records (or, with `undefined`, forgets) the quote whose placement is unknown. The choice and its expiry are unchanged. */
+export async function setCheckoutPlacing(
+  choice: CheckoutChoice,
+  placing: string | undefined,
+  now = Date.now(),
+): Promise<void> {
+  if (choice.placing === placing) return
+  await rewriteCheckoutChoice({ ...choice, placing }, now)
+}
+
+async function rewriteCheckoutChoice(choice: CheckoutChoice, now: number): Promise<void> {
+  const keys = serverEnv().sessionKeys
+  if (!keys) throw new Error('customer sessions are not configured')
+  const { placing, ...rest } = choice
+  const sealed = seal(
+    'checkout',
+    placing === undefined ? rest : { ...rest, placing },
+    choice.expiresAt,
+    keys,
+  )
+  const p = policy()
+  ;(await cookies()).set(p.checkout, sealed, attributes(p.secure, (choice.expiresAt - now) / 1000))
 }
 
 export async function clearCheckoutChoice(): Promise<void> {

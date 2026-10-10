@@ -300,3 +300,53 @@ describe('home degradation log', () => {
     expect(line).not.toMatch(/TZP|\?|http/)
   })
 })
+
+describe('sendJson: rejected checkout lines', () => {
+  async function send(response: Response) {
+    fetchMock.mockResolvedValueOnce(response)
+    const { sendJson } = await import('@/server/backend/client')
+    return sendJson('POST', '/v1/customer/checkout/quote', { bearer: 'AT.x', body: {} })
+  }
+
+  it('reads the bounded per-line rejections of a refused quote, and only well-formed ones', async () => {
+    const items = [
+      { skuId: 'TZP-1001', reason: 'OUT_OF_STOCK' },
+      { skuId: 'TZP-Mix-7', reason: 'INSUFFICIENT_STOCK' },
+      { skuId: '../x', reason: 'OUT_OF_STOCK' },
+      { skuId: 'TZP-1002', reason: 'out of stock, call 555' },
+      { skuId: 'TZP-1003' },
+      null,
+      'TZP-1004',
+    ]
+    const out = await send(
+      new Response(JSON.stringify({ code: 'CHECKOUT_ITEM_UNAVAILABLE', message: 'x', items }), {
+        status: 409,
+      }),
+    )
+    expect(out).toEqual({
+      ok: false,
+      kind: 'unavailable',
+      code: 'CHECKOUT_ITEM_UNAVAILABLE',
+      retryAfterSeconds: null,
+      items: [
+        { skuId: 'TZP-1001', reason: 'OUT_OF_STOCK' },
+        { skuId: 'TZP-Mix-7', reason: 'INSUFFICIENT_STOCK' },
+      ],
+    })
+  })
+
+  it('caps the list at 50 and ignores a non-array', async () => {
+    const many = Array.from({ length: 80 }, (_, i) => ({
+      skuId: `TZP-${i + 1000}`,
+      reason: 'OUT_OF_STOCK',
+    }))
+    const capped = await send(
+      new Response(JSON.stringify({ code: 'X_Y', items: many }), { status: 409 }),
+    )
+    expect(capped.ok === false && capped.items).toHaveLength(50)
+    const odd = await send(
+      new Response(JSON.stringify({ code: 'X_Y', items: 'nope' }), { status: 409 }),
+    )
+    expect(odd).toEqual({ ok: false, kind: 'unavailable', code: 'X_Y', retryAfterSeconds: null })
+  })
+})

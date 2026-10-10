@@ -1,4 +1,5 @@
 import 'server-only'
+import { PRODUCT_ID } from '@/lib/ids'
 import { serverEnv } from '@/server/env'
 
 /**
@@ -155,13 +156,21 @@ export type SendResult =
       kind: 'unauthenticated' | 'rejected' | 'rate_limited' | 'unavailable'
       code: string | null
       retryAfterSeconds: number | null
+      /** The per-line rejections of a refused checkout quote (`CHECKOUT_ITEM_UNAVAILABLE`), otherwise absent. */
+      items?: RejectedItem[]
     }
+
+/** One cart line a checkout quote refused, with the backend's closed reason code. */
+export interface RejectedItem {
+  skuId: string
+  reason: string
+}
 
 const SEND_RETRY_AFTER_MAX_S = 3_600
 const ERROR_CODE = /^[A-Z][A-Z_]{0,39}$/
 
 /**
- * Customer-session calls (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`; `ifMatch` sets the cart's or an address's `If-Match`, `idempotencyKey` an address create's `Idempotency-Key`): `/v1/auth/**` and
+ * Customer-session calls (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`; `ifMatch` sets the cart's or an address's `If-Match`, `idempotencyKey` an address create's or a checkout quote's `Idempotency-Key`): `/v1/auth/**` and
  * `/v1/customer/**`, never cached, never retried. Same transport rules as
  * `getJson` (timeout, redirects refused, trusted-caller headers, only `TAZZZO_API_BASE_URL`), plus an optional bearer
  * access token. No client address or any incoming header is forwarded: the backend takes the visitor address only from
@@ -206,7 +215,7 @@ export async function sendJson(
   console.warn(
     `storefront_backend_error path=${routeLabel(path)} status=${response.status} request_id=${requestId(response)}`,
   )
-  const code = await errorCode(response)
+  const { code, items } = await errorBody(response)
   const retry = Number(response.headers.get('retry-after'))
   const retryAfterSeconds =
     Number.isFinite(retry) && retry > 0 ? Math.min(Math.ceil(retry), SEND_RETRY_AFTER_MAX_S) : null
@@ -223,14 +232,42 @@ export async function sendJson(
   if (response.status === 400 || response.status === 422) {
     return { ok: false, kind: 'rejected', code, retryAfterSeconds: null }
   }
-  return { ok: false, kind: 'unavailable', code, retryAfterSeconds }
+  return {
+    ok: false,
+    kind: 'unavailable',
+    code,
+    retryAfterSeconds,
+    ...(items.length > 0 ? { items } : {}),
+  }
 }
 
-async function errorCode(response: Response): Promise<string | null> {
+const MAX_REJECTED_ITEMS = 50
+
+/** The backend's public error `code` and, when it sent them, the bounded per-line rejections. Nothing else is read. */
+async function errorBody(
+  response: Response,
+): Promise<{ code: string | null; items: RejectedItem[] }> {
   try {
-    const body = (await response.json()) as { code?: unknown }
-    return typeof body.code === 'string' && ERROR_CODE.test(body.code) ? body.code : null
+    const body = (await response.json()) as { code?: unknown; items?: unknown }
+    const code = typeof body.code === 'string' && ERROR_CODE.test(body.code) ? body.code : null
+    const items: RejectedItem[] = []
+    if (Array.isArray(body.items)) {
+      for (const entry of body.items.slice(0, MAX_REJECTED_ITEMS) as unknown[]) {
+        const row = entry as { skuId?: unknown; reason?: unknown } | null
+        if (
+          row !== null &&
+          typeof row === 'object' &&
+          typeof row.skuId === 'string' &&
+          PRODUCT_ID.test(row.skuId) &&
+          typeof row.reason === 'string' &&
+          ERROR_CODE.test(row.reason)
+        ) {
+          items.push({ skuId: row.skuId, reason: row.reason })
+        }
+      }
+    }
+    return { code, items }
   } catch {
-    return null
+    return { code: null, items: [] }
   }
 }
