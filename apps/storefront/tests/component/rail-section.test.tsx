@@ -18,23 +18,26 @@ beforeAll(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('RailSection (server component: rail ids -> product reads -> cards)', () => {
-  it('skips missing products silently and keeps the rail order', async () => {
+  it('one batch read: skips missing products silently and keeps the rail order', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        const id = url.split('/').pop()!
-        if (id === 'TZP-404') return new Response('{}', { status: 404 })
-        return new Response(
-          JSON.stringify({
+    const fetchMock = vi.fn(async (url: string) => {
+      const ids = new URL(url).searchParams.get('ids')!.split(',')
+      const found = ids.filter((id) => id !== 'TZP-404')
+      return new Response(
+        JSON.stringify({
+          resolvedReleaseId: 'R1',
+          items: found.map((id) => ({
             productId: id,
             name: `Name ${id}`,
             thumbnailUrl: `https://cdn.tazzzo.test/${id}.png`,
-          }),
-          { status: 200 },
-        )
-      }),
-    )
+          })),
+          missing: ids.filter((id) => id === 'TZP-404'),
+          requestId: 'r',
+        }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
     const { RailSection } = await import('@/app/_sections/RailSection')
     render(
       await RailSection({
@@ -49,5 +52,21 @@ describe('RailSection (server component: rail ids -> product reads -> cards)', (
     const cards = within(screen.getByRole('region', { name: 'Picks' })).getAllByRole('article')
     expect(cards.map((c) => c.dataset.productId)).toEqual(['TZP-3', 'TZP-1'])
     expect(screen.queryByText(/TZP-404/)).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]![0]).toContain('/v1/products:batch?ids=TZP-3,TZP-404,TZP-1')
+  })
+
+  it('renders no rail (and no heading) when the batch read fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { RailSection } = await import('@/app/_sections/RailSection')
+    const { container } = render(
+      await RailSection({
+        block: { type: 'PRODUCT_RAIL', blockId: 'R2', title: 'Down', ids: ['TZP-3', 'TZP-1'] },
+      }),
+    )
+    expect(container).toBeEmptyDOMElement()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -190,18 +190,18 @@ describe('public reads carry ?pin= (a canonical PIN only)', () => {
       'GET /v1/products/TZP-1001',
     ])
   })
-  it('rails, category lists and search', async () => {
+  it('rails (one batch read), category lists and search', async () => {
     const m = await load()
     fetchMock.mockImplementation(async (u) =>
-      String(u).includes('/v1/products/')
-        ? reply(200, okProduct)
+      String(u).includes('/v1/products:batch')
+        ? reply(200, { resolvedReleaseId: 'R1', items: [okProduct], missing: [], requestId: 'r' })
         : reply(200, { items: [okProduct], hasMore: false }),
     )
     await m.catalog.getRailProducts(['TZP-1001'], '560001')
     await m.catalog.getCategoryProducts('TZC-000002', null, '560001')
     await m.catalog.searchProducts('rice', null, '560001')
     expect(urls()).toEqual([
-      'GET /v1/products/TZP-1001?pin=560001',
+      'GET /v1/products:batch?ids=TZP-1001&pin=560001',
       'GET /v1/categories/TZC-000002/products?page_size=24&pin=560001',
       'GET /v1/search?q=rice&page_size=24&pin=560001',
     ])
