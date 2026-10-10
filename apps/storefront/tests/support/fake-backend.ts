@@ -16,6 +16,11 @@ import { deflateSync } from 'node:zlib'
  * - the customer auth contract (OtpController, SessionController, CustomerProfileController): OTP request/verify,
  *   session establish, refresh with rotation (the old refresh token dies), logout (bearer) and `GET /v1/customer/profile`,
  *   with the backend's public error codes. Test phones/codes: see `handleAuth`. Test tokens only, never real values.
+ * - the customer cart contract (CartController): `GET/DELETE /v1/customer/cart`, `PUT/DELETE /v1/customer/cart/items/{sku}`,
+ *   with the backend's rules: `If-Match: "cart-<version>"` required (428) and compared (412), `quantity` an integer
+ *   1..20, 50 distinct lines (409 CART_ITEM_LIMIT_REACHED), unknown/invalid sku 404, every answer the full enriched cart.
+ *   With no `addressId` the backend knows no location, so every line is `LOCATION_REQUIRED` with stock `UNKNOWN`;
+ *   `POST /__control/cart` switches a sku to the answers a located cart gives (out of stock, price changed, ...).
  * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
@@ -30,6 +35,8 @@ export interface RecordedRequest {
   bearer: boolean
   /** `X-Forwarded-For` as received: the storefront must never send one. */
   forwardedFor: string | null
+  /** `If-Match` as received (the cart's version precondition), or null. */
+  ifMatch: string | null
 }
 
 interface FakeSession {
@@ -40,6 +47,22 @@ interface FakeSession {
 }
 
 type Audience = 'APP_ONLY' | 'WEB_ONLY' | 'BOTH'
+
+/** How the fake enriches a cart line (`/__control/cart?sku=..&mode=..`). `located` = as if a delivery address were known. */
+type CartMode =
+  | 'default'
+  | 'located'
+  | 'out_of_stock'
+  | 'insufficient'
+  | 'unserviceable'
+  | 'unavailable'
+  | 'price_changed'
+
+interface FakeCart {
+  version: number
+  lines: Array<{ sku: string; quantity: number; addedAt: string; updatedAt: string }>
+  freshness: 'FRESH' | 'REVALIDATE'
+}
 
 export class FakeBackend {
   url = ''
@@ -53,6 +76,10 @@ export class FakeBackend {
   private readonly challenges = new Map<string, { phone: string; wrong: number }>()
   private readonly grants = new Set<string>()
   private readonly sessions = new Map<string, FakeSession>()
+  private cart: FakeCart = { version: 0, lines: [], freshness: 'FRESH' }
+  private readonly cartModes = new Map<string, CartMode>()
+  private readonly cartPrices = new Map<string, number>()
+  private cartDown = false
   private api?: Server
   private media?: Server | HttpsServer
 
@@ -223,6 +250,171 @@ export class FakeBackend {
     }
   }
 
+  /** Products reachable by id only (not in listings or search): a known out-of-stock product. */
+  private catalog(): Record<string, Record<string, unknown>> {
+    return {
+      ...this.products(),
+      'TZP-2001': {
+        skuId: 'TZP-2001',
+        productId: 'TZP-2001',
+        name: 'Sold Out Ghee 500 ml',
+        brandName: null,
+        packSize: '500 ml',
+        sellingPricePaise: 32000,
+        mrpPaise: 35000,
+        stockState: 'OUT_OF_STOCK',
+        maxOrderQuantity: 0,
+        minimumOrderQuantity: 1,
+        buyable: false,
+      },
+      // Mixed case is part of the canonical grammar and must round-trip untouched.
+      'TZP-Mix-7': {
+        skuId: 'TZP-Mix-7',
+        productId: 'TZP-Mix-7',
+        name: 'Mixed Case Tea',
+        brandName: null,
+        packSize: null,
+        sellingPricePaise: 12000,
+        mrpPaise: 12000,
+        stockState: 'UNKNOWN',
+        maxOrderQuantity: 0,
+        minimumOrderQuantity: 1,
+        buyable: false,
+      },
+    }
+  }
+
+  private setLine(sku: string, quantity: number): void {
+    const now = new Date().toISOString()
+    const line = this.cart.lines.find((l) => l.sku === sku)
+    if (line) {
+      line.quantity = quantity
+      line.updatedAt = now
+    } else this.cart.lines.push({ sku, quantity, addedAt: now, updatedAt: now })
+    this.cart.version += 1
+  }
+
+  /** The cart as the backend presents it (`CartResponseDto`), enriched per line by the sku's mode. */
+  private presentCart(): Record<string, unknown> {
+    const catalog = this.catalog()
+    let subtotal = 0
+    let itemCount = 0
+    const items = this.cart.lines.map((line) => {
+      const mode = this.cartModes.get(line.sku) ?? 'default'
+      const card = catalog[line.sku]
+      const unit = this.cartPrices.get(line.sku) ?? (card?.sellingPricePaise as number | undefined)
+      itemCount += line.quantity
+      const base = {
+        skuId: line.sku,
+        quantity: line.quantity,
+        addedAt: line.addedAt,
+        updatedAt: line.updatedAt,
+      }
+      if (mode === 'unavailable' || !card || unit === undefined) {
+        return {
+          ...base,
+          product: null,
+          price: null,
+          availability: { stockState: 'UNKNOWN', maxOrderQuantity: 0, serviceable: null },
+          lineTotalPaise: null,
+          buyable: false,
+          issues: ['PRODUCT_UNAVAILABLE'],
+        }
+      }
+      const lineTotal = unit * line.quantity
+      subtotal += lineTotal
+      const located = mode !== 'default'
+      const stock = mode === 'out_of_stock' ? 'OUT_OF_STOCK' : located ? 'IN_STOCK' : 'UNKNOWN'
+      const maxOrder = mode === 'out_of_stock' ? 0 : mode === 'insufficient' ? 2 : located ? 10 : 0
+      const issues: string[] = []
+      if (!located) issues.push('LOCATION_REQUIRED')
+      if (mode === 'unserviceable') issues.push('UNSERVICEABLE')
+      if (mode === 'out_of_stock') issues.push('OUT_OF_STOCK')
+      if (mode === 'insufficient' && line.quantity > 2) issues.push('INSUFFICIENT_STOCK')
+      if (mode === 'price_changed') issues.push('PRICE_CHANGED')
+      return {
+        ...base,
+        product: {
+          title: card.name,
+          brandCode: card.brandName ? 'TZB-1' : null,
+          imageUrl: card.thumbnailUrl ?? null,
+        },
+        price: { unitPricePaise: unit, mrpPaise: card.mrpPaise ?? null, currency: 'INR' },
+        availability: {
+          stockState: stock,
+          maxOrderQuantity: maxOrder,
+          serviceable: mode === 'unserviceable' ? false : located ? true : null,
+        },
+        lineTotalPaise: lineTotal,
+        buyable: issues.length === 0 || (issues.length === 1 && issues[0] === 'PRICE_CHANGED'),
+        issues,
+      }
+    })
+    return {
+      version: this.cart.version,
+      items,
+      itemCount,
+      distinctItemCount: items.length,
+      subtotalPaise: subtotal,
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+      freshness: this.cart.lines.length === 0 ? 'FRESH' : this.cart.freshness,
+      requestId: 'req_cart',
+    }
+  }
+
+  /** `/v1/customer/cart**` (CartController + CartExceptionHandler): bearer required; flat `{code,message,requestId}` errors. */
+  private handleCart(
+    req: IncomingMessage,
+    path: string,
+    body: unknown,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+  ): void {
+    if (this.cartDown) return fail(503, 'SERVICE_UNAVAILABLE')
+    const reply = () => out(200, this.presentCart(), { etag: `"cart-${this.cart.version}"` })
+    const header = req.headers['if-match']
+    const mutating = req.method !== 'GET'
+    let expected = -1
+    if (mutating) {
+      if (typeof header !== 'string' || header.trim() === '')
+        return fail(428, 'PRECONDITION_REQUIRED')
+      const m = /^"?cart-([0-9]{1,15})"?$/.exec(header.trim())
+      if (!m) return fail(400, 'INVALID_REQUEST')
+      expected = Number(m[1])
+    }
+    const item = /^\/v1\/customer\/cart\/items\/([^/]+)$/.exec(path)
+    if (path === '/v1/customer/cart' && req.method === 'GET') return reply()
+    if (path === '/v1/customer/cart' && req.method === 'DELETE') {
+      if (expected !== this.cart.version) return fail(412, 'PRECONDITION_FAILED')
+      this.cart.lines = []
+      this.cart.version += 1
+      return reply()
+    }
+    if (!item) return fail(404, 'NOT_FOUND')
+    const sku = decodeURIComponent(item[1] ?? '')
+    if (!/^TZP-[A-Za-z0-9-]{1,40}$/.test(sku) || !this.catalog()[sku]) return fail(404, 'NOT_FOUND')
+    if (req.method === 'PUT') {
+      const q = (body as { quantity?: unknown } | null)?.quantity
+      if (typeof q !== 'number' || !Number.isInteger(q) || q < 1 || q > 20) {
+        return fail(400, 'INVALID_REQUEST')
+      }
+      if (expected !== this.cart.version) return fail(412, 'PRECONDITION_FAILED')
+      if (!this.cart.lines.some((l) => l.sku === sku) && this.cart.lines.length >= 50) {
+        return fail(409, 'CART_ITEM_LIMIT_REACHED')
+      }
+      this.setLine(sku, q)
+      return reply()
+    }
+    if (req.method === 'DELETE') {
+      if (expected !== this.cart.version) return fail(412, 'PRECONDITION_FAILED')
+      if (!this.cart.lines.some((l) => l.sku === sku)) return fail(404, 'NOT_FOUND')
+      this.cart.lines = this.cart.lines.filter((l) => l.sku !== sku)
+      this.cart.version += 1
+      return reply()
+    }
+    return fail(405, 'INVALID_REQUEST')
+  }
+
   /** Visible nodes; TZG-000004 is two levels deep (only `GET /v1/categories/{id}` can name it). */
   private nodes: Record<string, { name: string; children: string[] }> = {
     'TZS-000001': { name: 'Staples', children: ['TZC-000002'] },
@@ -263,6 +455,28 @@ export class FakeBackend {
           logoutCount: this.logoutCount,
         })
       }
+      if (url.pathname === '/__control/cart') {
+        if (req.method === 'POST') {
+          const q = url.searchParams
+          if (q.get('reset') === '1') {
+            this.cart = { version: 0, lines: [], freshness: 'FRESH' }
+            this.cartModes.clear()
+            this.cartPrices.clear()
+            this.cartDown = false
+          }
+          const sku = q.get('sku')
+          if (sku && q.get('mode')) this.cartModes.set(sku, q.get('mode') as CartMode)
+          if (sku && q.get('price')) this.cartPrices.set(sku, Number(q.get('price')))
+          if (q.get('freshness')) this.cart.freshness = q.get('freshness') as FakeCart['freshness']
+          if (q.get('down')) this.cartDown = q.get('down') === '1'
+          // Another tab changed the cart: the version moves under the caller (the next mutation is stale).
+          if (q.get('bump') === '1') this.cart.version += 1
+          // Another tab added a line.
+          const add = q.get('addLine')
+          if (add) this.setLine(add, Number(q.get('qty') ?? '1'))
+        }
+        return send(200, this.cart)
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -281,6 +495,7 @@ export class FakeBackend {
       callerSecret: header('x-tazzzo-caller-secret'),
       bearer: header('authorization') !== null,
       forwardedFor: header('x-forwarded-for'),
+      ifMatch: header('if-match'),
     })
     if (url.pathname.startsWith('/v1/auth/') || url.pathname.startsWith('/v1/customer/')) {
       return this.handleAuth(req, res, url, send)
@@ -309,7 +524,7 @@ export class FakeBackend {
 
     const product = /^\/v1\/products\/([^/]+)$/.exec(url.pathname)
     if (product) {
-      const p = this.products()[decodeURIComponent(product[1] ?? '')]
+      const p = this.catalog()[decodeURIComponent(product[1] ?? '')]
       if (!p) return error(404, 'NOT_FOUND')
       return send(
         200,
@@ -491,6 +706,10 @@ export class FakeBackend {
       res.writeHead(204, { 'cache-control': 'no-store' })
       res.end()
       return
+    }
+    if (path === '/v1/customer/cart' || path.startsWith('/v1/customer/cart/')) {
+      if (!sessionFor(bearer)) return code(401, 'UNAUTHENTICATED')
+      return this.handleCart(req, path, body, out, code)
     }
     if (req.method === 'GET' && path === '/v1/customer/profile') {
       const session = sessionFor(bearer)

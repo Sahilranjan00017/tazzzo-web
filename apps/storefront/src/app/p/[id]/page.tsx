@@ -1,10 +1,12 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { AddToCart } from '@/components/AddToCart'
 import { Price } from '@/components/Price'
 import { ProductGallery } from '@/components/ProductGallery'
 import { Unavailable } from '@/components/Unavailable'
 import { isProductId } from '@/lib/ids'
 import { getProduct } from '@/server/backend/catalog'
+import { readSession } from '@/server/session/cookies'
 
 const DESCRIPTION_MAX = 160
 
@@ -37,6 +39,7 @@ export default async function ProductPage({ params }: PageProps<'/p/[id]'>) {
   const product = await getProduct(id)
   if (product === null) notFound()
   if (product === 'unavailable') return <Unavailable what="this product" />
+  const session = await readSession()
   return (
     <article className="pdp" data-product-id={product.productId}>
       <ProductGallery images={product.images} productName={product.name} />
@@ -48,6 +51,12 @@ export default async function ProductPage({ params }: PageProps<'/p/[id]'>) {
           </p>
         )}
         <Price sellingPaise={product.sellingPricePaise} mrpPaise={product.mrpPaise} />
+        <AddToCart
+          productId={product.productId}
+          productName={product.name}
+          csrfToken={session?.csrf ?? null}
+          stockState={product.stockState}
+        />
         {product.highlights.length > 0 && (
           <ul className="pdp__highlights">
             {product.highlights.map((h, i) => (

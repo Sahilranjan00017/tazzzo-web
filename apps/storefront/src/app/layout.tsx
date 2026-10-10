@@ -3,6 +3,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { connection } from 'next/server'
 import { serverEnv } from '@/server/env'
+import { headerCartCount } from '@/server/cart/service'
 import { readSession } from '@/server/session/cookies'
 import './globals.css'
 
@@ -26,7 +27,9 @@ export function generateMetadata(): Metadata {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection()
   serverEnv()
-  const signedIn = (await readSession()) !== null
+  const session = await readSession()
+  const signedIn = session !== null
+  const cartCount = await headerCartCount(session)
   return (
     <html lang="en">
       <body>
@@ -55,6 +58,21 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <button type="submit">Search</button>
             </form>
             <nav aria-label="Account" className="account-nav">
+              <Link
+                href="/cart"
+                className="cart-link"
+                data-testid="cart-link"
+                aria-label={
+                  cartCount ? `Cart, ${cartCount} ${cartCount === 1 ? 'item' : 'items'}` : undefined
+                }
+              >
+                Cart
+                {cartCount !== null && cartCount > 0 && (
+                  <span className="cart-link__count" data-testid="cart-count" aria-hidden="true">
+                    {cartCount}
+                  </span>
+                )}
+              </Link>
               {signedIn ? (
                 <Link href="/account" data-testid="account-link">
                   Your account
