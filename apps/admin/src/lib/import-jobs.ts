@@ -444,9 +444,30 @@ export interface UploadTiming {
 const num = (v: string | undefined, fallback: number, min: number, max: number) =>
   v && /^\d{1,9}$/.test(v) && Number(v) >= min && Number(v) <= max ? Number(v) : fallback
 export function uploadTiming(): UploadTiming {
-  return {
-    pollMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_POLL_MS, 5_000, 0, 60_000),
-    settleMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_SETTLE_MS, 90_000, 0, 600_000),
-    maxWaitMs: num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_MAXWAIT_MS, 16 * 60_000, 1_000, 3_600_000),
-  }
+  // Floors protect production: a short value is ignored (the default is used) unless the test flag is set, which only the
+  // e2e configuration sets. The quiet window must outlast the BFF's 60 s timeout, and polling must not be a tight loop.
+  const test = process.env.NEXT_PUBLIC_IMPORT_UPLOAD_TEST_TIMINGS === '1'
+  const pollMs = num(process.env.NEXT_PUBLIC_IMPORT_UPLOAD_POLL_MS, 5_000, test ? 0 : 1_000, 60_000)
+  const settle = num(
+    process.env.NEXT_PUBLIC_IMPORT_UPLOAD_SETTLE_MS,
+    90_000,
+    test ? 0 : 60_000,
+    600_000,
+  )
+  const settleMs = Math.max(settle, pollMs)
+  const maxWait = num(
+    process.env.NEXT_PUBLIC_IMPORT_UPLOAD_MAXWAIT_MS,
+    16 * 60_000,
+    1_000,
+    3_600_000,
+  )
+  return { pollMs, settleMs, maxWaitMs: Math.max(maxWait, settleMs) }
+}
+
+/** A cheap fingerprint of one request's rows (count, first id, hash of all ids): "is this the same chunk?" without keeping the rows. */
+export function chunkFingerprint(rows: readonly { id?: unknown }[]): string {
+  let h = 5381
+  for (const r of rows)
+    for (const ch of String(r.id ?? '') + '\n') h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0
+  return `${rows.length}:${String(rows[0]?.id ?? '')}:${h.toString(16)}`
 }

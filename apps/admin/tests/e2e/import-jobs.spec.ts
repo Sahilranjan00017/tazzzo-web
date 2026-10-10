@@ -311,6 +311,7 @@ test('upload failures are explained without backend text and never retried by th
   page,
   request,
 }) => {
+  test.slow() // four of its five cases wait out the ambiguity window (6 s) or the maximum (25 s)
   await signInFresh(page, WRITER_SUB)
   const id = await seedJob(request, { status: 'OPEN', rows: 0 })
   const rows = csv(
@@ -759,12 +760,13 @@ test('an invalid stock filter in the address is dropped and the person is told',
 
 for (const [label, zombieMs] of [
   ['finishes inside the wait', 3_000],
-  ['outlives the wait (the retry meets the lock)', 12_000],
+  ['outlives the wait (the retry meets the lock)', 20_000],
 ] as const) {
   test(`ZOMBIE request (the BFF gave up, the backend keeps going) that ${label}: no duplicates, never "stored nothing"`, async ({
     page,
     request,
   }) => {
+    test.slow()
     await signInFresh(page, WRITER_SUB)
     const id = await seedJob(request, { status: 'OPEN', rows: 0 })
     await openJob(page, id)
@@ -817,6 +819,7 @@ test('ZOMBIE request that never finishes: the wait is bounded and the upload is 
   page,
   request,
 }) => {
+  test.slow()
   await signInFresh(page, WRITER_SUB)
   const id = await seedJob(request, { status: 'OPEN', rows: 0 })
   await openJob(page, id)

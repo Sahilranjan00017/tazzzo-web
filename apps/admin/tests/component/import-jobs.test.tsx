@@ -856,6 +856,75 @@ describe('JobUpload: waiting out an unknown outcome', () => {
     expect(posts).toHaveLength(1) // the loop noticed and stopped before request 2
   })
 
+  it('leaving mid-request that then ends ambiguously leaves the job marked unknown: a returning user must confirm, and the same rows are called out', async () => {
+    let fail504: () => void = () => undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      await new Promise<void>((r) => (fail504 = r))
+      return fail(504)
+    })
+    const user = userEvent.setup()
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await waitFor(() => expect(fail504).not.toBe(undefined))
+    first.unmount() // the page is left while the request is in flight
+    fail504()
+    await new Promise((r) => setTimeout(r, 50))
+    // same rows again: explicit confirmation, and the repeated request is named
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    const add = await screen.findByRole('button', { name: 'Add 3 rows to the job' })
+    expect(add).toBeDisabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/ended with an UNKNOWN outcome/)
+    expect(screen.getByRole('note')).toHaveTextContent(/contains that same request \(same rows\)/)
+    await user.click(screen.getByRole('checkbox'))
+    expect(add).toBeEnabled()
+  })
+
+  it('a different file after an unknown outcome still needs confirmation but is not called the same request', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      return fail(504)
+    })
+    const user = userEvent.setup()
+    const first = wrap(
+      <JobUpload timingOverride={{ ...T, maxWaitMs: 1_000 }} job={job({ rowsTotal: 0 })} />,
+    )
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await screen.findByText(/nothing was published/, undefined, slow)
+    first.unmount()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3).replaceAll('TZP-w-', 'TZP-other-')], 'other.csv', { type: 'text/csv' }),
+    )
+    expect(await screen.findByRole('button', { name: 'Add 3 rows to the job' })).toBeDisabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/UNKNOWN outcome/)
+    expect(screen.getByRole('note')).not.toHaveTextContent(/same request/)
+  })
+
+  it('announces only the start of the wait (the per-poll counter is not a live region) and moves focus off the removed Stop button', async () => {
+    const { user } = await start(['ok', { fail: 504 }])
+    const live = await screen.findByText(/Waiting to learn whether request 2 reached the job/)
+    expect(live).toHaveAttribute('role', 'status')
+    expect(live.textContent).not.toMatch(/\d+ s so far/)
+    expect(screen.getByText(/s so far, row count unchanged/)).not.toHaveAttribute('role')
+    await user.click(screen.getByRole('button', { name: 'Stop waiting' }))
+    const retry = await screen.findByRole('button', { name: 'Retry from request 2' })
+    await waitFor(() => expect(retry).toHaveFocus())
+  })
+
   it('a second mount for the same job cannot start a concurrent upload while one is running', async () => {
     let release: () => void = () => undefined
     const posts: number[] = []
@@ -879,6 +948,7 @@ describe('JobUpload: waiting out an unknown outcome', () => {
       screen.getByLabelText('CSV file'),
       new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
     )
+    await user.click(await screen.findByRole('checkbox')) // the in-flight request marks the job unknown: explicit append
     await user.click(await screen.findByRole('button', { name: /Add 3 rows to the job/ }))
     expect(await screen.findByText(/already running in this tab/)).toBeInTheDocument()
     expect(posts).toHaveLength(1)

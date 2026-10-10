@@ -8,6 +8,7 @@ import { callBff, getBff } from '@/lib/bff-client'
 import { FIELDS } from '@/lib/imports'
 import {
   JOB_FILE_LIMITS,
+  chunkFingerprint,
   appendedSchema,
   buildUploadRows,
   chunkRows,
@@ -41,7 +42,8 @@ type Progress = { sent: number; total: number; added: number; duplicates: number
 /** Uploads running in this tab, by job: a remounted component can never start a second concurrent upload for the same job. */
 const running_ = new Set<string>()
 /** Jobs of this tab whose last upload ended with an unknown outcome (survives navigation within the app, not a reload). */
-const unresolved_ = new Set<string>()
+/** Value: fingerprints of the request that was in flight (so "the same rows again" can be called out). */
+const unresolved_ = new Map<string, string>()
 /** Test seam: the two guards above are module state, so tests start each case from a clean slate. */
 export function resetUploadGuards() {
   running_.clear()
@@ -70,6 +72,8 @@ export function JobUpload({
   /** The outcome of the last failed request is not known yet: a retry must first WAIT (not just look once). */
   const needSettle = useRef(false)
   const alive = useRef(true)
+  const refocus = useRef(false)
+  const retryButton = useRef<HTMLButtonElement>(null)
   const timing = useMemo(() => timingOverride ?? uploadTiming(), [timingOverride])
   const [appendAnyway, setAppendAnyway] = useState(false)
   /** Rows the job held before the first request of THIS upload: every later check is arithmetic on it. */
@@ -88,6 +92,14 @@ export function JobUpload({
     const known = new Set(firstIds)
     return built.sendable.slice(0, 50).filter((b) => known.has(String(b.value.id))).length
   }, [prepared, built, firstIds])
+  // An earlier upload of this tab ended (or was left) with an unknown outcome: do these rows repeat one of its requests?
+  const unknownFp = unresolved_.get(job.id)
+  const sameAsUnknown = useMemo(() => {
+    if (!unknownFp || !built) return false
+    return chunkRows(built.sendable.map((b) => b.value)).some(
+      (c) => chunkFingerprint(c) === unknownFp,
+    )
+  }, [unknownFp, built])
   const needsConfirm =
     prepared !== undefined &&
     (prepared.existing > 0 || unresolved_.has(job.id)) &&
@@ -130,6 +142,13 @@ export function JobUpload({
     if (f) void onFile(f)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // When "Stop waiting" removes the focused button, focus moves to the retry control (or the file input), never to <body>.
+  useEffect(() => {
+    if (waiting || !refocus.current) return
+    refocus.current = false
+    ;(retryButton.current ?? fileInput.current)?.focus()
+  }, [waiting])
 
   // Leaving the page stops the upload loop at its next step; nothing keeps sending in the background.
   useEffect(() => {
@@ -303,7 +322,6 @@ export function JobUpload({
     }
     /** The request just failed or is being resumed with an unknown outcome: wait it out, then act on the answer. */
     const resolveUnknown = async (i: number, head: string, lockHeld = false) => {
-      unresolved_.add(job.id)
       needSettle.current = true
       const verdict = await settle(chunks, i, lockHeld)
       if (verdict === 'login') return (login(), 'end' as const)
@@ -320,6 +338,7 @@ export function JobUpload({
       }
       return 'idle' as const
     }
+    const sentBefore = (i: number) => chunks.slice(0, i).reduce((n, c) => n + c.length, 0)
     for (let i = from; i < chunks.length; i++) {
       if (stop.current)
         return halt(
@@ -351,6 +370,16 @@ export function JobUpload({
           }
         }
       }
+      // Marked BEFORE sending: if this page is left while the request is in flight, a returning user must not treat a later
+      // publish of these rows as anything but unknown.
+      unresolved_.set(
+        job.id,
+        chunkFingerprint(
+          built.sendable
+            .slice(sentBefore(i), sentBefore(i) + chunks[i]!.length)
+            .map((b) => b.value),
+        ),
+      )
       const result = await callBff<unknown>(
         `/api/bff/imports/jobs/${encodeURIComponent(job.id)}/rows`,
         'POST',
@@ -360,11 +389,13 @@ export function JobUpload({
       if (!result.ok) {
         if (result.status === 401) return login()
         const head = `${jobErrorMessage(result, 'upload')} Request ${i + 1} of ${chunks.length}`
-        if (isDefiniteFailure(result))
+        if (isDefiniteFailure(result)) {
+          unresolved_.delete(job.id)
           return halt(
             `${head} stored nothing; ${done.added} rows from the earlier requests are stored in the job. You can retry from request ${i + 1}, or cancel the job and start again.`,
             i,
           )
+        }
         // Ambiguous (including every 409 here: "another upload is in progress" may be our own earlier request still running).
         setProblem(
           result.status === 409
@@ -395,10 +426,11 @@ export function JobUpload({
           )
         }
         return halt(
-          `${head} had an unknown outcome. The job was watched for ${Math.round(timing.settleMs / 1000)} s: nothing was published and no other upload held it. You can retry from request ${i + 1} (the job is checked again first, and the backend refuses it while an upload still runs).`,
+          `${head} had an unknown outcome. The job was watched for ${Math.round(timing.settleMs / 1000)} s: nothing was published. You can retry from request ${i + 1} (the job is checked again first, and the backend refuses a retry while an upload still holds the job).`,
           i,
         )
       }
+      unresolved_.delete(job.id)
       const appended = appendedSchema.safeParse(result.data)
       const expectedAfter = base.current + sent + chunks[i]!.length
       if (appended.success && appended.data.rowsTotal !== expectedAfter) {
@@ -520,6 +552,15 @@ export function JobUpload({
           )}
           {needsConfirm ? (
             <div className="notice" role="note">
+              {unknownFp ? (
+                <p>
+                  An earlier upload from this page ended with an UNKNOWN outcome: its last request
+                  may still publish its rows later.{' '}
+                  {sameAsUnknown
+                    ? 'This file contains that same request (same rows), so adding it again would duplicate them.'
+                    : "Check the job's row count first."}
+                </p>
+              ) : null}
               <p>
                 This job already holds {prepared.existing} rows.{' '}
                 {overlap > 0
@@ -542,6 +583,7 @@ export function JobUpload({
           <div className="row">
             <button
               type="button"
+              ref={retryButton}
               className="btn btn-primary"
               disabled={blocked || running || locked}
               onClick={() => void upload(resumeAt ?? 0, resumeAt !== undefined)}
@@ -577,12 +619,22 @@ export function JobUpload({
       {waiting ? (
         <div className="stack">
           <p role="status">
-            Waiting to learn whether request {waiting.request + 1} reached the job:{' '}
+            Waiting to learn whether request {waiting.request + 1} reached the job. Nothing is sent
+            while waiting.
+          </p>
+          {/* per-poll progress is deliberately NOT a live region: only the start and the outcome are announced */}
+          <p className="muted">
             {Math.round(waiting.elapsed / 1000)} s so far, row count unchanged for{' '}
             {Math.round(waiting.unchanged / 1000)} of {Math.round(timing.settleMs / 1000)} s.
-            Nothing is sent while waiting.
           </p>
-          <button type="button" className="btn" onClick={() => (stop.current = true)}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              refocus.current = true
+              stop.current = true
+            }}
+          >
             Stop waiting
           </button>
         </div>

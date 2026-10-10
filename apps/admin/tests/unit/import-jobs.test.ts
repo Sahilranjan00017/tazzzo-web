@@ -385,6 +385,39 @@ describe('request sizing and failure classes', () => {
 })
 
 describe('upload wait timing', () => {
+  it('production ignores short values (floors: poll 1 s, quiet window 60 s); the test flag lifts the floors; ordering is enforced', () => {
+    const names = ['POLL_MS', 'SETTLE_MS', 'MAXWAIT_MS', 'TEST_TIMINGS'].map(
+      (k) => `NEXT_PUBLIC_IMPORT_UPLOAD_${k}`,
+    )
+    const saved = names.map((k) => process.env[k])
+    try {
+      for (const k of names) delete process.env[k]
+      process.env[names[0]!] = '10'
+      process.env[names[1]!] = '5000'
+      process.env[names[2]!] = '8000'
+      expect(uploadTiming()).toEqual({
+        pollMs: 5_000,
+        settleMs: 90_000,
+        maxWaitMs: 8_000 > 90_000 ? 8_000 : 90_000,
+      })
+      process.env[names[3]!] = '1'
+      process.env[names[0]!] = '10'
+      expect(uploadTiming()).toEqual({ pollMs: 10, settleMs: 5_000, maxWaitMs: 8_000 })
+      process.env[names[3]!] = 'yes' // only exactly "1" counts
+      expect(uploadTiming().settleMs).toBe(90_000)
+      process.env[names[3]!] = '1'
+      process.env[names[0]!] = '9000'
+      process.env[names[1]!] = '2000'
+      process.env[names[2]!] = '3000'
+      const t = uploadTiming()
+      expect(t.settleMs).toBeGreaterThanOrEqual(t.pollMs)
+      expect(t.maxWaitMs).toBeGreaterThanOrEqual(t.settleMs)
+    } finally {
+      names.forEach((k, i) =>
+        saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i]),
+      )
+    }
+  })
   it('defaults to the long, conservative windows; test overrides must be whole milliseconds in range', () => {
     const keys = ['POLL_MS', 'SETTLE_MS', 'MAXWAIT_MS'].map((k) => `NEXT_PUBLIC_IMPORT_UPLOAD_${k}`)
     const saved = keys.map((k) => process.env[k])
@@ -394,7 +427,9 @@ describe('upload wait timing', () => {
       process.env[keys[0]!] = '1000'
       process.env[keys[1]!] = '6000'
       process.env[keys[2]!] = '25000'
+      process.env.NEXT_PUBLIC_IMPORT_UPLOAD_TEST_TIMINGS = '1'
       expect(uploadTiming()).toEqual({ pollMs: 1_000, settleMs: 6_000, maxWaitMs: 25_000 })
+      delete process.env.NEXT_PUBLIC_IMPORT_UPLOAD_TEST_TIMINGS
       process.env[keys[0]!] = 'abc'
       process.env[keys[1]!] = '-5'
       process.env[keys[2]!] = '999999999999'
