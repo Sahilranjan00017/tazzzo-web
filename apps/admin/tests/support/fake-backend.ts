@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
+import { FakeAdminLists, type Forced } from './fake-jobs'
 
 /**
  * Local stand-in for the Tazzzo backend (never production). When given the mock provider, it verifies every bearer
@@ -75,6 +76,8 @@ export class FakeBackend {
       active: boolean
     }
   >()
+  /** Stock list (`listStock`) and asynchronous import jobs; see fake-jobs.ts. */
+  readonly lists: FakeAdminLists = new FakeAdminLists(this.stock)
   readonly orders = new Map<
     string,
     {
@@ -338,6 +341,8 @@ export class FakeBackend {
     this.orders.set('O-100', { orderId: 'O-100', status: 'CONFIRMED', version: 2 })
     this.orders.set('O-101', { orderId: 'O-101', status: 'OUT_FOR_DELIVERY', version: 3 })
     this.stock.clear()
+    this.lists.reset()
+    this.lists.products = this.products
     this.prices.set('TZP-REF-1', { sellingPricePaise: 12900, mrpPaise: 14900, version: 2 })
     this.stock.set('TZP-REF-1|LOC-1', {
       onHand: 20,
@@ -587,6 +592,26 @@ export class FakeBackend {
       // audit-reader reaches only /me and the audit trail; other roles never read the audit trail.
       if (auditPath ? !auditRole : auditRole) return json(403, { error: { code: 'FORBIDDEN' } })
       if (!auditPath && staffRole !== staffPath) return json(403, { error: { code: 'FORBIDDEN' } })
+    }
+    const listsReply = await this.lists.handle({
+      method: req.method ?? '',
+      pathname: url.pathname,
+      params: url.searchParams,
+      body,
+      byteLength: raw.length,
+      roles,
+      sub: claims?.sub,
+    })
+    if (listsReply?.status === 0) return void req.socket.destroy() // the answer is lost
+    if (listsReply) {
+      if (listsReply.text !== undefined) {
+        res.writeHead(listsReply.status, {
+          'x-request-id': `req_${randomBytes(10).toString('hex')}`,
+          ...listsReply.headers,
+        })
+        return void res.end(listsReply.text)
+      }
+      return json(listsReply.status, listsReply.body ?? {})
     }
     if (auditPath && req.method === 'GET') {
       const all = [
@@ -1064,7 +1089,7 @@ export class FakeBackend {
         return json(200, next)
       }
     }
-    const caseView = (c: NonNullable<ReturnType<typeof this.cases.get>>) => ({
+    const caseView = (c: NonNullable<ReturnType<FakeBackend['cases']['get']>>) => ({
       ...c,
       customerId: 'C-1',
       category: 'ORDER_ISSUE',
@@ -1500,6 +1525,59 @@ export class FakeBackend {
       this.dashboardOverride = body
         ? (JSON.parse(body) as FakeBackend['dashboardOverride'])
         : undefined
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/jobs/tick' && method === 'POST') {
+      this.lists.tick(JSON.parse(body || '{}') as { id?: string; step?: number; pause?: boolean })
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/jobs/seed' && method === 'POST') {
+      const job = this.lists.seed(
+        JSON.parse(body) as {
+          status: string
+          rows?: number
+          note?: string
+          invalidRows?: number[]
+        },
+      )
+      return json(200, { id: job.id })
+    }
+    if (url.pathname === '/__control/jobs/config' && method === 'POST') {
+      const c = JSON.parse(body || '{}') as { maxRowsPerJob?: number; maxActiveJobs?: number }
+      if (c.maxRowsPerJob) this.lists.maxRowsPerJob = c.maxRowsPerJob
+      if (c.maxActiveJobs) this.lists.maxActiveJobs = c.maxActiveJobs
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/force' && method === 'POST') {
+      this.lists.forced = body ? (JSON.parse(body) as Forced[]) : []
+      return json(200, { ok: true })
+    }
+    if (url.pathname === '/__control/seed-stock' && method === 'POST') {
+      const {
+        count,
+        location = 'LOC-BULK',
+        corruptEvery,
+      } = JSON.parse(body) as {
+        count: number
+        location?: string
+        corruptEvery?: number
+      }
+      for (let i = 0; i < count; i++) {
+        const sku = `TZP-BULK-${String(i).padStart(4, '0')}`
+        if (corruptEvery && i % corruptEvery === corruptEvery - 1) {
+          this.lists.corrupt.push({ sku, loc: location })
+          continue
+        }
+        const onHand = [0, 3, 40, 12][i % 4]!
+        this.stock.set(`${sku}|${location}`, {
+          onHand,
+          reserved: i % 4 === 1 ? 1 : 0,
+          lowStockThreshold: 5,
+          maxPurchasable: 10,
+          version: 1,
+          active: i % 7 !== 6,
+        })
+      }
       return json(200, { ok: true })
     }
     if (url.pathname === '/__control/mutation' && method === 'POST') {

@@ -46,6 +46,14 @@ const RULES: {
     }),
   },
   {
+    test: /^IMPJ-[0-9a-f]{24}$/,
+    module: 'import-jobs',
+    build: (id) => ({
+      href: `/catalogue/imports/jobs/${encodeURIComponent(id)}`,
+      label: `Import job ${id}`,
+    }),
+  },
+  {
     test: /^TZ[SCGV]-[0-9]{6}$/,
     module: 'taxonomy',
     upper: true,
@@ -70,7 +78,7 @@ const RULES: {
 ]
 
 export const GOTO_HELP =
-  'Enter an exact id: product TZP-…, order ORD_…, support case SUP_…, content CB_…, taxonomy node TZS-/TZC-/TZB-/TZV-…, a 6-digit pincode, or an audit request id req_….'
+  'Enter an exact id: product TZP-…, order ORD_…, support case SUP_…, content CB_…, import job IMPJ-…, taxonomy node TZS-/TZC-/TZB-/TZV-…, a 6-digit pincode, or an audit request id req_….'
 
 export function resolveGoto(input: string, roles: readonly string[]): GotoResult {
   const text = input.trim()

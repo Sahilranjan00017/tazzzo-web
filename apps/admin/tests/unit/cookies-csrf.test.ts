@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cookieAttributes, cookiePolicy, isOpaqueId } from '@/server/auth/cookies'
-import { isSameOriginMutation } from '@/server/auth/csrf'
+import { isSameOriginMutation, isSameOriginRead } from '@/server/auth/csrf'
 
 describe('cookie policy', () => {
   it('production: __Host- names, Secure, HttpOnly, SameSite=Lax, Path=/, no Domain', () => {
@@ -73,5 +73,22 @@ describe('logout CSRF rule', () => {
     expect(isSameOriginMutation(h({ 'x-tazzzo-csrf': '1', referer: 'not a url' }), base)).toBe(
       false,
     )
+  })
+})
+
+describe('BFF read CSRF rule', () => {
+  const base = 'https://admin.tazzzo.example'
+  const h = (init: Record<string, string>) => new Headers(init)
+
+  it('requires the custom header; Origin, when sent, must be the CMS origin; no Origin is fine for a same-origin GET', () => {
+    expect(isSameOriginRead(h({ 'x-tazzzo-csrf': '1' }), base)).toBe(true)
+    expect(isSameOriginRead(h({ 'x-tazzzo-csrf': '1', origin: base }), base)).toBe(true)
+    expect(isSameOriginRead(h({}), base)).toBe(false)
+    expect(isSameOriginRead(h({ origin: base }), base)).toBe(false)
+    expect(isSameOriginRead(h({ 'x-tazzzo-csrf': '0' }), base)).toBe(false)
+    expect(
+      isSameOriginRead(h({ 'x-tazzzo-csrf': '1', origin: 'https://evil.example' }), base),
+    ).toBe(false)
+    expect(isSameOriginRead(h({ 'x-tazzzo-csrf': '1', origin: 'null' }), base)).toBe(false)
   })
 })

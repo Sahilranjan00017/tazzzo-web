@@ -22,15 +22,25 @@ export async function callBff<T = unknown>(
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown,
 ): Promise<BffResult<T>> {
+  return sendBff<T>(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Tazzzo-CSRF': '1' },
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
+/** Same-origin JSON READ through the BFF (only for the few explicit GET routes). Carries the CSRF header like a write. */
+export async function getBff<T = unknown>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<BffResult<T>> {
+  return sendBff<T>(path, { method: 'GET', headers: { 'X-Tazzzo-CSRF': '1' }, signal })
+}
+
+async function sendBff<T>(path: string, init: RequestInit): Promise<BffResult<T>> {
   let response: Response
   try {
-    response = await fetch(path, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'X-Tazzzo-CSRF': '1' },
-      body: JSON.stringify(body ?? {}),
-      redirect: 'error',
-      cache: 'no-store',
-    })
+    response = await fetch(path, { ...init, redirect: 'error', cache: 'no-store' })
   } catch {
     return { ok: false, status: 0, error: 'network' }
   }
