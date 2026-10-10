@@ -962,12 +962,81 @@ describe('JobUpload: waiting out an unknown outcome', () => {
     }
   })
 
-  it('a request left mid-flight that ends with a definite OK leaves no unknown marker behind', async () => {
+  it('a request left mid-flight whose answer is 2xx keeps the confirmation: the same file needs the box, and the changed row count is re-asked at click time', async () => {
     let release: () => void = () => undefined
+    const stored = { n: 0 }
+    const posts: number[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: stored.n }))
+      posts.push(1)
+      if (posts.length === 1) await new Promise<void>((r) => (release = r))
+      stored.n += 3
+      return ok({ rowsAdded: 3, rowsTotal: stored.n, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    const file = () => new File([csvOf(3)], 'rows.csv', { type: 'text/csv' })
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(screen.getByLabelText('CSV file'), file())
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    first.unmount()
+    // remount with a STALE job (0 rows) and the same file, before the zombie answers
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(screen.getByLabelText('CSV file'), file())
+    const add = await screen.findByRole('button', { name: 'Add 3 rows to the job' })
+    expect(add).toBeDisabled() // only the marker can require this: the job shows 0 rows
+    expect(screen.getByRole('note')).toHaveTextContent(/UNKNOWN outcome/)
+    expect(screen.getByRole('note')).toHaveTextContent(/same request/)
+    // the zombie now answers 2xx: its rows are in the job
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(add).toBeDisabled() // still needs the confirmation
+    expect(screen.getByRole('note')).toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(add)
+    // click time: the job really holds 3 rows now; the confirmation was for a different state, so nothing is sent
+    expect(
+      await screen.findByText(/The job now holds 3 rows \(it held 0 when you chose this file\)/),
+    ).toBeInTheDocument()
+    expect(posts).toHaveLength(1)
+    const again = screen.getByRole('button', { name: 'Add 3 rows to the job' })
+    expect(again).toBeDisabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/PUBLISHED its rows/)
+    expect(screen.getByRole('note')).toHaveTextContent(/This job already holds 3 rows/)
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(again)
+    await waitFor(() => expect(posts).toHaveLength(2)) // only after the new, informed confirmation
+  })
+
+  it('a definite 4xx for the request left mid-flight clears its marker (nothing was published)', async () => {
+    let release: () => void = () => undefined
+    let posts = 0
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
       if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      posts++
       await new Promise<void>((r) => (release = r))
-      return ok({ rowsAdded: 3, rowsTotal: 3, duplicates: 0 })
+      return fail(422, { code: 'INVALID_IMPORT' })
+    })
+    const user = userEvent.setup()
+    const file = () => new File([csvOf(3)], 'rows.csv', { type: 'text/csv' })
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(screen.getByLabelText('CSV file'), file())
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await waitFor(() => expect(posts).toBe(1))
+    first.unmount()
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(screen.getByLabelText('CSV file'), file())
+    expect(await screen.findByRole('button', { name: 'Add 3 rows to the job' })).toBeEnabled()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('remounting BEFORE the left-mid-flight answer arrives already requires the box (the cleanup conversion)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      await new Promise<void>(() => undefined) // never answers
+      return fail(504)
     })
     const user = userEvent.setup()
     const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
@@ -976,17 +1045,45 @@ describe('JobUpload: waiting out an unknown outcome', () => {
       new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
     )
     await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
-    await waitFor(() => expect(release).not.toBe(undefined))
-    first.unmount()
-    release()
     await new Promise((r) => setTimeout(r, 50))
-    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 3 })} firstIds={[]} />)
+    first.unmount()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
     await user.upload(
       screen.getByLabelText('CSV file'),
-      new File([csvOf(3).replaceAll('TZP-w-', 'TZP-n-')], 'n.csv', { type: 'text/csv' }),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
     )
-    await screen.findByRole('button', { name: 'Add 3 rows to the job' })
-    expect(screen.queryByText(/UNKNOWN outcome/)).toBeNull() // only the ordinary "job already holds rows" confirmation
+    expect(await screen.findByRole('button', { name: 'Add 3 rows to the job' })).toBeDisabled()
+    expect(screen.getByRole('checkbox')).toBeInTheDocument()
+  })
+
+  it('stopping BETWEEN requests of a healthy multi-request upload leaves no unknown marker: a remount shows only the ordinary rows-exist confirmation', async () => {
+    let release: () => void = () => undefined
+    const stored = { n: 0 }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: stored.n }))
+      await new Promise<void>((r) => (release = r))
+      stored.n += 200
+      return ok({ rowsAdded: 200, rowsTotal: stored.n, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(405)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 405 rows to the job' }))
+    await user.click(await screen.findByRole('button', { name: 'Stop after this request' }))
+    release()
+    await screen.findByText(/Stopped before request 2 of 3/)
+    first.unmount()
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 200 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(405)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await screen.findByRole('button', { name: 'Add 405 rows to the job' })
+    expect(screen.getByRole('note')).toHaveTextContent(/This job already holds 200 rows/)
+    expect(screen.getByRole('note')).not.toHaveTextContent(/UNKNOWN|PUBLISHED/)
   })
 
   it('a second mount for the same job cannot start a concurrent upload while one is running', async () => {

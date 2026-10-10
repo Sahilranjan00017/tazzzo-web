@@ -42,8 +42,33 @@ type Progress = { sent: number; total: number; added: number; duplicates: number
 /** Uploads running in this tab, by job: a remounted component can never start a second concurrent upload for the same job. */
 const running_ = new Set<string>()
 /** Jobs of this tab whose last upload ended with an unknown outcome (survives navigation within the app, not a reload). */
-/** Value: fingerprints of the request that was in flight (so "the same rows again" can be called out). */
-const unresolved_ = new Map<string, string>()
+/**
+ * Per job: fingerprints of requests whose outcome this tab does not know ("the same rows again" can then be called out), and
+ * whether one of them is later KNOWN to have published its rows (a request left mid-flight that answered 2xx afterwards).
+ */
+interface Marker {
+  fps: Set<string>
+  published: boolean
+}
+const unresolved_ = new Map<string, Marker>()
+function markUnknown(jobId: string, fp: string | undefined) {
+  if (!fp) return
+  const m = unresolved_.get(jobId) ?? { fps: new Set<string>(), published: false }
+  m.fps.add(fp)
+  unresolved_.set(jobId, m)
+}
+function markPublished(jobId: string, fp: string | undefined) {
+  markUnknown(jobId, fp)
+  const m = unresolved_.get(jobId)
+  if (m) m.published = true
+}
+/** A definite answer for THIS request only: other unknown requests of the job keep their marker. */
+function clearRequest(jobId: string, fp: string | undefined) {
+  const m = unresolved_.get(jobId)
+  if (!m || !fp) return
+  m.fps.delete(fp)
+  if (m.fps.size === 0 && !m.published) unresolved_.delete(jobId)
+}
 /** Test seam: the two guards above are module state, so tests start each case from a clean slate. */
 export function resetUploadGuards() {
   running_.clear()
@@ -95,13 +120,13 @@ export function JobUpload({
     return built.sendable.slice(0, 50).filter((b) => known.has(String(b.value.id))).length
   }, [prepared, built, firstIds])
   // An earlier upload of this tab ended (or was left) with an unknown outcome: do these rows repeat one of its requests?
-  const unknownFp = unresolved_.get(job.id)
+  const marker = unresolved_.get(job.id)
   const sameAsUnknown = useMemo(() => {
-    if (!unknownFp || !built) return false
-    return chunkRows(built.sendable.map((b) => b.value)).some(
-      (c) => chunkFingerprint(c) === unknownFp,
+    if (!marker || !built) return false
+    return chunkRows(built.sendable.map((b) => b.value)).some((c) =>
+      marker.fps.has(chunkFingerprint(c)),
     )
-  }, [unknownFp, built])
+  }, [marker, built])
   const needsConfirm =
     prepared !== undefined &&
     (prepared.existing > 0 || unresolved_.has(job.id)) &&
@@ -159,7 +184,7 @@ export function JobUpload({
     return () => {
       alive.current = false
       stop.current = true
-      if (inflightFp.current) unresolved_.set(job.id, inflightFp.current) // left mid-request
+      markUnknown(job.id, inflightFp.current) // left mid-request
     }
   }, [job.id])
 
@@ -303,6 +328,16 @@ export function JobUpload({
           'The job could not be read, or no longer accepts rows. Refresh and try again.',
         )
       }
+      if (prepared && start.job.rowsTotal !== prepared.existing) {
+        // The job changed since this file was chosen (an earlier request left mid-flight published, or another tab added
+        // rows): the confirmation the person gave was for a different state. Ask again, with the real count.
+        setPrepared({ ...prepared, existing: start.job.rowsTotal })
+        setAppendAnyway(false)
+        setRunning(false)
+        return setProblem(
+          `The job now holds ${start.job.rowsTotal} rows (it held ${prepared.existing} when you chose this file). Nothing was sent. Review the note below and confirm to add.`,
+        )
+      }
       base.current = start.job.rowsTotal
     }
     let sent = chunks.slice(0, from).reduce((n, c) => n + c.length, 0)
@@ -388,22 +423,26 @@ export function JobUpload({
       inflightFp.current = undefined
       if (!alive.current) {
         // The page was left while the request ran. A 2xx or a 4xx refusal is a definite answer; anything else stays unknown.
-        if (result.ok || isDefiniteFailure(result)) unresolved_.delete(job.id)
-        else if (fp) unresolved_.set(job.id, fp)
+        // 2xx: the rows ARE in the job now, which is exactly when sending the same file again duplicates them. The marker
+        // stays (as "published") so a file chosen before this answer still needs confirmation, and the job's row count is
+        // re-read at click time. Only a 4xx refusal (nothing published) lets this request's marker go.
+        if (result.ok) markPublished(job.id, fp)
+        else if (isDefiniteFailure(result)) clearRequest(job.id, fp)
+        else markUnknown(job.id, fp)
         return
       }
       if (!result.ok) {
         if (result.status === 401) return login()
         const head = `${jobErrorMessage(result, 'upload')} Request ${i + 1} of ${chunks.length}`
         if (isDefiniteFailure(result)) {
-          unresolved_.delete(job.id)
+          clearRequest(job.id, fp)
           return halt(
             `${head} stored nothing; ${done.added} rows from the earlier requests are stored in the job. You can retry from request ${i + 1}, or cancel the job and start again.`,
             i,
           )
         }
         // Ambiguous (including every 409 here: "another upload is in progress" may be our own earlier request still running).
-        if (fp) unresolved_.set(job.id, fp)
+        markUnknown(job.id, fp)
         setProblem(
           result.status === 409
             ? `An upload on this job is still running (possibly your previous request ${i + 1}). Waiting to see whether it finishes…`
@@ -437,7 +476,7 @@ export function JobUpload({
           i,
         )
       }
-      unresolved_.delete(job.id)
+      clearRequest(job.id, fp)
       const appended = appendedSchema.safeParse(result.data)
       const expectedAfter = base.current + sent + chunks[i]!.length
       if (appended.success && appended.data.rowsTotal !== expectedAfter) {
@@ -559,10 +598,11 @@ export function JobUpload({
           )}
           {needsConfirm ? (
             <div className="notice" role="note">
-              {unknownFp ? (
+              {marker ? (
                 <p>
-                  An earlier upload from this page ended with an UNKNOWN outcome: its last request
-                  may still publish its rows later.{' '}
+                  {marker.published
+                    ? 'An earlier upload from this page was left mid-request, and that request has since PUBLISHED its rows.'
+                    : 'An earlier upload from this page ended with an UNKNOWN outcome: its last request may still publish its rows later.'}{' '}
                   {sameAsUnknown
                     ? 'This file contains that same request (same rows), so adding it again would duplicate them.'
                     : "Check the job's row count first."}
