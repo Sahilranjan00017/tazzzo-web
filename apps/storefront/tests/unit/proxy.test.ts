@@ -51,6 +51,23 @@ describe('proxy matcher', () => {
     expect(matches('/', genuine)).toBe(false)
   })
 
+  it('never skips /api/* routes, whatever prefetch headers they carry (route handlers run in full)', () => {
+    const genuine = { rsc: '1', 'next-router-prefetch': '1' }
+    for (const url of [
+      '/api/location',
+      '/api/checkout/delivery',
+      '/api/auth/otp/request',
+      '/api/addresses',
+      '/api/cart/add',
+      '/api/auth/refresh?next=/',
+    ]) {
+      expect(matches(url, genuine), url).toBe(true)
+      expect(matches(url), url).toBe(true)
+    }
+    // pages keep the exemption
+    expect(matches('/apiary', genuine)).toBe(false)
+  })
+
   it('runs for every prefetch-LOOKING request Next renders in full (these used to skip the limit and the CSP)', () => {
     for (const headers of <Array<Record<string, string>>>[
       { 'next-router-prefetch': '1' },
@@ -63,6 +80,30 @@ describe('proxy matcher', () => {
       { rsc: '1, 1', 'next-router-prefetch': '1' },
     ]) {
       expect(matches('/search?q=rice', headers), JSON.stringify(headers)).toBe(true)
+    }
+  })
+})
+
+describe('proxy on route handlers with prefetch headers', () => {
+  it('charges a POST to the expensive routes against the expensive bucket and adds the security headers', () => {
+    vi.stubEnv('STOREFRONT_TRUST_PROXY', 'true')
+    resetVisitorLimiter()
+    const post = (path: string) =>
+      proxy(
+        new NextRequest(`http://localhost${path}`, {
+          method: 'POST',
+          headers: { rsc: '1', 'next-router-prefetch': '1', 'x-forwarded-for': '203.0.113.9' },
+        }),
+      )
+    for (const path of ['/api/location', '/api/auth/otp/request']) {
+      resetVisitorLimiter()
+      const statuses = Array.from({ length: 12 }, () => post(path))
+      const first = statuses[0]!
+      expect(first.headers.get('content-security-policy')).toContain("script-src 'self' 'nonce-")
+      const limited = statuses.filter((r) => r.status === 429)
+      expect(limited.length, path).toBeGreaterThan(0)
+      expect(limited[0]!.headers.get('retry-after')).toBeTruthy()
+      expect(limited[0]!.headers.get('content-security-policy')).toBeTruthy()
     }
   })
 })

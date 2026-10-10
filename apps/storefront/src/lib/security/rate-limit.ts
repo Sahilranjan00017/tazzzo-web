@@ -141,6 +141,8 @@ export function isExpensivePath(pathname: string, searchParams: URLSearchParams)
   if (pathname.startsWith('/api/auth/otp/')) return true
   // Checking a PIN is one uncached `/v1/serviceability` call every time (and the slot step reads and re-checks slots).
   if (pathname === '/api/location' || pathname === '/api/checkout/delivery') return true
+  // Address create/update/delete/default: each is a customer-scoped backend write.
+  if (pathname.startsWith('/api/addresses')) return true
   return pathname.startsWith('/c/') && searchParams.has('cursor')
 }
 

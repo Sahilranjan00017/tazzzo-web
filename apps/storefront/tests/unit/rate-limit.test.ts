@@ -83,7 +83,10 @@ describe('isExpensivePath', () => {
     ['/api/location', '', true],
     ['/api/checkout/delivery', '', true],
     ['/api/location/clear', '', false],
-    ['/api/addresses', '', false],
+    ['/api/addresses', '', true],
+    ['/api/addresses/update', '', true],
+    ['/api/addresses/delete', '', true],
+    ['/api/addresses/default', '', true],
     ['/location', '', false],
     ['/login', '', false],
   ])('%s%s -> %s', (path, query, expected) => {
