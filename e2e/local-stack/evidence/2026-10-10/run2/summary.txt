@@ -1,0 +1,38 @@
+
+journey verdict  checks    time   transcript   title
+J01    PASS     13/13     1s     L4-37        catalogue create (admin -> backend -> storefront PDP)
+J02    PASS     8/8       65s    L39-66       catalogue update (title PATCH, stale version, price change flows to PDP and cards)
+J03    PASS     14/14     1s     L68-129      canonical product id accepted: TZP-Mix-7 style, case preserved end to end
+J04    FAIL     31/32     3s     L131-243     invalid product ids rejected on create, import and cart (lowercase, 41-char tail, empty, newline)  [FAILED: J04.12 [BUG-1] CSV job: every row INVALID, including the quoted id with a trailing newline (docs/ops/BULK_IMPORT.md)]
+J05    PASS     8/8       0s     L245-262     normal (synchronous) product import: dry run, apply, UNCHANGED re-submit
+J06    PASS     10/10     4s     L264-310     async import job end to end: create, upload CSV, validate, approve/apply, products exist
+J07    PASS     20/20     3s     L312-388     async import with invalid rows: per-row verdicts, apply blocked, correct a row, errors.csv neutralises formulas
+J08    PASS     6/6       138s   L390-469     import resume: worker crash mid-apply (kill -9 + restart), lease takeover, no re-apply; datastore outage ridden out
+J09    PASS     6/6       9s     L471-514     import cancel: before apply (nothing written) and while applying (stops, rest not written)
+J10    PASS     5/5       1s     L516-547     errors.csv download: complete stream, header, row order, content type, auth
+J11    PASS     11/11     67s    L549-590     pricing set (admin) and visible on the storefront: price + MRP, versioned writes
+J12    PASS     14/14     68s    L592-659     inventory set (admin) + admin stock list + stock state on PDP and cart
+J21    PASS     12/12     1s     L661-689     category by id (/v1/categories/{id}) and the storefront category page
+J13    PASS     9/9       1s     L691-734     media upload: presigned target -> browser PUT to the S3 gateway -> object stored (write-once)
+J14    PASS     20/20     1s     L736-837     media verify: set with dimension/ext/type checks; bad MIME, oversize, bomb, mismatch rejected
+J23    PASS     9/9       1s     L839-870     product detail with media via the CDN stand-in, price and availability
+J15    PASS     23/23     1s     L872-979     banner create (CMS content API): upload, validation, DRAFT -> PUBLISHED, fixtures for the audience journeys
+J16    PASS     9/9       56s    L981-1003    APP-only content is NOT visible on the website (public channels, admin preview, storefront DOM)
+J17    PASS     6/6       0s     L1005-1016   WEBSITE-only content is visible on the website (and not on the app channel)
+J18    PASS     5/5       0s     L1018-1031   BOTH content is visible on website AND app channel (banner + product rail with cards)
+J19    PASS     7/7       107s   L1033-1068   scheduling: a future block is not live, becomes live after its window start (public API + storefront)
+J20    PASS     5/5       62s    L1070-1093   reorder: new order on public API and storefront; all-or-nothing on a stale version
+J22    PASS     9/9       62s    L1095-1127   storefront home: banners and rails; ONE products:batch call per rail (counting proxy)
+J24    PASS     14/14     3s     L1129-1155   search and category navigation on the storefront (real browser)
+J25    PASS     16/16     7s     L1157-1255   cart add / update / remove with stale-line revalidation after admin price and stock changes
+J26    PASS     15/15     5s     L1257-1290   checkout COD end to end: OTP sign-in, address, PIN, slot, quote, place, confirmation, Orders list/detail
+J27    PASS     12/12     5s     L1292-1393   stock + idempotency: double click, quote/placement replay, oversell on the last unit
+J28    PASS     26/26     2s     L1395-1534   orders + support: customer order visible to staff, staff transitions, customer sees status, support case thread
+C1     PASS     14/14     0s     L1536-1585   unauthenticated admin calls are 401 (and a bad token is 401, not 403/500)
+C2     PASS     21/21     0s     L1587-1616   reader role is 403 on every write; reads still work
+C3     PASS     13/13     0s     L1618-1692   a customer cannot read or use another customer's order, address, cart or support case
+C4     FAIL     5/6       40s    L1694-1708   OTP request rate limiting: 429 + Retry-After at the backend and through the storefront  [FAILED: C4.2 [BUG-3] the 202 reports the configured windows exactly: expiresInSeconds 300 and resendAfterSeconds 2 (floor off-by-one: OtpService Duration.between of ms-truncated dates)]
+C5     PASS     14/14     1s     L1710-1727   CSRF refusal on storefront mutations (no token, foreign origin, wrong method); signed-out is 401
+C6     FAIL     13/14     0s     L1729-1769   malformed queries -> a fixed 400 envelope (no echo, no stack, no 5xx)  [FAILED: C6.12 [BUG-2] every malformed-query 400 has the SAME envelope (code, message, requestId, retryable)]
+
+journeys passed 31/34; failed 3; blocked 0; total run time 719s

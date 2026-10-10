@@ -1,0 +1,382 @@
+[
+ {
+  "id": "J01",
+  "title": "catalogue create (admin -> backend -> storefront PDP)",
+  "verdict": "PASS",
+  "checks": 13,
+  "failed": 0,
+  "failures": [],
+  "startLine": 4,
+  "endLine": 37,
+  "ms": 754
+ },
+ {
+  "id": "J02",
+  "title": "catalogue update (title PATCH, stale version, price change flows to PDP and cards)",
+  "verdict": "PASS",
+  "checks": 8,
+  "failed": 0,
+  "failures": [],
+  "startLine": 39,
+  "endLine": 66,
+  "ms": 65276
+ },
+ {
+  "id": "J03",
+  "title": "canonical product id accepted: TZP-Mix-7 style, case preserved end to end",
+  "verdict": "PASS",
+  "checks": 14,
+  "failed": 0,
+  "failures": [],
+  "startLine": 68,
+  "endLine": 129,
+  "ms": 1200
+ },
+ {
+  "id": "J04",
+  "title": "invalid product ids rejected on create, import and cart (lowercase, 41-char tail, empty, newline)",
+  "verdict": "FAIL",
+  "checks": 32,
+  "failed": 1,
+  "failures": [
+   "J04.12 [BUG-1] CSV job: every row INVALID, including the quoted id with a trailing newline (docs/ops/BULK_IMPORT.md)"
+  ],
+  "startLine": 131,
+  "endLine": 243,
+  "ms": 4433
+ },
+ {
+  "id": "J05",
+  "title": "normal (synchronous) product import: dry run, apply, UNCHANGED re-submit",
+  "verdict": "PASS",
+  "checks": 8,
+  "failed": 0,
+  "failures": [],
+  "startLine": 245,
+  "endLine": 262,
+  "ms": 247
+ },
+ {
+  "id": "J06",
+  "title": "async import job end to end: create, upload CSV, validate, approve/apply, products exist",
+  "verdict": "PASS",
+  "checks": 10,
+  "failed": 0,
+  "failures": [],
+  "startLine": 264,
+  "endLine": 310,
+  "ms": 3261
+ },
+ {
+  "id": "J07",
+  "title": "async import with invalid rows: per-row verdicts, apply blocked, correct a row, errors.csv neutralises formulas",
+  "verdict": "PASS",
+  "checks": 20,
+  "failed": 0,
+  "failures": [],
+  "startLine": 312,
+  "endLine": 388,
+  "ms": 3149
+ },
+ {
+  "id": "J08",
+  "title": "import resume: worker crash mid-apply (kill -9 + restart), lease takeover, no re-apply; datastore outage ridden out",
+  "verdict": "PASS",
+  "checks": 6,
+  "failed": 0,
+  "failures": [],
+  "startLine": 390,
+  "endLine": 469,
+  "ms": 144068
+ },
+ {
+  "id": "J09",
+  "title": "import cancel: before apply (nothing written) and while applying (stops, rest not written)",
+  "verdict": "PASS",
+  "checks": 6,
+  "failed": 0,
+  "failures": [],
+  "startLine": 471,
+  "endLine": 514,
+  "ms": 7358
+ },
+ {
+  "id": "J10",
+  "title": "errors.csv download: complete stream, header, row order, content type, auth",
+  "verdict": "PASS",
+  "checks": 5,
+  "failed": 0,
+  "failures": [],
+  "startLine": 516,
+  "endLine": 547,
+  "ms": 872
+ },
+ {
+  "id": "J11",
+  "title": "pricing set (admin) and visible on the storefront: price + MRP, versioned writes",
+  "verdict": "PASS",
+  "checks": 11,
+  "failed": 0,
+  "failures": [],
+  "startLine": 549,
+  "endLine": 590,
+  "ms": 66679
+ },
+ {
+  "id": "J12",
+  "title": "inventory set (admin) + admin stock list + stock state on PDP and cart",
+  "verdict": "PASS",
+  "checks": 14,
+  "failed": 0,
+  "failures": [],
+  "startLine": 592,
+  "endLine": 659,
+  "ms": 68203
+ },
+ {
+  "id": "J21",
+  "title": "category by id (/v1/categories/{id}) and the storefront category page",
+  "verdict": "PASS",
+  "checks": 12,
+  "failed": 0,
+  "failures": [],
+  "startLine": 661,
+  "endLine": 689,
+  "ms": 1358
+ },
+ {
+  "id": "J13",
+  "title": "media upload: presigned target -> browser PUT to the S3 gateway -> object stored (write-once)",
+  "verdict": "PASS",
+  "checks": 9,
+  "failed": 0,
+  "failures": [],
+  "startLine": 691,
+  "endLine": 734,
+  "ms": 653
+ },
+ {
+  "id": "J14",
+  "title": "media verify: set with dimension/ext/type checks; bad MIME, oversize, bomb, mismatch rejected",
+  "verdict": "PASS",
+  "checks": 20,
+  "failed": 0,
+  "failures": [],
+  "startLine": 736,
+  "endLine": 837,
+  "ms": 875
+ },
+ {
+  "id": "J23",
+  "title": "product detail with media via the CDN stand-in, price and availability",
+  "verdict": "PASS",
+  "checks": 9,
+  "failed": 0,
+  "failures": [],
+  "startLine": 839,
+  "endLine": 870,
+  "ms": 676
+ },
+ {
+  "id": "J15",
+  "title": "banner create (CMS content API): upload, validation, DRAFT -> PUBLISHED, fixtures for the audience journeys",
+  "verdict": "PASS",
+  "checks": 23,
+  "failed": 0,
+  "failures": [],
+  "startLine": 872,
+  "endLine": 979,
+  "ms": 614
+ },
+ {
+  "id": "J16",
+  "title": "APP-only content is NOT visible on the website (public channels, admin preview, storefront DOM)",
+  "verdict": "PASS",
+  "checks": 9,
+  "failed": 0,
+  "failures": [],
+  "startLine": 981,
+  "endLine": 1003,
+  "ms": 56627
+ },
+ {
+  "id": "J17",
+  "title": "WEBSITE-only content is visible on the website (and not on the app channel)",
+  "verdict": "PASS",
+  "checks": 6,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1005,
+  "endLine": 1016,
+  "ms": 470
+ },
+ {
+  "id": "J18",
+  "title": "BOTH content is visible on website AND app channel (banner + product rail with cards)",
+  "verdict": "PASS",
+  "checks": 5,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1018,
+  "endLine": 1031,
+  "ms": 500
+ },
+ {
+  "id": "J19",
+  "title": "scheduling: a future block is not live, becomes live after its window start (public API + storefront)",
+  "verdict": "PASS",
+  "checks": 7,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1033,
+  "endLine": 1068,
+  "ms": 106913
+ },
+ {
+  "id": "J20",
+  "title": "reorder: new order on public API and storefront; all-or-nothing on a stale version",
+  "verdict": "PASS",
+  "checks": 5,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1070,
+  "endLine": 1093,
+  "ms": 62042
+ },
+ {
+  "id": "J22",
+  "title": "storefront home: banners and rails; ONE products:batch call per rail (counting proxy)",
+  "verdict": "PASS",
+  "checks": 9,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1095,
+  "endLine": 1127,
+  "ms": 61926
+ },
+ {
+  "id": "J24",
+  "title": "search and category navigation on the storefront (real browser)",
+  "verdict": "PASS",
+  "checks": 14,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1129,
+  "endLine": 1155,
+  "ms": 1799
+ },
+ {
+  "id": "J25",
+  "title": "cart add / update / remove with stale-line revalidation after admin price and stock changes",
+  "verdict": "PASS",
+  "checks": 16,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1157,
+  "endLine": 1255,
+  "ms": 5052
+ },
+ {
+  "id": "J26",
+  "title": "checkout COD end to end: OTP sign-in, address, PIN, slot, quote, place, confirmation, Orders list/detail",
+  "verdict": "PASS",
+  "checks": 15,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1257,
+  "endLine": 1290,
+  "ms": 4206
+ },
+ {
+  "id": "J27",
+  "title": "stock + idempotency: double click, quote/placement replay, oversell on the last unit",
+  "verdict": "PASS",
+  "checks": 12,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1292,
+  "endLine": 1393,
+  "ms": 4985
+ },
+ {
+  "id": "J28",
+  "title": "orders + support: customer order visible to staff, staff transitions, customer sees status, support case thread",
+  "verdict": "PASS",
+  "checks": 26,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1395,
+  "endLine": 1534,
+  "ms": 1482
+ },
+ {
+  "id": "C1",
+  "title": "unauthenticated admin calls are 401 (and a bad token is 401, not 403/500)",
+  "verdict": "PASS",
+  "checks": 14,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1536,
+  "endLine": 1585,
+  "ms": 112
+ },
+ {
+  "id": "C2",
+  "title": "reader role is 403 on every write; reads still work",
+  "verdict": "PASS",
+  "checks": 21,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1587,
+  "endLine": 1616,
+  "ms": 73
+ },
+ {
+  "id": "C3",
+  "title": "a customer cannot read or use another customer's order, address, cart or support case",
+  "verdict": "PASS",
+  "checks": 13,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1618,
+  "endLine": 1692,
+  "ms": 395
+ },
+ {
+  "id": "C4",
+  "title": "OTP request rate limiting: 429 + Retry-After at the backend and through the storefront",
+  "verdict": "FAIL",
+  "checks": 6,
+  "failed": 1,
+  "failures": [
+   "C4.2 [BUG-3] the 202 reports the configured windows exactly: expiresInSeconds 300 and resendAfterSeconds 2 (floor off-by-one: OtpService Duration.between of ms-truncated dates)"
+  ],
+  "startLine": 1694,
+  "endLine": 1708,
+  "ms": 40082
+ },
+ {
+  "id": "C5",
+  "title": "CSRF refusal on storefront mutations (no token, foreign origin, wrong method); signed-out is 401",
+  "verdict": "PASS",
+  "checks": 14,
+  "failed": 0,
+  "failures": [],
+  "startLine": 1710,
+  "endLine": 1727,
+  "ms": 1071
+ },
+ {
+  "id": "C6",
+  "title": "malformed queries -> a fixed 400 envelope (no echo, no stack, no 5xx)",
+  "verdict": "FAIL",
+  "checks": 14,
+  "failed": 1,
+  "failures": [
+   "C6.12 [BUG-2] every malformed-query 400 has the SAME envelope (code, message, requestId, retryable)"
+  ],
+  "startLine": 1729,
+  "endLine": 1769,
+  "ms": 135
+ }
+]
