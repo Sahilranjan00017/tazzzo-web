@@ -51,7 +51,8 @@ export function ProductAvailability({
   if (stockState === 'LOW_STOCK') {
     return (
       <p className="availability availability--yes" data-testid="availability">
-        {lowStockRemaining ? `Only ${lowStockRemaining} left` : 'Low stock'} for delivery to {pinUsed}.
+        {lowStockRemaining ? `Only ${lowStockRemaining} left` : 'Low stock'} for delivery to{' '}
+        {pinUsed}.
       </p>
     )
   }

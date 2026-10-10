@@ -30,7 +30,6 @@ export const POST = (request: Request) =>
     true,
   )
 
-
 function respondDeliveryError(error: DeliveryError, retryAfterSeconds: number | null) {
   const status: Record<DeliveryError, number> = {
     unauthenticated: 401,

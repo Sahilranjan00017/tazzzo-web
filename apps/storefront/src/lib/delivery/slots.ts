@@ -43,36 +43,50 @@ export function groupByDate(slots: Slot[]): Array<{ date: string; slots: Slot[] 
   return groups
 }
 
-function safeZone(timezone: string): string {
-  try {
-    new Intl.DateTimeFormat('en-IN', { timeZone: timezone })
-    return timezone
-  } catch {
-    return 'Asia/Kolkata'
-  }
-}
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
-/** "Tuesday, 14 October" for a `yyyy-MM-dd` date (a calendar date, shown without any zone shift). */
+/**
+ * "Tuesday, 14 October" for a `yyyy-MM-dd` date (a calendar date, no zone shift). Written out by hand rather than with
+ * `Intl`: the server and the browser ship different ICU data, and a differing string is a hydration mismatch.
+ */
 export function formatSlotDate(date: string): string {
   const [y, m, d] = date.split('-').map(Number)
-  if (!y || !m || !d) return date
-  return new Intl.DateTimeFormat('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(y, m - 1, d)))
+  if (!y || !m || !d || m > 12) return date
+  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return `${weekday}, ${d} ${MONTHS[m - 1]}`
 }
 
-/** "9:00 am to 11:00 am" in the delivery time zone. */
-export function formatWindow(slot: Pick<Slot, 'startsAt' | 'endsAt'>, timezone: string): string {
-  const fmt = new Intl.DateTimeFormat('en-IN', {
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: safeZone(timezone),
-  })
-  const start = new Date(slot.startsAt)
-  const end = new Date(slot.endsAt)
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
-  return `${fmt.format(start)} to ${fmt.format(end)}`
+const CLOCK = /T([01][0-9]|2[0-3]):([0-5][0-9])/
+
+function clock(iso: string): string | null {
+  const match = CLOCK.exec(iso)
+  if (!match) return null
+  const hour = Number(match[1])
+  const h12 = hour % 12 === 0 ? 12 : hour % 12
+  return `${h12}:${match[2]} ${hour < 12 ? 'am' : 'pm'}`
+}
+
+/**
+ * "9:00 am to 11:00 am". The backend writes `startsAt`/`endsAt` as ISO offset date-times in its delivery time zone
+ * (`timezone` in the answer, Asia/Kolkata by default), so the wall-clock part IS the delivery-zone time; reading it
+ * directly is deterministic on server and browser alike.
+ */
+export function formatWindow(slot: Pick<Slot, 'startsAt' | 'endsAt'>): string {
+  const start = clock(slot.startsAt)
+  const end = clock(slot.endsAt)
+  return start && end ? `${start} to ${end}` : ''
 }

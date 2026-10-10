@@ -22,6 +22,9 @@ const product = (id: string, over: Partial<ProductSummary> = {}): ProductSummary
   sellingPricePaise: 15950,
   mrpPaise: 19900,
   image: { url: `https://cdn.test/${id}.jpg`, alt: `Product ${id}`, width: null, height: null },
+  stockState: 'UNKNOWN',
+  serviceable: null,
+  lowStockRemaining: null,
   ...over,
 })
 

@@ -28,4 +28,3 @@ export const POST = (request: Request) =>
     }
     return respondLocation(await setAddressLocation(session, input.addressId))
   })
-

@@ -13,7 +13,10 @@ export type AddressError =
   | 'rate_limited'
   | 'unavailable'
 
-export function addressErrorMessage(error: string, retryAfterSeconds: number | null = null): string {
+export function addressErrorMessage(
+  error: string,
+  retryAfterSeconds: number | null = null,
+): string {
   switch (error) {
     case 'unauthenticated':
       return 'Please sign in to manage your addresses.'

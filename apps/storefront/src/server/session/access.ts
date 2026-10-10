@@ -11,7 +11,11 @@ import { accessTokenUsable, refreshSession } from '@/server/session/service'
 export async function withAccessToken<O extends { ok: boolean }>(
   session: CustomerSession,
   flow: (accessToken: string) => Promise<O>,
-  outcomes: { unauthenticated: () => O; unavailable: () => O; isUnauthenticated: (o: O) => boolean },
+  outcomes: {
+    unauthenticated: () => O
+    unavailable: () => O
+    isUnauthenticated: (o: O) => boolean
+  },
 ): Promise<O> {
   let current = session
   let rotated = false

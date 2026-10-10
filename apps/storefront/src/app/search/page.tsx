@@ -58,22 +58,25 @@ export default async function SearchPage({ searchParams }: PageProps<'/search'>)
         </p>
       )}
       {result === 'unavailable' && <Unavailable what="search results" />}
-      {result !== null && result !== 'rejected' && result !== 'unavailable' && result !== 'stale_cursor' && (
-        <>
-          {result.items.length === 0 ? (
-            <p role="status">No products match “{q}”.</p>
-          ) : (
-            <ProductGrid products={result.items} label={`Results for ${q}`} />
-          )}
-          {result.nextCursor && q && (
-            <p className="pager">
-              <Link href={`/search?${new URLSearchParams({ q, cursor: result.nextCursor })}`}>
-                More results
-              </Link>
-            </p>
-          )}
-        </>
-      )}
+      {result !== null &&
+        result !== 'rejected' &&
+        result !== 'unavailable' &&
+        result !== 'stale_cursor' && (
+          <>
+            {result.items.length === 0 ? (
+              <p role="status">No products match “{q}”.</p>
+            ) : (
+              <ProductGrid products={result.items} label={`Results for ${q}`} />
+            )}
+            {result.nextCursor && q && (
+              <p className="pager">
+                <Link href={`/search?${new URLSearchParams({ q, cursor: result.nextCursor })}`}>
+                  More results
+                </Link>
+              </p>
+            )}
+          </>
+        )}
     </section>
   )
 }

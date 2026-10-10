@@ -8,4 +8,9 @@ import { mutation } from '@/server/address/route'
  * creates a second address). No other field is accepted; the customer is always the session's.
  */
 export const POST = (request: Request) =>
-  mutation(request, parseCreate, (session, input) => addAddress(session, input.fields, input.idempotencyKey), 201)
+  mutation(
+    request,
+    parseCreate,
+    (session, input) => addAddress(session, input.fields, input.idempotencyKey),
+    201,
+  )

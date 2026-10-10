@@ -16,8 +16,7 @@ import { accessTokenUsable } from '@/server/session/service'
  * this file logs.
  */
 export type DeliveryOutcome<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: DeliveryError; retryAfterSeconds: number | null }
+  { ok: true; data: T } | { ok: false; error: DeliveryError; retryAfterSeconds: number | null }
 
 const fail = (error: DeliveryError, retryAfterSeconds: number | null = null) =>
   ({ ok: false, error, retryAfterSeconds }) as const

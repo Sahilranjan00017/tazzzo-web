@@ -46,7 +46,6 @@ export const FIELD_TITLE: Record<FieldName, string> = {
 }
 
 // Java `Character.isISOControl`: C0 and C1 controls.
-// eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
 
 type Text = { ok: true; value: string | null } | { ok: false; message: string }
@@ -63,12 +62,12 @@ function text(raw: unknown, title: string, max: number, required: boolean): Text
   if ([...value].length > max) {
     return { ok: false, message: `${title} can be at most ${max} characters.` }
   }
-  if (CONTROL.test(value)) return { ok: false, message: `${title} has characters we cannot accept.` }
+  if (CONTROL.test(value))
+    return { ok: false, message: `${title} has characters we cannot accept.` }
   return { ok: true, value }
 }
 
-export type AddressCheck =
-  { ok: true; value: AddressFields } | { ok: false; errors: FieldErrors }
+export type AddressCheck = { ok: true; value: AddressFields } | { ok: false; errors: FieldErrors }
 
 /** Checks one address as typed; the value is normalised (trimmed, empty optionals null, phone canonical). */
 export function validateAddress(input: Record<string, unknown>): AddressCheck {
@@ -79,10 +78,12 @@ export function validateAddress(input: Record<string, unknown>): AddressCheck {
     out.label = label as AddressLabel
   } else errors.label = 'Choose Home, Work or Other.'
   const phone = normalisePhone(input.recipientPhone)
-  if (phone === null) errors.recipientPhone = 'Enter a 10-digit Indian mobile number starting 6 to 9.'
+  if (phone === null)
+    errors.recipientPhone = 'Enter a 10-digit Indian mobile number starting 6 to 9.'
   else out.recipientPhone = phone
   const postal = typeof input.postalCode === 'string' ? input.postalCode.trim() : null
-  if (postal === null || !isPin(postal)) errors.postalCode = 'Enter a 6-digit PIN code (it does not start with 0).'
+  if (postal === null || !isPin(postal))
+    errors.postalCode = 'Enter a 6-digit PIN code (it does not start with 0).'
   else out.postalCode = postal
   const fields = [
     ['recipientName', true],

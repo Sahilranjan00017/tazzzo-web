@@ -6,7 +6,11 @@
 export const ADDRESS_LABELS = ['HOME', 'WORK', 'OTHER'] as const
 export type AddressLabel = (typeof ADDRESS_LABELS)[number]
 
-export const LABEL_TEXT: Record<AddressLabel, string> = { HOME: 'Home', WORK: 'Work', OTHER: 'Other' }
+export const LABEL_TEXT: Record<AddressLabel, string> = {
+  HOME: 'Home',
+  WORK: 'Work',
+  OTHER: 'Other',
+}
 
 export interface AddressFields {
   label: AddressLabel

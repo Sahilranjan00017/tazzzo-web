@@ -87,7 +87,9 @@ export function LocationForm({ initial, csrfToken, addresses, selectedAddressId,
     if (reply.ok && reply.data) {
       setCurrent(reply.data)
       setSelected(address.addressId)
-      setStatus(`Delivering to your ${LABEL_TEXT[address.label]} address. ${resultText(reply.data)}`)
+      setStatus(
+        `Delivering to your ${LABEL_TEXT[address.label]} address. ${resultText(reply.data)}`,
+      )
       router.refresh()
       return
     }

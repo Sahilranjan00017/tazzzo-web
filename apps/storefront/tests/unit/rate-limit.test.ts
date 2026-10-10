@@ -80,6 +80,11 @@ describe('isExpensivePath', () => {
     ['/api/auth/otp/request', '', true],
     ['/api/auth/otp/verify', '', true],
     ['/api/auth/logout', '', false],
+    ['/api/location', '', true],
+    ['/api/checkout/delivery', '', true],
+    ['/api/location/clear', '', false],
+    ['/api/addresses', '', false],
+    ['/location', '', false],
     ['/login', '', false],
   ])('%s%s -> %s', (path, query, expected) => {
     expect(isExpensivePath(path, new URLSearchParams(query))).toBe(expected)

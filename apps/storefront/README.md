@@ -2,21 +2,25 @@
 
 The customer website: home merchandising, product detail, category browse and search, rendered by Next.js from the
 **public** Tazzzo API (`/v1/**`, tazzzo-backend `docs/api/v1/openapi.yaml`), plus customer sign-in with a phone OTP and a
-server-side session (`/login`, `/account`) and the customer cart (`/cart`, Add to cart on `/p/[id]`). No checkout yet.
+server-side session (`/login`, `/account`), the customer cart (`/cart`, Add to cart on `/p/[id]`), the delivery location, saved addresses and
+delivery slots (`/location`, `/account/addresses`, `/checkout/delivery`). No payment or order placement yet.
 
 ## Routes
 
-| Route          | Backend reads (all from the Next server, never the browser)                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `/`            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile     |
-| `/p/[id]`      | `GET /v1/products/{id}` (gallery, price, description)                                                                    |
-| `/c/[node]`    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                               |
-| `/search?q=`   | `GET /v1/search` (never cached)                                                                                          |
-| `/login`       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                    |
-| `/account`     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`       |
-| `/cart`        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]` |
-| `/robots.txt`  | none                                                                                                                     |
-| `/sitemap.xml` | `GET /v1/categories` (home + super-categories)                                                                           |
+| Route                          | Backend reads (all from the Next server, never the browser)                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `/`                            | `GET /v1/content/home?channel=web`; rails: `GET /v1/products/{id}` per id; grids: `GET /v1/categories/{id}` per tile     |
+| `/p/[id]`                      | `GET /v1/products/{id}` (gallery, price, description)                                                                    |
+| `/c/[node]`                    | `GET /v1/categories/{id}` (title), `/children`, `/products` (cursor paged)                                               |
+| `/search?q=`                   | `GET /v1/search` (never cached)                                                                                          |
+| `/login`                       | none (the page); the form calls `/api/auth/otp/*`, which call `/v1/auth/otp/*` and `/v1/auth/session`                    |
+| `/account`                     | `GET /v1/customer/profile` (bearer); `/api/auth/refresh` and `/api/auth/logout` call `/v1/auth/refresh`, `/logout`       |
+| `/location`                    | `GET /v1/serviceability?pin=` (via `POST /api/location`); signed in: `GET /v1/customer/addresses`                        |
+| `/account/addresses[/new,/id]` | `GET /v1/customer/addresses[/{id}]`; mutations via `/api/addresses/*`                                                    |
+| `/checkout/delivery`           | `GET /v1/customer/addresses`, `GET /v1/customer/delivery/slots?pin=`                                                     |
+| `/cart`                        | `GET /v1/customer/cart` (bearer); the page calls `/api/cart/*`, which call `PUT`/`DELETE /v1/customer/cart[/items/{id}]` |
+| `/robots.txt`                  | none                                                                                                                     |
+| `/sitemap.xml`                 | `GET /v1/categories` (home + super-categories)                                                                           |
 
 ### Home content contract
 
@@ -159,11 +163,11 @@ backend token, every call is made by the Next server with the sealed session's b
   (`REVALIDATE` after 24 h; carts expire after 7 days and read as empty) and `subtotalPaise` = sum of **priced** lines at **current**
   prices (not a payable total: no delivery, fees, tax). Nothing is reserved or price-locked. There is no merge/guest cart and no
   idempotency key; the version is the only concurrency control.
-- **No delivery location is sent** (`addressId` needs a saved-address UI that does not exist yet), so the backend answers
-  `LOCATION_REQUIRED` and stock `UNKNOWN` for every line, `buyable: false`. The site shows that as information ("Stock and delivery are
-  confirmed once a delivery address is chosen"), **not** as a blocking problem, and shows every other issue exactly as reported.
-  The public product read has no location either, so its `stockState` is normally `UNKNOWN`; a known `OUT_OF_STOCK` disables Add to
-  cart up front, otherwise the backend's own answer to the add is what the product page reports.
+- **The cart is located by a saved address only** (`?addressId=` on every cart call, see Delivery location below). Without a chosen address the
+  backend answers `LOCATION_REQUIRED` and stock `UNKNOWN` for every line, `buyable: false`; the site shows that as information ("Stock and
+  delivery are confirmed once a delivery address is chosen", with a link to `/location`), **not** as a blocking problem, and shows every other
+  issue exactly as reported. A chosen address the backend no longer knows (404) is retried without it. A known `OUT_OF_STOCK` on the product page
+  disables Add to cart up front, otherwise the backend's own answer to the add is what the product page reports.
 
 **Routes** (all `POST` + JSON, body capped at 2 KiB, **exactly** the listed fields, `no-store` JSON out; `GET /api/cart` is read-only):
 
@@ -196,10 +200,61 @@ flight but stay focusable via `aria-disabled`). Results go to a polite live regi
 the cart heading; the stepper buttons are 44 px. The header **Cart** link shows the item count: one best-effort cart read per page view for
 signed-in visitors (time-boxed to 1.5 s, shared with the `/cart` page render by React `cache`), nothing when it fails.
 
-**Limits / not done.** No checkout, delivery address or saved-address location (so stock is `UNKNOWN` until that lands), no guest cart or
-merge, no client-side persistence. `/api/cart/*` passes through the per-visitor limiter (page bucket) like every other request. The
+**Limits / not done.** No checkout, no guest cart or merge, no client-side persistence. `/api/cart/*` passes through the per-visitor limiter (page bucket) like every other request. The
 `MAX_QUANTITY_PER_ITEM`/`MAX_DISTINCT_ITEMS` constants (20/50) are the backend's defaults (`tazzzo.customer-cart.*`); if the backend is
 configured lower it answers 400 and the customer sees the quantity message.
+
+## Delivery location, addresses and slots (`src/server/location/*`, `src/server/address/*`, `src/server/delivery/*`)
+
+Built only on what the backend serves (controllers read at tazzzo-backend `origin/main` b3ee656): `CommerceReadController`, `AddressController`,
+`DeliverySlotController`, `CartLocationResolver`, `CheckoutController`/`OrderController`.
+
+**How a location reaches the backend (there are two forms, not one).**
+
+- Public reads (`/v1/products/{id}`, `/v1/search`, `/v1/categories/{id}/products`, and `/v1/serviceability`) take **`?pin=`**, a six-digit PIN
+  `^[1-9][0-9]{5}$` (after trimming). `lat`/`lng` are refused by the backend unless an operator enabled a geo provider, so they are never sent. Without a
+  PIN the backend answers anonymously (stock `UNKNOWN`). The site sends the PIN only when `GET /v1/serviceability` said it is serviceable, so the 60 s data
+  cache holds one copy per real service-area PIN, never per string a visitor typed. Cached stock can therefore be up to ~60 s old.
+- The customer cart takes **only `?addressId=`** of a saved address (looked up scoped to the caller; foreign, unknown and malformed ids are the same
+  404). There is no PIN form on the cart. So a signed-in customer who wants real cart stock picks a saved address.
+- A list/search **cursor is bound to the location it started under**: after a PIN change the backend refuses the old cursor (400). The pages treat that
+  as "start again" and redirect to the first page.
+
+**The location cookie** (`__Host-tz_loc`, `tz_loc_dev` on plain http): sealed (S1 helper, purpose `location`), `HttpOnly; Secure; SameSite=Lax; Path=/`, 90 days.
+It holds the PIN, the backend's serviceable answer (true/false/null), and, for a saved address, its id plus the customer id it belongs to; the address
+id is honoured only for that customer's session (another customer in the same browser, or signed out, ignores it) and is forgotten on sign-out and
+when the address is deleted. No name, phone or street. Signed-out visitors can set a PIN. An unserviceable PIN is remembered as "Not delivering to ..."
+(chip, product page) and is not sent to product reads.
+
+**Routes** (all `POST` + JSON, CSRF as the cart: `X-Tazzzo-CSRF` = session token or `1` signed out, `Sec-Fetch-Site`, `Origin` = `Host`; exact fields):
+
+| Route                         | Body                                   | Backend                                                           |
+| ----------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| `POST /api/location`          | `{pin}` or `{addressId}` (signed in)   | `GET /v1/serviceability?pin=` / `GET /v1/customer/addresses/{id}` |
+| `POST /api/location/clear`    | `{}`                                   | none                                                              |
+| `POST /api/addresses`         | nine address fields + `idempotencyKey` | `POST /v1/customer/addresses` + `Idempotency-Key`                 |
+| `POST /api/addresses/update`  | nine fields + `addressId` + `version`  | `PATCH` + `If-Match: "address-<version>"`                         |
+| `POST /api/addresses/delete`  | `{addressId, version}`                 | `DELETE` + `If-Match`                                             |
+| `POST /api/addresses/default` | `{addressId}`                          | `PUT .../default`                                                 |
+| `POST /api/checkout/delivery` | `{addressId, slotId}`                  | `GET` address, `GET /v1/customer/delivery/slots?pin=`             |
+
+A customer id (or any unlisted field) in a body is a 400: the backend takes the customer from the bearer token and scopes every address id to it, so
+an id of another customer is a 404 and the BFF adds no user id of its own. Address bodies may be 8 KiB (free text up to ~680 characters); the others 2 KiB.
+Validation mirrors `AddressService`: label HOME/WORK/OTHER; name <= 80, lines <= 160, landmark <= 120, city/state <= 80 code points, trimmed, no control
+characters; PIN grammar; Indian mobile (sent as `+91...`). Edit and delete present the version the page saw (`409 conflict` when stale, and the page
+refreshes); the first address becomes the default; at most 10 (409 `limit_reached`). Create sends an `Idempotency-Key` that the form reuses only while its
+contents are unchanged, so a retry after a lost reply never creates a second address. Error codes are a closed set; backend text, ids and PII never reach
+the page or the logs (address ids are masked in log labels).
+
+**Slots.** `GET /v1/customer/delivery/slots?pin=` returns `{serviceable, timezone, slots[{slotId, date, startsAt, endsAt, label, status}]}` for the default
+horizon (3 days); status is AVAILABLE / FULL / CLOSED (no capacity numbers, computed fresh, nothing reserved by reading). `SlotPicker` is a reusable,
+controlled radio group (dates, windows in the delivery zone, "Fully booked"/"Booking closed", unserviceable/empty states). **The backend ties a slot to
+the ORDER only** (`deliverySlotId` on placing the order, reserved in its transaction; the checkout quote takes just `addressId` + the cart version), so
+`/checkout/delivery` validates the choice with the backend (the address is the caller's and serviceable, the slot is offered for its PIN and AVAILABLE) and
+keeps `{customer, addressId, slotId}` in a sealed 30-minute cookie (`__Host-tz_checkout`) for the order step, which must re-check it. It places no order.
+
+**Limits / not done.** No payment or order placement (S4). The cart uses a saved address only if one was chosen (no automatic "use the default address" yet). No
+map or lat/lng. Slot horizon is the backend default; `days` is not sent. A PIN's serviceability is checked when it is set (not re-checked per page).
 
 ## Images
 
@@ -260,12 +315,15 @@ pnpm --filter storefront build          # standalone output
    The site shows a hint on a 400.
 7. **No banner dimension contract.** The site assumes 16:9 (and 3:1 on desktop when every banner in a carousel has a
    desktop image), `object-fit: cover`.
-8. **PDP / category products are `private, no-store`.** The site caches them 60 s server-side because it never sends a
-   location, so the answers are the same for everyone; price/stock shown can be up to ~60 s old.
-9. **No product enumeration** for the sitemap.
-10. **Visitor IP for OTP buckets.** `/v1/auth/otp/*` rate-limits by client IP, which the backend derives only from a trusted proxy's
+8. **PDP / category products are `private, no-store`.** The site caches them 60 s server-side (one copy per serviceable PIN, keyed by URL),
+   so price/stock shown can be up to ~60 s old.
+9. **Cart location is address-only.** `GET/PUT/DELETE /v1/customer/cart*` accept `addressId` but no PIN, so a customer must save an address to see real cart
+   stock. **OpenAPI is thin for these endpoints** (`docs/openapi.json` lists no response codes, `isDefault`, the 201 on create, 204 on delete, or the
+   `IDEMPOTENCY_CONFLICT`/`ADDRESS_LIMIT_REACHED` codes); the controllers are the source of truth used here.
+10. **No product enumeration** for the sitemap.
+11. **Visitor IP for OTP buckets.** `/v1/auth/otp/*` rate-limits by client IP, which the backend derives only from a trusted proxy's
     `X-Forwarded-For`; the storefront server is not such a proxy and the trusted-caller credential does not carry the visitor, so all
     sign-ins share this server's IP bucket until the backend offers a trusted way to pass the visitor address (or exempts the caller).
     The per-phone/per-challenge buckets and this site's per-visitor limiter bound abuse meanwhile.
-11. **Refresh-token rotation across instances.** The cookie holds the only copy of the refresh token; two instances refreshing the same
+12. **Refresh-token rotation across instances.** The cookie holds the only copy of the refresh token; two instances refreshing the same
     cookie at the same instant can lose the race (the loser signs in again). Single-flight per process removes the common case.

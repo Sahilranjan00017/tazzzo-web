@@ -21,6 +21,13 @@ import { deflateSync } from 'node:zlib'
  *   1..20, 50 distinct lines (409 CART_ITEM_LIMIT_REACHED), unknown/invalid sku 404, every answer the full enriched cart.
  *   With no `addressId` the backend knows no location, so every line is `LOCATION_REQUIRED` with stock `UNKNOWN`;
  *   `POST /__control/cart` switches a sku to the answers a located cart gives (out of stock, price changed, ...).
+ * - delivery location, addresses and slots (S3; compared with the controller sources, differences listed in the PR):
+ *   `GET /v1/serviceability?pin=` (pin required, `^[1-9][0-9]{5}$`, lat/lng 400; serviceable PINs 560001, 560002, 110001; 500500
+ *   is a 503), `?pin=` on product/list/search reads (stock and `serviceable` only for a serviceable PIN; lat/lng 400; list/search
+ *   cursors are bound to the PIN they started under), `?addressId=` on the cart (owned address -> located by its PIN; foreign,
+ *   unknown or malformed id -> 404), `/v1/customer/addresses**` (per customer; 201 create with optional `Idempotency-Key`,
+ *   `If-Match: "address-<n>"` on PATCH/DELETE, 10 max, first becomes default, strict field validation) and
+ *   `GET /v1/customer/delivery/slots` (AVAILABLE / FULL / CLOSED, no capacity). `+919123456780` signs in as a second customer.
  * Every API request is recorded (with any trusted-caller headers); tests read them through `GET /__control/requests`. `POST /__control/media?down=1`
  * makes the media host fail every image (CDN outage).
  */
@@ -37,6 +44,8 @@ export interface RecordedRequest {
   forwardedFor: string | null
   /** `If-Match` as received (the cart's version precondition), or null. */
   ifMatch: string | null
+  /** `Idempotency-Key` as received (address create), or null. */
+  idempotencyKey: string | null
 }
 
 interface FakeSession {
@@ -64,6 +73,25 @@ interface FakeCart {
   freshness: 'FRESH' | 'REVALIDATE'
 }
 
+interface FakeAddress {
+  addressId: string
+  customerId: string
+  label: string
+  recipientName: string
+  recipientPhone: string
+  addressLine1: string
+  addressLine2: string | null
+  landmark: string | null
+  city: string
+  state: string
+  postalCode: string
+  version: number
+}
+
+const SERVICEABLE_PINS = new Set(['560001', '560002', '110001'])
+const PIN_RE = /^[1-9][0-9]{5}$/
+const ADDRESS_ID_RE = /^ADDR_[A-Za-z0-9_-]{6,64}$/
+
 export class FakeBackend {
   url = ''
   mediaUrl = ''
@@ -80,6 +108,13 @@ export class FakeBackend {
   private readonly cartModes = new Map<string, CartMode>()
   private readonly cartPrices = new Map<string, number>()
   private cartDown = false
+  private readonly grantPhones = new Map<string, string>()
+  private readonly addresses = new Map<string, FakeAddress[]>()
+  private readonly addressKeys = new Map<string, { hash: string; id: string }>()
+  private defaultByCustomer = new Map<string, string>()
+  private paged = false
+  private slotsFull = false
+  private addressDown = false
   private api?: Server
   private media?: Server | HttpsServer
 
@@ -295,7 +330,7 @@ export class FakeBackend {
   }
 
   /** The cart as the backend presents it (`CartResponseDto`), enriched per line by the sku's mode. */
-  private presentCart(): Record<string, unknown> {
+  private presentCart(pin: string | null): Record<string, unknown> {
     const catalog = this.catalog()
     let subtotal = 0
     let itemCount = 0
@@ -323,12 +358,17 @@ export class FakeBackend {
       }
       const lineTotal = unit * line.quantity
       subtotal += lineTotal
-      const located = mode !== 'default'
-      const stock = mode === 'out_of_stock' ? 'OUT_OF_STOCK' : located ? 'IN_STOCK' : 'UNKNOWN'
-      const maxOrder = mode === 'out_of_stock' ? 0 : mode === 'insufficient' ? 2 : located ? 10 : 0
+      // Located by a saved address (its PIN) or, for the older tests, forced by the line's control mode.
+      const byAddress = pin !== null
+      const located = mode !== 'default' || byAddress
+      const pinServed = pin === null || SERVICEABLE_PINS.has(pin)
+      const stock =
+        mode === 'out_of_stock' ? 'OUT_OF_STOCK' : located && pinServed ? 'IN_STOCK' : 'UNKNOWN'
+      const maxOrder =
+        mode === 'out_of_stock' ? 0 : mode === 'insufficient' ? 2 : located && pinServed ? 10 : 0
       const issues: string[] = []
       if (!located) issues.push('LOCATION_REQUIRED')
-      if (mode === 'unserviceable') issues.push('UNSERVICEABLE')
+      if (mode === 'unserviceable' || !pinServed) issues.push('UNSERVICEABLE')
       if (mode === 'out_of_stock') issues.push('OUT_OF_STOCK')
       if (mode === 'insufficient' && line.quantity > 2) issues.push('INSUFFICIENT_STOCK')
       if (mode === 'price_changed') issues.push('PRICE_CHANGED')
@@ -343,7 +383,7 @@ export class FakeBackend {
         availability: {
           stockState: stock,
           maxOrderQuantity: maxOrder,
-          serviceable: mode === 'unserviceable' ? false : located ? true : null,
+          serviceable: mode === 'unserviceable' || !pinServed ? false : located ? true : null,
         },
         lineTotalPaise: lineTotal,
         buyable: issues.length === 0 || (issues.length === 1 && issues[0] === 'PRICE_CHANGED'),
@@ -369,9 +409,21 @@ export class FakeBackend {
     body: unknown,
     out: (status: number, body: unknown, headers?: Record<string, string>) => void,
     fail: (status: number, code: string) => void,
+    customerId: string,
+    query: URLSearchParams,
   ): void {
     if (this.cartDown) return fail(503, 'SERVICE_UNAVAILABLE')
-    const reply = () => out(200, this.presentCart(), { etag: `"cart-${this.cart.version}"` })
+    // CartLocationResolver: `addressId` is looked up scoped to the caller; foreign, unknown and malformed are one 404.
+    let pin: string | null = null
+    const addressId = query.get('addressId')
+    if (addressId !== null) {
+      const own = ADDRESS_ID_RE.test(addressId)
+        ? (this.addresses.get(customerId) ?? []).find((a) => a.addressId === addressId)
+        : undefined
+      if (!own) return fail(404, 'NOT_FOUND')
+      pin = own.postalCode
+    }
+    const reply = () => out(200, this.presentCart(pin), { etag: `"cart-${this.cart.version}"` })
     const header = req.headers['if-match']
     const mutating = req.method !== 'GET'
     let expected = -1
@@ -421,6 +473,65 @@ export class FakeBackend {
     'TZS-000002': { name: 'Fruits', children: [] },
     'TZC-000002': { name: 'Rice', children: ['TZG-000004'] },
     'TZG-000004': { name: 'Basmati', children: [] },
+  }
+
+  /** The validated PIN (null when absent), or 'invalid' (malformed pin, or any lat/lng). `required`: absent -> null is "invalid" for serviceability. */
+  private locationParams(url: URL, optional = false): string | null | 'invalid' {
+    if (url.searchParams.has('lat') || url.searchParams.has('lng')) return 'invalid'
+    const pin = url.searchParams.get('pin')
+    if (pin === null || pin.trim() === '') return optional ? null : 'invalid'
+    return PIN_RE.test(pin.trim()) ? pin.trim() : 'invalid'
+  }
+
+  /** A product card as the backend answers it for a location: stock and serviceability only with a serviceable PIN. */
+  private located(card: Record<string, unknown>, pin: string | null): Record<string, unknown> {
+    if (pin === null) return card
+    if (!SERVICEABLE_PINS.has(pin))
+      return { ...card, serviceable: false, stockState: 'UNKNOWN', buyable: false }
+    const id = String(card.productId)
+    if (card.stockState === 'OUT_OF_STOCK') return { ...card, serviceable: true }
+    if (id === 'TZP-1002') {
+      return {
+        ...card,
+        serviceable: true,
+        stockState: 'LOW_STOCK',
+        lowStockRemaining: 3,
+        maxOrderQuantity: 3,
+        buyable: true,
+      }
+    }
+    return {
+      ...card,
+      serviceable: true,
+      stockState: 'IN_STOCK',
+      maxOrderQuantity: 10,
+      buyable: true,
+    }
+  }
+
+  /** A list/search page. Cursors are bound to the location they started under (a different one is 400, like the backend). */
+  private page(
+    all: Array<Record<string, unknown>>,
+    pin: string | null,
+    url: URL,
+    send: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    error: (status: number, code: string) => void,
+    requestId: string,
+  ): void {
+    const context = pin ?? 'anon'
+    const cursor = url.searchParams.get('cursor')
+    if (cursor !== null && cursor !== `cur-${context}`) return error(400, 'INVALID_CURSOR')
+    const items = all.map((p) => this.located(p, pin))
+    if (!this.paged) return send(200, { resolvedReleaseId: 'R1', items, hasMore: false, requestId })
+    return cursor === null
+      ? send(200, {
+          resolvedReleaseId: 'R1',
+          items: items.slice(0, 1),
+          hasMore: true,
+          nextCursor: `cur-${context}`,
+          requestId,
+        })
+      : send(200, { resolvedReleaseId: 'R1', items: items.slice(1), hasMore: false, requestId })
   }
 
   private async handleApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -477,6 +588,24 @@ export class FakeBackend {
         }
         return send(200, this.cart)
       }
+      if (url.pathname === '/__control/delivery' && req.method === 'POST') {
+        const q = url.searchParams
+        if (q.get('reset') === '1') {
+          this.addresses.clear()
+          this.addressKeys.clear()
+          this.defaultByCustomer.clear()
+          this.paged = false
+          this.slotsFull = false
+          this.addressDown = false
+        }
+        if (q.get('paged')) this.paged = q.get('paged') === '1'
+        if (q.get('slotsFull')) this.slotsFull = q.get('slotsFull') === '1'
+        if (q.get('addressDown')) this.addressDown = q.get('addressDown') === '1'
+        // Another device deleted every address of a customer.
+        const wipe = q.get('wipe')
+        if (wipe) this.addresses.delete(wipe)
+        return send(200, { ok: true })
+      }
       if (url.pathname === '/__control/media' && req.method === 'POST') {
         this.mediaDown = url.searchParams.get('down') === '1'
         return send(200, { mediaDown: this.mediaDown })
@@ -496,6 +625,7 @@ export class FakeBackend {
       bearer: header('authorization') !== null,
       forwardedFor: header('x-forwarded-for'),
       ifMatch: header('if-match'),
+      idempotencyKey: header('idempotency-key'),
     })
     if (url.pathname.startsWith('/v1/auth/') || url.pathname.startsWith('/v1/customer/')) {
       return this.handleAuth(req, res, url, send)
@@ -522,13 +652,30 @@ export class FakeBackend {
       return send(200, { blocks, requestId: 'req_home' }, { 'cache-control': 'public, max-age=60' })
     }
 
+    if (url.pathname === '/v1/serviceability') {
+      const bad = this.locationParams(url)
+      if (bad === 'invalid' || bad === null) return error(400, 'INVALID_REQUEST')
+      if (bad === '500500') return error(503, 'SERVICE_UNAVAILABLE')
+      const serviceable = SERVICEABLE_PINS.has(bad)
+      return send(
+        200,
+        serviceable
+          ? { serviceable, serviceAreaId: 'SA_blr', serviceAreaVersion: 3, requestId: 'req_svc' }
+          : { serviceable, requestId: 'req_svc' },
+        { 'cache-control': 'private, no-store' },
+      )
+    }
+    // pin / lat / lng on the reads: a malformed PIN or any lat/lng is 400; absent = anonymous.
+    const where = this.locationParams(url, true)
+    if (where === 'invalid') return error(400, 'INVALID_REQUEST')
+
     const product = /^\/v1\/products\/([^/]+)$/.exec(url.pathname)
     if (product) {
       const p = this.catalog()[decodeURIComponent(product[1] ?? '')]
       if (!p) return error(404, 'NOT_FOUND')
       return send(
         200,
-        { ...p, resolvedReleaseId: 'R1', requestId: 'req_pdp' },
+        { ...this.located(p, where), resolvedReleaseId: 'R1', requestId: 'req_pdp' },
         { 'cache-control': 'private, no-store' },
       )
     }
@@ -561,8 +708,7 @@ export class FakeBackend {
     const listing = /^\/v1\/categories\/([^/]+)\/products$/.exec(url.pathname)
     if (listing) {
       if (!this.nodes[listing[1] ?? '']) return error(404, 'NOT_FOUND')
-      const items = Object.values(this.products())
-      return send(200, { resolvedReleaseId: 'R1', items, hasMore: false, requestId: 'req_list' })
+      return this.page(Object.values(this.products()), where, url, send, error, 'req_list')
     }
     if (url.pathname === '/v1/search') {
       const q = url.searchParams.get('q') ?? ''
@@ -578,7 +724,7 @@ export class FakeBackend {
           .split(/[^\p{L}\p{M}\p{N}]+/u)
         return tokens.every((t) => words.some((w) => w.startsWith(t)))
       })
-      return send(200, { resolvedReleaseId: 'R1', items, hasMore: false, requestId: 'req_search' })
+      return this.page(items, where, url, send, error, 'req_search')
     }
     return error(404, 'NOT_FOUND')
   }
@@ -670,6 +816,7 @@ export class FakeBackend {
       this.challenges.delete(String(body.challengeId))
       const grantId = `GRANT_${rand(18)}`
       this.grants.add(grantId)
+      this.grantPhones.set(grantId, challenge.phone)
       return out(200, {
         challengeId: body.challengeId,
         verified: true,
@@ -681,7 +828,8 @@ export class FakeBackend {
       const grantId = String(body.grantId)
       if (!this.grants.delete(grantId)) return code(401, 'UNAUTHENTICATED')
       const session: FakeSession = {
-        customerId: 'CUS_e2e0001',
+        customerId:
+          this.grantPhones.get(grantId) === '+919123456780' ? 'CUS_e2e0002' : 'CUS_e2e0001',
         refreshToken: '',
         accessTokens: new Set(),
         revoked: false,
@@ -709,7 +857,24 @@ export class FakeBackend {
     }
     if (path === '/v1/customer/cart' || path.startsWith('/v1/customer/cart/')) {
       if (!sessionFor(bearer)) return code(401, 'UNAUTHENTICATED')
-      return this.handleCart(req, path, body, out, code)
+      return this.handleCart(
+        req,
+        path,
+        body,
+        out,
+        code,
+        sessionFor(bearer)!.customerId,
+        url.searchParams,
+      )
+    }
+    if (path === '/v1/customer/addresses' || path.startsWith('/v1/customer/addresses/')) {
+      const session = sessionFor(bearer)
+      if (!session) return code(401, 'UNAUTHENTICATED')
+      return this.handleAddresses(req, path, body, out, code, session.customerId)
+    }
+    if (path === '/v1/customer/delivery/slots') {
+      if (!sessionFor(bearer)) return code(401, 'UNAUTHENTICATED')
+      return this.handleSlots(req, url, out, code)
     }
     if (req.method === 'GET' && path === '/v1/customer/profile') {
       const session = sessionFor(bearer)
@@ -723,6 +888,228 @@ export class FakeBackend {
       })
     }
     return code(404, 'NOT_FOUND')
+  }
+
+  private addressView(a: FakeAddress): Record<string, unknown> {
+    const isDefault = this.defaultByCustomer.get(a.customerId) === a.addressId
+    const { customerId: _owner, ...rest } = a
+    void _owner
+    return {
+      ...rest,
+      latitude: null,
+      longitude: null,
+      isDefault,
+      serviceability: { serviceable: SERVICEABLE_PINS.has(a.postalCode) },
+      requestId: 'req_addr',
+    }
+  }
+
+  /** `/v1/customer/addresses**` (AddressController + AddressService + AddressExceptionHandler). */
+  private handleAddresses(
+    req: IncomingMessage,
+    path: string,
+    body: Record<string, unknown>,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+    customerId: string,
+  ): void {
+    if (this.addressDown) return fail(503, 'SERVICE_UNAVAILABLE')
+    const mine = this.addresses.get(customerId) ?? []
+    const etag = (a: FakeAddress) => ({ etag: `"address-${a.version}"` })
+    const sorted = () =>
+      [...mine].sort(
+        (x, y) =>
+          Number(this.defaultByCustomer.get(customerId) === y.addressId) -
+          Number(this.defaultByCustomer.get(customerId) === x.addressId),
+      )
+    const text = (raw: unknown, max: number, required: boolean): string | null | undefined => {
+      if (raw === undefined || raw === null) return required ? undefined : null
+      if (typeof raw !== 'string') return undefined
+      const t = raw.trim()
+      if (t === '') return required ? undefined : null
+      if ([...t].length > max || /[\u0000-\u001f\u007f-\u009f]/.test(t)) return undefined
+      return t
+    }
+    const phone = (raw: unknown): string | undefined => {
+      if (typeof raw !== 'string') return undefined
+      const t = raw.trim()
+      if (t.length === 0 || t.length > 16) return undefined
+      if (/^\+91[6-9][0-9]{9}$/.test(t)) return t
+      if (/^[6-9][0-9]{9}$/.test(t)) return `+91${t}`
+      if (/^0[6-9][0-9]{9}$/.test(t)) return `+91${t.slice(1)}`
+      return undefined
+    }
+    /** Normalises a full or partial field set; undefined = INVALID_REQUEST. */
+    const fields = (
+      src: Record<string, unknown>,
+      partial: boolean,
+    ): Partial<FakeAddress> | undefined => {
+      const out: Record<string, unknown> = {}
+      const spec: Array<[string, (v: unknown) => unknown]> = [
+        [
+          'label',
+          (v) =>
+            typeof v === 'string' && ['HOME', 'WORK', 'OTHER'].includes(v.trim().toUpperCase())
+              ? v.trim().toUpperCase()
+              : undefined,
+        ],
+        ['recipientName', (v) => text(v, 80, true) ?? undefined],
+        ['recipientPhone', phone],
+        ['addressLine1', (v) => text(v, 160, true) ?? undefined],
+        ['addressLine2', (v) => text(v, 160, false)],
+        ['landmark', (v) => text(v, 120, false)],
+        ['city', (v) => text(v, 80, true) ?? undefined],
+        ['state', (v) => text(v, 80, true) ?? undefined],
+        [
+          'postalCode',
+          (v) => (typeof v === 'string' && PIN_RE.test(v.trim()) ? v.trim() : undefined),
+        ],
+      ]
+      for (const [key, check] of spec) {
+        if (partial && !(key in src)) continue
+        const value = check(src[key])
+        if (value === undefined) return undefined
+        out[key] = value
+      }
+      return out as Partial<FakeAddress>
+    }
+    const ifMatch = (): number | 'missing' | 'bad' => {
+      const h = req.headers['if-match']
+      if (typeof h !== 'string' || h.trim() === '') return 'missing'
+      const m = /^"?address-([0-9]{1,15})"?$/.exec(h.trim())
+      return m ? Number(m[1]) : 'bad'
+    }
+    const one = /^\/v1\/customer\/addresses\/([^/]+)(\/default)?$/.exec(path)
+    if (path === '/v1/customer/addresses' && req.method === 'GET') {
+      return out(200, { items: sorted().map((a) => this.addressView(a)), requestId: 'req_addr' })
+    }
+    if (path === '/v1/customer/addresses' && req.method === 'POST') {
+      const keyHeader = req.headers['idempotency-key']
+      const key = typeof keyHeader === 'string' ? keyHeader : null
+      if (key !== null && !/^[A-Za-z0-9_-]{8,64}$/.test(key)) return fail(400, 'INVALID_REQUEST')
+      const allowed = new Set([
+        'label',
+        'recipientName',
+        'recipientPhone',
+        'addressLine1',
+        'addressLine2',
+        'landmark',
+        'city',
+        'state',
+        'postalCode',
+        'latitude',
+        'longitude',
+      ])
+      void allowed // unknown properties are ignored by the backend DTO (Jackson); the BFF never sends any
+      const f = fields(body, false)
+      if (!f) return fail(400, 'INVALID_REQUEST')
+      const hash = JSON.stringify(f)
+      if (key !== null) {
+        const prior = this.addressKeys.get(`${customerId}:${key}`)
+        if (prior) {
+          const existing = mine.find((a) => a.addressId === prior.id)
+          if (prior.hash !== hash || !existing) return fail(409, 'IDEMPOTENCY_CONFLICT')
+          return out(201, this.addressView(existing), etag(existing))
+        }
+      }
+      if (mine.length >= 10) return fail(409, 'ADDRESS_LIMIT_REACHED')
+      const created: FakeAddress = {
+        addressId: `ADDR_${randomBytes(15).toString('base64url')}`,
+        customerId,
+        version: 1,
+        ...(f as Omit<FakeAddress, 'addressId' | 'customerId' | 'version'>),
+      }
+      this.addresses.set(customerId, [...mine, created])
+      if (mine.length === 0) this.defaultByCustomer.set(customerId, created.addressId)
+      if (key !== null)
+        this.addressKeys.set(`${customerId}:${key}`, { hash, id: created.addressId })
+      return out(201, this.addressView(created), etag(created))
+    }
+    if (!one) return fail(404, 'NOT_FOUND')
+    const id = decodeURIComponent(one[1] ?? '')
+    const target = ADDRESS_ID_RE.test(id) ? mine.find((a) => a.addressId === id) : undefined
+    if (one[2]) {
+      if (req.method !== 'PUT') return fail(405, 'INVALID_REQUEST')
+      if (!target) return fail(404, 'NOT_FOUND')
+      this.defaultByCustomer.set(customerId, target.addressId)
+      return out(200, this.addressView(target), etag(target))
+    }
+    if (req.method === 'GET') {
+      return target ? out(200, this.addressView(target), etag(target)) : fail(404, 'NOT_FOUND')
+    }
+    if (req.method === 'PATCH' || req.method === 'DELETE') {
+      const expected = ifMatch()
+      if (expected === 'missing') return fail(428, 'PRECONDITION_REQUIRED')
+      if (expected === 'bad') return fail(400, 'INVALID_REQUEST')
+      const patch = req.method === 'PATCH' ? fields(body, true) : {}
+      if (!patch) return fail(400, 'INVALID_REQUEST')
+      if (!target) return fail(404, 'NOT_FOUND')
+      if (target.version !== expected) return fail(412, 'PRECONDITION_FAILED')
+      if (req.method === 'DELETE') {
+        this.addresses.set(
+          customerId,
+          mine.filter((a) => a !== target),
+        )
+        if (this.defaultByCustomer.get(customerId) === target.addressId) {
+          const next = mine.find((a) => a !== target)
+          if (next) this.defaultByCustomer.set(customerId, next.addressId)
+          else this.defaultByCustomer.delete(customerId)
+        }
+        return out(204 as number, undefined)
+      }
+      Object.assign(target, patch, { version: target.version + 1 })
+      return out(200, this.addressView(target), etag(target))
+    }
+    return fail(405, 'INVALID_REQUEST')
+  }
+
+  /** `GET /v1/customer/delivery/slots` (DeliverySlotController): `pin` required, `days` 1..3 (the default horizon). */
+  private handleSlots(
+    req: IncomingMessage,
+    url: URL,
+    out: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (status: number, code: string) => void,
+  ): void {
+    if (req.method !== 'GET') return fail(405, 'INVALID_REQUEST')
+    const pin = url.searchParams.get('pin')
+    if (pin === null || !PIN_RE.test(pin.trim())) return fail(400, 'INVALID_REQUEST')
+    const days = url.searchParams.get('days')
+    if (days !== null && (!/^[1-9][0-9]?$/.test(days) || Number(days) > 3))
+      return fail(400, 'INVALID_REQUEST')
+    const serviceable = SERVICEABLE_PINS.has(pin.trim())
+    const slots: unknown[] = []
+    if (serviceable && pin.trim() !== '560002') {
+      const windows = [
+        { id: 'morning', label: 'Morning', from: 9, to: 11 },
+        { id: 'afternoon', label: 'Afternoon', from: 13, to: 15 },
+        { id: 'evening', label: 'Evening', from: 18, to: 20 },
+      ]
+      for (let d = 0; d < Number(days ?? 3); d++) {
+        const date = new Date(Date.now() + d * 86_400_000 + 5.5 * 3_600_000)
+          .toISOString()
+          .slice(0, 10)
+        for (const w of windows) {
+          const at = (h: number) => `${date}T${String(h).padStart(2, '0')}:00:00+05:30`
+          // Day 0: the afternoon is full and the evening closed; later days are open (unless `slotsFull`).
+          const status = this.slotsFull
+            ? 'FULL'
+            : d === 0 && w.id === 'afternoon'
+              ? 'FULL'
+              : d === 0 && w.id === 'evening'
+                ? 'CLOSED'
+                : 'AVAILABLE'
+          slots.push({
+            slotId: `${w.id}~${date}`,
+            date,
+            startsAt: at(w.from),
+            endsAt: at(w.to),
+            label: w.label,
+            status,
+          })
+        }
+      }
+    }
+    return out(200, { serviceable, timezone: 'Asia/Kolkata', slots, requestId: 'req_slots' })
   }
 
   private handleMedia(req: IncomingMessage, res: ServerResponse): void {

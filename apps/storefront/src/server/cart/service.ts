@@ -177,6 +177,8 @@ export async function emptyCart(session: CustomerSession, version: number): Prom
   return withAccess(session, async (token) => {
     const cleared = await located(addressId, (a) => clearCart(token, version, a))
     if (cleared.ok) return toOutcome(cleared)
-    return cleared.reason === 'conflict' ? withFresh('conflict', token, addressId) : toOutcome(cleared)
+    return cleared.reason === 'conflict'
+      ? withFresh('conflict', token, addressId)
+      : toOutcome(cleared)
   })
 }

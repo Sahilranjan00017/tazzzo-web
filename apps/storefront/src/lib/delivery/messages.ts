@@ -3,7 +3,10 @@ import { addressErrorMessage, type AddressError } from '@/lib/address/messages'
 /** The closed set of outcomes of saving the delivery choice (address + slot). Client-safe. */
 export type DeliveryError = AddressError | 'slot_unavailable' | 'unserviceable'
 
-export function deliveryErrorMessage(error: string, retryAfterSeconds: number | null = null): string {
+export function deliveryErrorMessage(
+  error: string,
+  retryAfterSeconds: number | null = null,
+): string {
   switch (error) {
     case 'slot_unavailable':
       return 'That delivery slot is no longer available. Please choose another.'

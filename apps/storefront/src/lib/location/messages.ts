@@ -10,7 +10,10 @@ export type LocationError =
   | 'rate_limited'
   | 'unavailable'
 
-export function locationErrorMessage(error: string, retryAfterSeconds: number | null = null): string {
+export function locationErrorMessage(
+  error: string,
+  retryAfterSeconds: number | null = null,
+): string {
   switch (error) {
     case 'invalid_pin':
       return PIN_HINT

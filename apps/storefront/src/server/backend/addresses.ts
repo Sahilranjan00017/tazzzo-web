@@ -57,7 +57,9 @@ function toAddress(a: z.infer<typeof addressBody>): Address {
 }
 
 /** The backend's public error code (and HTTP class) as one closed `AddressError`. */
-export function addressFailure(result: Extract<SendResult, { ok: false }>): AddressCallResult<never> {
+export function addressFailure(
+  result: Extract<SendResult, { ok: false }>,
+): AddressCallResult<never> {
   const base = { ok: false, retryAfterSeconds: result.retryAfterSeconds } as const
   switch (result.kind) {
     case 'unauthenticated':

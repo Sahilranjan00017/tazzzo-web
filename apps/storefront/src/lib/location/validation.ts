@@ -17,7 +17,8 @@ export function normalisePin(raw: unknown): string | null {
   return PIN.test(pin) ? pin : null
 }
 
-export const isPin = (value: unknown): value is string => typeof value === 'string' && PIN.test(value)
+export const isPin = (value: unknown): value is string =>
+  typeof value === 'string' && PIN.test(value)
 
 /** The opaque saved-address id (`AddressId`): never case-changed, never trusted beyond this shape. */
 export const isAddressId = (value: unknown): value is string =>
