@@ -12,9 +12,11 @@ import {
 import {
   SESSION_MAX_AGE_SECONDS,
   clearChallenge,
+  clearCheckoutChoice,
   clearSession,
   newCsrfToken,
   readChallenge,
+  unbindLocationAddress,
   writeChallenge,
   writeSession,
   type CustomerSession,
@@ -184,5 +186,8 @@ export async function signOut(
   }
   await clearSession()
   await clearChallenge()
+  // The saved address and the order-step choice belong to this customer; the PIN stays (it is the browser's).
+  await clearCheckoutChoice()
+  await unbindLocationAddress()
   return { revoked }
 }

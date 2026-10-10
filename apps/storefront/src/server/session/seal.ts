@@ -14,7 +14,7 @@ const IV_BYTES = 12
 const TAG_BYTES = 16
 const MAX_SEALED_LENGTH = 3_800 // a cookie, with its name and attributes, must stay within the 4096 byte browser limit
 
-export type SealPurpose = 'session' | 'challenge'
+export type SealPurpose = 'session' | 'challenge' | 'location' | 'checkout'
 
 function derive(secret: Buffer): Buffer {
   return Buffer.from(hkdfSync('sha256', secret, 'tazzzo-storefront', 'cookie-seal-v1', 32))

@@ -2,6 +2,7 @@ import 'server-only'
 import { z } from 'zod'
 import { isAllowedImageUrl } from '@/lib/images'
 import { PRODUCT_ID } from '@/lib/ids'
+import { isAddressId } from '@/lib/location/validation'
 import type { MediaBase } from '@/lib/media-base'
 import { ifMatch } from '@/lib/cart/validation'
 import { CART_ISSUES, type Cart, type CartIssue } from '@/lib/cart/model'
@@ -14,8 +15,9 @@ import { serverEnv } from '@/server/env'
  * `GET /v1/customer/cart`, `PUT /v1/customer/cart/items/{skuId}` (sets an exact quantity; `skuId` is the product id),
  * `DELETE /v1/customer/cart/items/{skuId}` and `DELETE /v1/customer/cart`. Every mutation REQUIRES `If-Match:
  * "cart-<version>"` (a stale version is 412, none is 428); every answer is the full, freshly enriched cart. There is
- * no merge call (no guest cart) and no `addressId` is sent (the site has no saved-address UI yet), so the backend
- * reports `LOCATION_REQUIRED` and stock `UNKNOWN`; that is shown as-is, never guessed. Success bodies are parsed with
+ * no merge call (no guest cart). The ONLY location the cart accepts is `?addressId=` (a saved address, looked up
+ * scoped to the caller: a foreign, unknown or malformed id is the same 404); it is sent when the customer chose one,
+ * and without it the backend reports `LOCATION_REQUIRED` and stock `UNKNOWN`; that is shown as-is, never guessed. Success bodies are parsed with
  * a strict schema; a body that does not match is `unavailable`, never passed on. Backend text is never read: only the
  * public error `code` selects a closed `CartError`.
  */
@@ -107,9 +109,11 @@ async function call(
   method: 'GET' | 'PUT' | 'DELETE',
   path: string,
   accessToken: string,
-  options: { body?: unknown; version?: number } = {},
+  options: { body?: unknown; version?: number; addressId?: string | null } = {},
 ): Promise<CartCallResult<Cart>> {
-  const result = await sendJson(method, path, {
+  const located = options.addressId && isAddressId(options.addressId) ? options.addressId : null
+  const target = located ? `${path}?addressId=${encodeURIComponent(located)}` : path
+  const result = await sendJson(method, target, {
     bearer: accessToken,
     body: options.body,
     ifMatch: options.version === undefined ? undefined : ifMatch(options.version),
@@ -129,8 +133,9 @@ const itemPath = (productId: string) => {
   return `/v1/customer/cart/items/${encodeURIComponent(productId)}`
 }
 
-/** `GET /v1/customer/cart`. */
-export const getCart = (accessToken: string) => call('GET', '/v1/customer/cart', accessToken)
+/** `GET /v1/customer/cart[?addressId=]`. */
+export const getCart = (accessToken: string, addressId: string | null = null) =>
+  call('GET', '/v1/customer/cart', accessToken, { addressId })
 
 /** `PUT /v1/customer/cart/items/{id}`: the line's quantity becomes exactly `quantity` (1..20), if `version` is current. */
 export const setCartItem = async (
@@ -138,12 +143,17 @@ export const setCartItem = async (
   productId: string,
   quantity: number,
   version: number,
-) => call('PUT', itemPath(productId), accessToken, { body: { quantity }, version })
+  addressId: string | null = null,
+) => call('PUT', itemPath(productId), accessToken, { body: { quantity }, version, addressId })
 
 /** `DELETE /v1/customer/cart/items/{id}`: 404 (`not_found`) when the line is not in the cart. */
-export const removeCartItem = async (accessToken: string, productId: string, version: number) =>
-  call('DELETE', itemPath(productId), accessToken, { version })
+export const removeCartItem = async (
+  accessToken: string,
+  productId: string,
+  version: number,
+  addressId: string | null = null,
+) => call('DELETE', itemPath(productId), accessToken, { version, addressId })
 
 /** `DELETE /v1/customer/cart`: empties the cart (the version still advances). */
-export const clearCart = (accessToken: string, version: number) =>
-  call('DELETE', '/v1/customer/cart', accessToken, { version })
+export const clearCart = (accessToken: string, version: number, addressId: string | null = null) =>
+  call('DELETE', '/v1/customer/cart', accessToken, { version, addressId })

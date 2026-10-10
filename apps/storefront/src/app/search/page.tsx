@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ProductGrid } from '@/components/ProductGrid'
 import { Unavailable } from '@/components/Unavailable'
 import { isCursor, searchProducts } from '@/server/backend/catalog'
+import { catalogPin } from '@/server/location/service'
 
 const MIN_QUERY = 2
 const MAX_QUERY = 64
@@ -37,7 +39,9 @@ export default async function SearchPage({ searchParams }: PageProps<'/search'>)
   const q = normalise(raw)
   const rawCursor = firstString(params.cursor)
   const cursor = isCursor(rawCursor) ? rawCursor : null
-  const result = q ? await searchProducts(q, cursor) : null
+  const result = q ? await searchProducts(q, cursor, await catalogPin()) : null
+  // The delivery location changed since this page was opened: its cursor no longer fits, start again.
+  if (result === 'stale_cursor' && q) redirect(`/search?${new URLSearchParams({ q })}`)
   return (
     <section className="listing" aria-labelledby="search-title">
       <h1 id="search-title">{q ? `Results for “${q}”` : 'Search'}</h1>
@@ -54,7 +58,7 @@ export default async function SearchPage({ searchParams }: PageProps<'/search'>)
         </p>
       )}
       {result === 'unavailable' && <Unavailable what="search results" />}
-      {result !== null && result !== 'rejected' && result !== 'unavailable' && (
+      {result !== null && result !== 'rejected' && result !== 'unavailable' && result !== 'stale_cursor' && (
         <>
           {result.items.length === 0 ? (
             <p role="status">No products match “{q}”.</p>

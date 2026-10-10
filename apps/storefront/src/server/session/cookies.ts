@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { z } from 'zod'
 import { serverEnv } from '@/server/env'
+import { isAddressId, isPin, isSlotId } from '@/lib/location/validation'
 import { seal, unseal, type SealPurpose } from '@/server/session/seal'
 
 /**
@@ -11,11 +12,17 @@ import { seal, unseal, type SealPurpose } from '@/server/session/seal'
  * - session: tokens + a per-session CSRF token; `HttpOnly; SameSite=Lax; Path=/`, `Secure` and the `__Host-` prefix
  *   whenever the site URL is https (production enforces https), no Domain, `Max-Age` = remaining session lifetime;
  * - challenge: the pending OTP challenge id (so it is bound to this browser), same attributes, lives as long as the
- *   code is valid.
+ *   code is valid;
+ * - location: the delivery location (PIN, whether it is serviceable and, for a signed-in customer who picked a saved
+ *   address, that address's id with the customer it belongs to), same attributes, 90 days. Signed-out visitors have one too;
+ * - checkout: the delivery address and slot a signed-in customer picked, kept for the order step (30 minutes).
  * Plain-http local development cannot use `__Host-`/`Secure` in every browser, so it uses separate `*_dev` names
  * without `Secure`; nothing else is relaxed (the admin app follows the same rule).
  */
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60 // the backend's default session lifetime; it ends it earlier if shorter
+
+export const LOCATION_MAX_AGE_SECONDS = 90 * 24 * 60 * 60
+export const CHECKOUT_CHOICE_MAX_AGE_SECONDS = 30 * 60
 
 export interface CustomerSession {
   customerId: string
@@ -53,6 +60,38 @@ const challengeSchema = z.object({
   expiresAt: z.number().int(),
 })
 
+export interface LocationCookie {
+  pin: string
+  /** The backend's answer when the PIN was checked; null when it could not tell. */
+  serviceable: boolean | null
+  /** A saved address chosen as the delivery location. Only honoured for `customerId` (see `locationFor`). */
+  addressId?: string
+  customerId?: string
+  expiresAt: number
+}
+
+const locationSchema = z.object({
+  pin: z.string().refine(isPin),
+  serviceable: z.boolean().nullable(),
+  addressId: z.string().refine(isAddressId).optional(),
+  customerId: z.string().min(1).max(128).optional(),
+  expiresAt: z.number().int(),
+})
+
+export interface CheckoutChoice {
+  customerId: string
+  addressId: string
+  slotId: string
+  expiresAt: number
+}
+
+const checkoutSchema = z.object({
+  customerId: z.string().min(1).max(128),
+  addressId: z.string().refine(isAddressId),
+  slotId: z.string().refine(isSlotId),
+  expiresAt: z.number().int(),
+})
+
 export function newCsrfToken(): string {
   return randomBytes(32).toString('base64url')
 }
@@ -60,8 +99,20 @@ export function newCsrfToken(): string {
 function policy() {
   const secure = new URL(serverEnv().siteUrl).protocol === 'https:'
   return secure
-    ? { session: '__Host-tz_session', challenge: '__Host-tz_otp', secure }
-    : { session: 'tz_session_dev', challenge: 'tz_otp_dev', secure }
+    ? {
+        session: '__Host-tz_session',
+        challenge: '__Host-tz_otp',
+        location: '__Host-tz_loc',
+        checkout: '__Host-tz_checkout',
+        secure,
+      }
+    : {
+        session: 'tz_session_dev',
+        challenge: 'tz_otp_dev',
+        location: 'tz_loc_dev',
+        checkout: 'tz_checkout_dev',
+        secure,
+      }
 }
 
 function attributes(secure: boolean, maxAgeSeconds: number) {
@@ -80,7 +131,7 @@ export function customerSessionsEnabled(): boolean {
 }
 
 async function read<T>(
-  name: 'session' | 'challenge',
+  name: 'session' | 'challenge' | 'location' | 'checkout',
   purpose: SealPurpose,
   schema: z.ZodType<T>,
   now: number,
@@ -130,4 +181,55 @@ export async function clearSession(): Promise<void> {
 export async function clearChallenge(): Promise<void> {
   const p = policy()
   ;(await cookies()).set(p.challenge, '', attributes(p.secure, 0))
+}
+
+/** The stored delivery location, or null (none, tampered, expired). Never calls the backend. */
+export function readLocation(now = Date.now()): Promise<LocationCookie | null> {
+  return read('location', 'location', locationSchema, now)
+}
+
+/** Route handlers only. The cookie lives `LOCATION_MAX_AGE_SECONDS` from `now`. */
+export async function writeLocation(
+  location: Omit<LocationCookie, 'expiresAt'>,
+  now = Date.now(),
+): Promise<void> {
+  const keys = serverEnv().sessionKeys
+  if (!keys) throw new Error('customer sessions are not configured')
+  const expiresAt = now + LOCATION_MAX_AGE_SECONDS * 1000
+  const sealed = seal('location', { ...location, expiresAt }, expiresAt, keys)
+  const p = policy()
+  ;(await cookies()).set(p.location, sealed, attributes(p.secure, LOCATION_MAX_AGE_SECONDS))
+}
+
+export async function clearLocation(): Promise<void> {
+  const p = policy()
+  ;(await cookies()).set(p.location, '', attributes(p.secure, 0))
+}
+
+/** Keeps the PIN but forgets the saved address (sign-out, the address was deleted). No-op without a location. */
+export async function unbindLocationAddress(): Promise<void> {
+  const current = await readLocation()
+  if (current?.addressId === undefined) return
+  await writeLocation({ pin: current.pin, serviceable: current.serviceable })
+}
+
+export function readCheckoutChoice(now = Date.now()): Promise<CheckoutChoice | null> {
+  return read('checkout', 'checkout', checkoutSchema, now)
+}
+
+export async function writeCheckoutChoice(
+  choice: Omit<CheckoutChoice, 'expiresAt'>,
+  now = Date.now(),
+): Promise<void> {
+  const keys = serverEnv().sessionKeys
+  if (!keys) throw new Error('customer sessions are not configured')
+  const expiresAt = now + CHECKOUT_CHOICE_MAX_AGE_SECONDS * 1000
+  const sealed = seal('checkout', { ...choice, expiresAt }, expiresAt, keys)
+  const p = policy()
+  ;(await cookies()).set(p.checkout, sealed, attributes(p.secure, CHECKOUT_CHOICE_MAX_AGE_SECONDS))
+}
+
+export async function clearCheckoutChoice(): Promise<void> {
+  const p = policy()
+  ;(await cookies()).set(p.checkout, '', attributes(p.secure, 0))
 }
