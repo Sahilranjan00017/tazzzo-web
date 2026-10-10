@@ -73,6 +73,8 @@ export function JobUpload({
   const needSettle = useRef(false)
   const alive = useRef(true)
   const refocus = useRef(false)
+  /** Fingerprint of the request currently in flight in this mounted run (cleared when its answer arrives). */
+  const inflightFp = useRef<string>(undefined)
   const retryButton = useRef<HTMLButtonElement>(null)
   const timing = useMemo(() => timingOverride ?? uploadTiming(), [timingOverride])
   const [appendAnyway, setAppendAnyway] = useState(false)
@@ -103,7 +105,8 @@ export function JobUpload({
   const needsConfirm =
     prepared !== undefined &&
     (prepared.existing > 0 || unresolved_.has(job.id)) &&
-    resumeAt === undefined
+    resumeAt === undefined &&
+    !running
   const blocked =
     !built ||
     built.missing.length > 0 ||
@@ -156,8 +159,9 @@ export function JobUpload({
     return () => {
       alive.current = false
       stop.current = true
+      if (inflightFp.current) unresolved_.set(job.id, inflightFp.current) // left mid-request
     }
-  }, [])
+  }, [job.id])
 
   /** Fresh, uncached read of the job: how many rows does the backend really hold, and can it still take rows? */
   async function readJob() {
@@ -370,22 +374,24 @@ export function JobUpload({
           }
         }
       }
-      // Marked BEFORE sending: if this page is left while the request is in flight, a returning user must not treat a later
-      // publish of these rows as anything but unknown.
-      unresolved_.set(
-        job.id,
-        chunkFingerprint(
-          built.sendable
-            .slice(sentBefore(i), sentBefore(i) + chunks[i]!.length)
-            .map((b) => b.value),
-        ),
+      // In flight in THIS mounted run: not an unknown outcome yet. If the page is left now, the cleanup effect converts it
+      // into one, so a returning user cannot treat a later publish of these rows as anything but unknown.
+      inflightFp.current = chunkFingerprint(
+        built.sendable.slice(sentBefore(i), sentBefore(i) + chunks[i]!.length).map((b) => b.value),
       )
       const result = await callBff<unknown>(
         `/api/bff/imports/jobs/${encodeURIComponent(job.id)}/rows`,
         'POST',
         { rows: chunks[i] },
       )
-      if (!alive.current) return
+      const fp = inflightFp.current
+      inflightFp.current = undefined
+      if (!alive.current) {
+        // The page was left while the request ran. A 2xx or a 4xx refusal is a definite answer; anything else stays unknown.
+        if (result.ok || isDefiniteFailure(result)) unresolved_.delete(job.id)
+        else if (fp) unresolved_.set(job.id, fp)
+        return
+      }
       if (!result.ok) {
         if (result.status === 401) return login()
         const head = `${jobErrorMessage(result, 'upload')} Request ${i + 1} of ${chunks.length}`
@@ -397,6 +403,7 @@ export function JobUpload({
           )
         }
         // Ambiguous (including every 409 here: "another upload is in progress" may be our own earlier request still running).
+        if (fp) unresolved_.set(job.id, fp)
         setProblem(
           result.status === 409
             ? `An upload on this job is still running (possibly your previous request ${i + 1}). Waiting to see whether it finishes…`

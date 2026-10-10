@@ -925,6 +925,70 @@ describe('JobUpload: waiting out an unknown outcome', () => {
     await waitFor(() => expect(retry).toHaveFocus())
   })
 
+  it('a healthy upload (one request or several) never shows the unknown-outcome notice or asks for the append checkbox', async () => {
+    for (const rows of [3, 405]) {
+      resetUploadGuards()
+      let release: () => void = () => undefined
+      const stored = { n: 0 }
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+        if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: stored.n }))
+        const n = (JSON.parse(String(init.body)) as { rows: unknown[] }).rows.length
+        await new Promise<void>((r) => (release = r)) // held in flight so the in-flight render is observed
+        stored.n += n
+        return ok({ rowsAdded: n, rowsTotal: stored.n, duplicates: 0 })
+      })
+      const user = userEvent.setup()
+      const view = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+      await user.upload(
+        screen.getByLabelText('CSV file'),
+        new File([csvOf(rows)], 'rows.csv', { type: 'text/csv' }),
+      )
+      expect(screen.queryByRole('checkbox')).toBeNull()
+      await user.click(await screen.findByRole('button', { name: `Add ${rows} rows to the job` }))
+      await waitFor(() => expect(release).not.toBe(undefined))
+      for (let k = 0; k < (rows === 3 ? 1 : 3); k++) {
+        await waitFor(() => expect(screen.getByText(/rows sent/)).toBeInTheDocument())
+        expect(screen.queryByText(/UNKNOWN outcome/)).toBeNull()
+        expect(screen.queryByRole('checkbox')).toBeNull()
+        release()
+        await new Promise((r) => setTimeout(r, 30))
+      }
+      await waitFor(() => expect(refresh).toHaveBeenCalled())
+      expect(screen.queryByText(/UNKNOWN outcome/)).toBeNull()
+      expect(screen.queryByRole('checkbox')).toBeNull()
+      view.unmount()
+      refresh.mockClear()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('a request left mid-flight that ends with a definite OK leaves no unknown marker behind', async () => {
+    let release: () => void = () => undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      if (!init?.method || init.method === 'GET') return ok(job({ rowsTotal: 0 }))
+      await new Promise<void>((r) => (release = r))
+      return ok({ rowsAdded: 3, rowsTotal: 3, duplicates: 0 })
+    })
+    const user = userEvent.setup()
+    const first = wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 0 })} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3)], 'rows.csv', { type: 'text/csv' }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add 3 rows to the job' }))
+    await waitFor(() => expect(release).not.toBe(undefined))
+    first.unmount()
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    wrap(<JobUpload timingOverride={T} job={job({ rowsTotal: 3 })} firstIds={[]} />)
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      new File([csvOf(3).replaceAll('TZP-w-', 'TZP-n-')], 'n.csv', { type: 'text/csv' }),
+    )
+    await screen.findByRole('button', { name: 'Add 3 rows to the job' })
+    expect(screen.queryByText(/UNKNOWN outcome/)).toBeNull() // only the ordinary "job already holds rows" confirmation
+  })
+
   it('a second mount for the same job cannot start a concurrent upload while one is running', async () => {
     let release: () => void = () => undefined
     const posts: number[] = []
