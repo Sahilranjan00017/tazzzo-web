@@ -174,7 +174,12 @@ export function JobDetailView({
       {canWrite ? (
         <>
           <JobActions job={j} approver={approver} />
-          {can.append ? <JobUpload job={j} /> : null}
+          {can.append ? (
+            <JobUpload
+              job={j}
+              firstIds={from === 0 ? page?.items.flatMap((r) => (r.id ? [r.id] : [])) : undefined}
+            />
+          ) : null}
         </>
       ) : (
         <p className="notice" role="note">

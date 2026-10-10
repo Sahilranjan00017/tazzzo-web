@@ -58,10 +58,12 @@ export function StockListView({
   result,
   filters,
   canWrite,
+  dropped = [],
 }: {
   result: Result
   filters: { location?: string; state?: StockListState }
   canWrite: boolean
+  dropped?: readonly string[]
 }) {
   const filtered = Boolean(filters.location || filters.state)
   return (
@@ -112,6 +114,12 @@ export function StockListView({
           Open record
         </button>
       </form>
+      {dropped.length > 0 ? (
+        <p className="notice" role="status">
+          The {dropped.join(' and ')} filter in the address was not a valid value and was ignored,
+          so the list is not filtered by {dropped.length > 1 ? 'them' : 'it'}.
+        </p>
+      ) : null}
       {!canWrite ? (
         <p className="notice" role="note">
           Read-only: changing stock needs the cms-writer role.

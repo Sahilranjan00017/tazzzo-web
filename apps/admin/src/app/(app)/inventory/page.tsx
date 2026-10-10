@@ -27,11 +27,21 @@ export default async function InventoryPage({
   const writer = canWrite(roles)
   if (!sku) {
     const filters = parseStockFilters(raw)
+    // a filter that was in the URL but is not valid is dropped, and the person is told rather than shown a silent change
+    const dropped = [
+      ...(one(raw.location) && !filters.location ? ['location'] : []),
+      ...(one(raw.state) && !filters.state ? ['state'] : []),
+    ]
     return (
-      <StockListView result={await readStockList(filters)} filters={filters} canWrite={writer} />
+      <StockListView
+        result={await readStockList(filters)}
+        filters={filters}
+        canWrite={writer}
+        dropped={dropped}
+      />
     )
   }
-  if (!sku || !location || !PRODUCT_ID.test(sku) || !LOCATION_ID.test(location)) {
+  if (!location || !PRODUCT_ID.test(sku) || !LOCATION_ID.test(location)) {
     return <InventoryView canWrite={writer} invalidInput />
   }
   const [product, stock] = await Promise.all([readProduct(sku), readInventory(sku, location)])

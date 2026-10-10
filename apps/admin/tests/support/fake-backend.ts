@@ -602,6 +602,7 @@ export class FakeBackend {
       roles,
       sub: claims?.sub,
     })
+    if (listsReply?.status === 0) return void req.socket.destroy() // the answer is lost
     if (listsReply) {
       if (listsReply.text !== undefined) {
         res.writeHead(listsReply.status, {
@@ -1088,7 +1089,7 @@ export class FakeBackend {
         return json(200, next)
       }
     }
-    const caseView = (c: NonNullable<ReturnType<typeof this.cases.get>>) => ({
+    const caseView = (c: NonNullable<ReturnType<FakeBackend['cases']['get']>>) => ({
       ...c,
       customerId: 'C-1',
       category: 'ORDER_ISSUE',

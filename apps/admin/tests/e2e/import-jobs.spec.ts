@@ -312,7 +312,7 @@ test('upload failures are explained without backend text and never retried by th
   request,
 }) => {
   await signInFresh(page, WRITER_SUB)
-  const id = await seedJob(request, { status: 'OPEN', rows: 1 })
+  const id = await seedJob(request, { status: 'OPEN', rows: 0 })
   const rows = csv(
     Array.from({ length: 3 }, (_, i) => `TZP-up-${i},T${i},acme,TZV-000001,REL-1,k${i}`),
   )
@@ -338,7 +338,11 @@ test('upload failures are explained without backend text and never retried by th
     await attempt()
     const alert = page.locator('main').getByRole('alert').filter({ hasText: text })
     await expect(alert).toBeVisible()
-    await expect(alert).toContainText('Request 1 of 1 stored nothing; 0 rows')
+    await expect(alert).toContainText(
+      status === 503
+        ? 'Request 1 of 1 had an unknown outcome, and the job was checked: it did not land'
+        : 'Request 1 of 1 stored nothing; 0 rows',
+    )
     await expect(page.getByText(/Foo\.java|stack trace/)).toHaveCount(0)
     await page.waitForTimeout(800)
     expect(await posts()).toBe(before + 1)
@@ -580,4 +584,168 @@ test('the quick import page keeps working and links to jobs; the backend job lis
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Import jobs' })).toBeVisible()
   expect(BACKEND()).toBeTruthy()
+})
+
+const rowsCell = (page: Page) =>
+  page.getByText('Rows stored').locator('xpath=following-sibling::dd[1]')
+const bigCsv = (n: number, prefix = 'TZP-amb') =>
+  csv(
+    Array.from(
+      { length: n },
+      (_, i) => `${prefix}-${i},T${i},acme,TZV-000001,REL-1,k-${prefix}-${i}`,
+    ),
+  )
+const rowPosts = async (request: Parameters<typeof recorded>[0]) =>
+  (await recorded(request)).filter((r) => r.method === 'POST' && r.path.endsWith('/rows'))
+
+for (const [label, status] of [
+  ['the connection drops (no answer at all)', 0],
+  ['the backend answers 504 after committing', 504],
+] as const) {
+  test(`ambiguous failure, COMMITTED: ${label} -> checked, says it landed, retry never duplicates rows`, async ({
+    page,
+    request,
+  }) => {
+    await signInFresh(page, WRITER_SUB)
+    const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+    await openJob(page, id)
+    await page
+      .getByLabel('CSV file')
+      .setInputFiles({ name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(405) })
+    // the 2nd request is processed and stored by the backend, then its answer is lost
+    await control(request, 'force', [
+      {
+        match: 'POST /api/v1/admin/imports/jobs',
+        status,
+        code: 'GATEWAY',
+        commit: true,
+        skip: 1,
+        count: 1,
+      },
+    ])
+    await page.getByRole('button', { name: 'Add 405 rows to the job' }).click()
+    const alert = page.locator('main').getByRole('alert').filter({ hasText: 'unknown outcome' })
+    await expect(alert).toContainText('it DID land')
+    await expect(alert).not.toContainText('stored nothing')
+    await expect(rowsCell(page)).toHaveText('400')
+    await page.getByRole('button', { name: 'Retry from request 3' }).click()
+    await expect(rowsCell(page)).toHaveText('405')
+    expect(await rowPosts(request)).toHaveLength(3) // request 2 was never sent twice
+    // validate: no row is flagged as a duplicate
+    await page.getByRole('button', { name: 'Validate rows' }).click()
+    await expect(page.getByRole('progressbar', { name: 'Validating progress' })).toBeVisible()
+    await tick(request, id)
+    await expect(page.getByText('Validated, ready to approve').first()).toBeVisible({
+      timeout: 20_000,
+    })
+    await expect(page.getByText('Duplicate').locator('xpath=following-sibling::dd[1]')).toHaveText(
+      '0',
+    )
+  })
+}
+
+test('ambiguous failure, NOT committed: reported as unknown, checked as not landed, retry sends it exactly once', async ({
+  page,
+  request,
+}) => {
+  await signInFresh(page, WRITER_SUB)
+  const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+  await openJob(page, id)
+  await page
+    .getByLabel('CSV file')
+    .setInputFiles({ name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(205) })
+  await control(request, 'force', [
+    { match: 'POST /api/v1/admin/imports/jobs', status: 504, code: 'GATEWAY', skip: 1, count: 1 },
+  ])
+  await page.getByRole('button', { name: 'Add 205 rows to the job' }).click()
+  const alert = page.locator('main').getByRole('alert').filter({ hasText: 'unknown outcome' })
+  await expect(alert).toContainText('it did not land')
+  await expect(rowsCell(page)).toHaveText('200')
+  await page.getByRole('button', { name: 'Retry from request 2' }).click()
+  await expect(rowsCell(page)).toHaveText('205')
+  expect(await rowPosts(request)).toHaveLength(3)
+})
+
+test('the job was changed by someone else meanwhile: the retry is blocked and nothing is re-sent', async ({
+  page,
+  request,
+}) => {
+  await signInFresh(page, WRITER_SUB)
+  const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+  await openJob(page, id)
+  await page
+    .getByLabel('CSV file')
+    .setInputFiles({ name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(205) })
+  await control(request, 'force', [
+    { match: 'POST /api/v1/admin/imports/jobs', status: 504, code: 'GATEWAY', skip: 1, count: 1 },
+  ])
+  await page.getByRole('button', { name: 'Add 205 rows to the job' }).click()
+  await expect(
+    page.locator('main').getByRole('alert').filter({ hasText: 'it did not land' }),
+  ).toBeVisible()
+  const other = await page.request.post(`/api/bff/imports/jobs/${id}/rows`, {
+    headers: {
+      origin: 'http://localhost:3988',
+      'x-tazzzo-csrf': '1',
+      'content-type': 'application/json',
+    },
+    data: {
+      rows: [
+        {
+          id: 'TZP-else-1',
+          productType: 'single',
+          identityType: 'internal',
+          internalKey: 'e1',
+          brandCode: 'ACME',
+          title: 'E',
+          verticalId: 'TZV-000001',
+          releaseId: 'REL-1',
+          classificationStatus: 'provisional',
+        },
+      ],
+    },
+  })
+  expect(other.status()).toBe(200)
+  const before = (await rowPosts(request)).length
+  await page.getByRole('button', { name: 'Retry from request 2' }).click()
+  await expect(
+    page
+      .locator('main')
+      .getByRole('alert')
+      .filter({ hasText: 'The job holds 201 rows but this upload expected 200' }),
+  ).toBeVisible()
+  expect((await rowPosts(request)).length).toBe(before)
+})
+
+test('choosing the same file again after a reload is called out and needs an explicit append', async ({
+  page,
+  request,
+}) => {
+  await signInFresh(page, WRITER_SUB)
+  const id = await seedJob(request, { status: 'OPEN', rows: 0 })
+  await openJob(page, id)
+  const file = { name: 'rows.csv', mimeType: 'text/csv', buffer: bigCsv(30, 'TZP-again') }
+  await page.getByLabel('CSV file').setInputFiles(file)
+  await page.getByRole('button', { name: 'Add 30 rows to the job' }).click()
+  await expect(rowsCell(page)).toHaveText('30')
+  await page.reload()
+  await settled(page)
+  await page.getByLabel('CSV file').setInputFiles(file)
+  const add = page.getByRole('button', { name: 'Add 30 rows to the job' })
+  await expect(add).toBeDisabled()
+  await expect(page.getByRole('note').filter({ hasText: 'same product ids' })).toContainText(
+    'This job already holds 30 rows',
+  )
+  await page.getByRole('checkbox', { name: /Append anyway/ }).check()
+  await expect(add).toBeEnabled()
+})
+
+test('an invalid stock filter in the address is dropped and the person is told', async ({
+  page,
+}) => {
+  await signInFresh(page, WRITER_SUB)
+  await page.goto('/inventory?state=bogus&location=bad%20id')
+  await expect(
+    page.getByText(/location and state filter in the address was not a valid value/),
+  ).toBeVisible()
 })

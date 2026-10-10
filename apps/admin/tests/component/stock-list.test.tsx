@@ -223,6 +223,12 @@ describe('StockListView', () => {
     )
     expect(screen.getByRole('note')).toHaveTextContent(/cms-writer/)
   })
+  it('tells the person when a filter in the address was invalid and ignored', () => {
+    render(<StockListView result={ok} filters={{}} canWrite dropped={['location', 'state']} />)
+    expect(
+      screen.getByText(/location and state filter in the address was not a valid value/),
+    ).toBeInTheDocument()
+  })
   it('shows no read-only notice for a writer and no clear link without filters', () => {
     render(<StockListView result={ok} filters={{}} canWrite />)
     expect(screen.queryByRole('note')).toBeNull()

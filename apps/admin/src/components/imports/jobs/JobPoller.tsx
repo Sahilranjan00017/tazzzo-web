@@ -41,9 +41,11 @@ export function JobPoller({ job }: { job: ImportJob }) {
     let ended = false
     let delay = POLL_START_MS
     let failures = 0
+    let inFlight = false // at most one request, and one timer chain, at any time
     let signature = `${job.status}:${job.version}:${job.nextRow}`
 
     const schedule = () => {
+      if (timer) clearTimeout(timer)
       if (!ended) timer = setTimeout(() => void poll(), delay)
     }
     const stop = (reason?: string) => {
@@ -52,9 +54,14 @@ export function JobPoller({ job }: { job: ImportJob }) {
       if (reason) setStopped(reason)
     }
     async function poll() {
-      if (ended) return
+      if (ended || inFlight) return
       if (document.hidden) return schedule() // checked again after the next wait, and at once on becoming visible
-      const result = await getBff<unknown>(`/api/bff/imports/jobs/${encodeURIComponent(job.id)}`)
+      inFlight = true
+      const result = await getBff<unknown>(
+        `/api/bff/imports/jobs/${encodeURIComponent(job.id)}`,
+      ).finally(() => {
+        inFlight = false
+      })
       if (ended) return
       if (!result.ok) {
         if (result.status === 401) {
@@ -86,7 +93,7 @@ export function JobPoller({ job }: { job: ImportJob }) {
       schedule()
     }
     const onVisible = () => {
-      if (!document.hidden && !ended) {
+      if (!document.hidden && !ended && !inFlight) {
         if (timer) clearTimeout(timer)
         void poll()
       }

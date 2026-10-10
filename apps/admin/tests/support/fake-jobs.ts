@@ -139,6 +139,8 @@ export interface Forced {
   count?: number
   /** Let this many matching requests through first, then force the next `count`. */
   skip?: number
+  /** Process the request for real (state changes), THEN fail the answer: status 0 drops the connection. */
+  commit?: boolean
   delayMs?: number
 }
 
@@ -185,6 +187,13 @@ export class FakeAdminLists {
     )
     if (forced?.skip) {
       forced.skip -= 1
+    } else if (forced?.commit) {
+      if (forced.count !== undefined) forced.count -= 1
+      if (isList) this.listStock(ctx)
+      else await this.jobsRoute(ctx)
+      return forced.status === 0
+        ? { status: 0 }
+        : err(forced.status, forced.code ?? 'FORCED', 'answer lost after commit')
     } else if (forced) {
       if (forced.count !== undefined) forced.count -= 1
       if (forced.delayMs) await new Promise((r) => setTimeout(r, forced.delayMs))

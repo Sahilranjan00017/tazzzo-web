@@ -297,13 +297,15 @@ export function buildUploadRows(rows: readonly (readonly string[])[], map: Recor
   }
 }
 
+const BYTES = new TextEncoder()
+
 /** Splits rows into requests of at most `CHUNK_MAX_ROWS` rows and `CHUNK_MAX_BYTES` of JSON. A row never splits. */
 export function chunkRows<T>(items: readonly T[]): T[][] {
   const out: T[][] = []
   let current: T[] = []
   let bytes = 0
   for (const item of items) {
-    const size = JSON.stringify(item).length + 1
+    const size = BYTES.encode(JSON.stringify(item)).length + 1 // UTF-8 bytes, which is what the 2 MiB request bound counts
     if (
       current.length > 0 &&
       (current.length >= CHUNK_MAX_ROWS || bytes + size > CHUNK_MAX_BYTES)
@@ -342,7 +344,20 @@ export function buildCorrection(
     : { ok: false, errors: row?.errors ?? ['The row is not valid.'] }
 }
 
-/* ---------------- failure copy (no backend text ever shown) ---------------- */
+/* ----------------
+ * Failure copy. The wording of a FAILED CALL is ours: no backend text is ever shown in it. Different on purpose: a row's
+ * verdict message (cut to 300 characters, see effectiveVerdict) and the job's worker note (`lastError`, cut to 200) are
+ * written by the backend about the admin's own data and are shown as plain React text (escaped, never HTML).
+ * ---------------- */
+
+/**
+ * A failure that proves the request stored NOTHING: the backend (or the BFF, before calling it) refused it with a 4xx.
+ * Status 0 (network), 5xx, timeouts and anything else are AMBIGUOUS: the backend may have committed the request before the
+ * answer was lost, so the outcome has to be checked on the job, never assumed.
+ */
+export function isDefiniteFailure(result: { status: number }): boolean {
+  return [400, 403, 404, 409, 413, 415, 422, 429].includes(result.status)
+}
 
 const CODE_COPY: Record<string, string> = {
   IMPORT_JOB_NOT_FOUND: 'This import job no longer exists.',

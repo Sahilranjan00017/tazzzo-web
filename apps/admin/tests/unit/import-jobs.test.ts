@@ -15,6 +15,7 @@ import {
   countCsvRecords,
   effectiveVerdict,
   isCorrectable,
+  isDefiniteFailure,
   isTerminal,
   isWorking,
   jobActions,
@@ -363,5 +364,20 @@ describe('countCsvRecords', () => {
     expect(countCsvRecords('a\n"he said ""hi"""\n')).toBe(2)
     expect(countCsvRecords('')).toBe(0)
     expect(countCsvRecords('row,line\r\n')).toBe(1)
+  })
+})
+
+describe('request sizing and failure classes', () => {
+  it('chunk size counts UTF-8 bytes, not UTF-16 units', () => {
+    const wide = Array.from({ length: 3 }, (_, i) => ({ id: `TZP-${i}`, t: '€'.repeat(300_000) }))
+    // 300k UTF-16 units each (< 1 MB together would be 900k) but 900 KB of UTF-8 each: no two fit one request
+    expect(chunkRows(wide).map((c) => c.length)).toEqual([1, 1, 1])
+    expect(JSON.stringify(wide[0]).length).toBeLessThan(CHUNK_MAX_BYTES)
+  })
+  it('only a 4xx refusal proves a request stored nothing; network, 5xx and timeouts are ambiguous', () => {
+    for (const s of [400, 403, 404, 409, 413, 415, 422, 429])
+      expect(isDefiniteFailure({ status: s }), String(s)).toBe(true)
+    for (const s of [0, 500, 502, 503, 504, 418, 302])
+      expect(isDefiniteFailure({ status: s }), String(s)).toBe(false)
   })
 })
