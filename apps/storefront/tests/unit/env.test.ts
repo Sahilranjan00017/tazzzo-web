@@ -7,6 +7,7 @@ const valid = {
   TAZZZO_SITE_URL: 'https://www.tazzzo.test',
   TAZZZO_MEDIA_BASE_URL: 'https://cdn.tazzzo.test/assets',
   STOREFRONT_SESSION_SECRET: 'q'.repeat(43), // 32 bytes of base64
+  STOREFRONT_TRUST_PROXY: 'true', // required in production while customer sessions are enabled
 }
 
 describe('parseServerEnv', () => {
@@ -102,15 +103,26 @@ describe('parseServerEnv', () => {
       }
     })
 
-    it('does not require a trusted proxy without the credential, or outside production', () => {
-      expect(parseServerEnv(valid).caller).toBeNull() // the untrusted default stays valid
-      expect(parseServerEnv({ ...valid, STOREFRONT_TRUST_PROXY: 'false' }).caller).toBeNull()
+    it('does not require a trusted proxy outside production', () => {
+      const dev = {
+        ...valid,
+        STOREFRONT_TRUST_PROXY: undefined,
+        STOREFRONT_SESSION_SECRET: undefined,
+      }
       for (const NODE_ENV of ['development', 'test']) {
-        expect(parseServerEnv({ ...valid, ...credential, NODE_ENV }).caller?.name).toBe(
-          'storefront',
-        )
+        expect(parseServerEnv({ ...dev, ...credential, NODE_ENV }).caller?.name).toBe('storefront')
+        expect(parseServerEnv({ ...dev, NODE_ENV }).caller).toBeNull()
       }
     })
+  })
+
+  it('production with customer sessions requires STOREFRONT_TRUST_PROXY=true (the OTP routes lean on the per-visitor limit)', () => {
+    for (const trust of [undefined, '', 'false']) {
+      expect(() => parseServerEnv({ ...valid, STOREFRONT_TRUST_PROXY: trust })).toThrow(
+        'invalid server environment: STOREFRONT_TRUST_PROXY',
+      )
+    }
+    expect(parseServerEnv(valid).sessionKeys).toHaveLength(1)
   })
 
   it.each([

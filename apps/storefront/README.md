@@ -124,15 +124,16 @@ timestamps (sealing refuses anything above 3.8 KB, under the 4 KB cookie limit).
 **Refresh.** The access token (15 min) is treated as expired 30 s early. A page cannot set cookies, so `/account` sends the browser
 to `GET /api/auth/refresh?next=...`, which rotates the tokens (`/v1/auth/refresh`; the old refresh token dies), rewrites the cookie
 and redirects. Concurrent requests with the same token in one process share one backend call. Backend 401 on refresh ends the session
-(`/login?reason=expired`); an outage keeps it and says so. Tokens refused right after being issued end the session instead of looping.
+(`/login?reason=expired`); an outage keeps it and says so. Two instances refreshing one cookie at the same instant can race and the loser signs in again (known limit, gap 11). Tokens refused right after being issued end the session instead of looping.
 
-**CSRF.** Every state-changing route is `POST` + JSON only (body capped at 2 KiB) and requires: header `X-Tazzzo-CSRF` (the literal `1`
+**CSRF.** Every state-changing route is `POST` + JSON only (body streamed with a hard 2 KiB cap, 413 beyond it) and requires: header `X-Tazzzo-CSRF` (the literal `1`
 before sign-in, the per-session token for logout), `Sec-Fetch-Site: same-origin` when sent, and an `Origin` whose host equals the request's
 `Host` (the load balancer preserves it). The cookie is `SameSite=Lax` as a second layer. The refresh `GET` serves only same-origin or
 direct navigations and redirects only to a same-origin path.
 
-**`next`.** `safeNext` accepts only a path with one leading slash, no backslash or control character (also after decoding), nothing that
-resolves off-origin, and not `/api/*` or `/login`; anything else becomes `/account`.
+**`next`.** `safeNext` accepts only a path with one leading slash, no backslash or control character, no `.`/`..` segment and no encoded
+slash/backslash (checked as given and after each round of percent-decoding, before URL parsing), a result that still resolves on the same
+origin, and not `/api/*` or `/login`; anything else becomes `/account`.
 
 **Errors and limits.** The server sends the browser a closed set of codes (`invalid_phone`, `invalid_code`, `expired`, `rate_limited`,
 `unavailable`); backend text, ids and tokens never reach the page or logs (only path, status and the backend request id are logged).
@@ -225,7 +226,8 @@ See [`.env.example`](.env.example): `TAZZZO_API_BASE_URL` (https in production; 
 URL; unset = every image is the placeholder), `STOREFRONT_SESSION_SECRET` (base64/base64url of 32+ random bytes, e.g. `openssl rand -base64 32`; **required in production**, unset elsewhere
 switches sign-in off with 503; `STOREFRONT_SESSION_SECRET_PREVIOUS` is the key being rotated out and only opens cookies), optionally
 `TAZZZO_CALLER_NAME`/`TAZZZO_CALLER_SECRET`, and the rate
-limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. Invalid
+limit settings `STOREFRONT_RATE_LIMIT_*`, `STOREFRONT_TRUST_PROXY`, `STOREFRONT_TRUSTED_PROXY_HOPS`. In production, `STOREFRONT_SESSION_SECRET` also requires `STOREFRONT_TRUST_PROXY=true` (the per-visitor limit is what bounds sign-in code
+requests, since the backend cannot tell visitors apart). Invalid
 configuration fails the first render (500) and logs only the field name.
 
 ## Commands (from the repository root)
