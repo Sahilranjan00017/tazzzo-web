@@ -1,0 +1,140 @@
+name: deploy-uat-web
+
+# Promotes a commit of branch `uat` to the two UAT Amplify apps (storefront, admin) AFTER the complete web CI has passed on
+# that exact commit. Amplify's own auto-build for branch `uat` MUST be disabled (docs/uat/AMPLIFY_UAT_SETUP.md), otherwise
+# a push would deploy before this gate. AWS access is OIDC only: no AWS key exists in GitHub secrets or variables.
+#
+# Needs (repository or environment `uat` VARIABLES, none of them secret):
+#   AWS_UAT_WEB_DEPLOY_ROLE_ARN   IAM role trusted for this repo + environment uat (amplify:StartJob/GetJob only)
+#   AWS_UAT_REGION                optional, default ap-south-1
+#   AMPLIFY_UAT_STOREFRONT_APP_ID, AMPLIFY_UAT_ADMIN_APP_ID
+#   UAT_STOREFRONT_URL, UAT_ADMIN_URL   e.g. https://uat.tazzzo.com, https://cms-uat.tazzzo.com
+# NOT RUN: this workflow cannot run until the AWS side exists.
+
+on:
+  push:
+    branches: [uat]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-uat-web
+  cancel-in-progress: false
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  # Exactly the pull-request CI: format, lint, typecheck, unit, integration, both Playwright suites, production build
+  # (standalone + client-bundle secret-name checks) and the dependency audit.
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  deploy:
+    name: Deploy ${{ matrix.app }} to UAT
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: uat
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [storefront, admin]
+    env:
+      APP: ${{ matrix.app }}
+      APP_ID: ${{ matrix.app == 'storefront' && vars.AMPLIFY_UAT_STOREFRONT_APP_ID || vars.AMPLIFY_UAT_ADMIN_APP_ID }}
+      APP_URL: ${{ matrix.app == 'storefront' && vars.UAT_STOREFRONT_URL || vars.UAT_ADMIN_URL }}
+      AWS_REGION: ${{ vars.AWS_UAT_REGION || 'ap-south-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_UAT_REGION || 'ap-south-1' }}
+      AWS_ROLE_ARN: ${{ vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN }}
+    steps:
+      - name: Only branch uat may deploy
+        run: |
+          if [ "$GITHUB_REF" != 'refs/heads/uat' ]; then
+            echo "::error::deploys run from refs/heads/uat only (this run is $GITHUB_REF)"
+            exit 1
+          fi
+          for name in APP_ID APP_URL AWS_ROLE_ARN; do
+            if [ -z "${!name}" ]; then echo "::error::repository/environment variable behind $name is not set"; exit 1; fi
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+
+      # AWS CLI v2 (preinstalled on ubuntu-24.04) assumes the role by itself from AWS_ROLE_ARN +
+      # AWS_WEB_IDENTITY_TOKEN_FILE. The GitHub OIDC token is short-lived, masked, kept in a 0600 file and never printed.
+      - name: Exchange the GitHub OIDC token for AWS credentials (no stored keys)
+        run: |
+          umask 077
+          response="$(curl -sS --fail -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          token="$(jq -r '.value' <<<"$response")"
+          echo "::add-mask::${token}"
+          printf '%s' "$token" > "${RUNNER_TEMP}/oidc-token"
+          echo "AWS_WEB_IDENTITY_TOKEN_FILE=${RUNNER_TEMP}/oidc-token" >> "$GITHUB_ENV"
+          echo "AWS_ROLE_SESSION_NAME=gha-uat-web-${GITHUB_RUN_ID}-${APP}" >> "$GITHUB_ENV"
+          aws sts get-caller-identity --query Account --output text > /dev/null
+          echo 'assumed the UAT deploy role via OIDC'
+
+      - name: Start the Amplify release job for this exact commit
+        id: start
+        run: |
+          job_id="$(aws amplify start-job \
+            --app-id "$APP_ID" --branch-name uat \
+            --job-type RELEASE --commit-id "$GITHUB_SHA" \
+            --job-reason "github-actions run ${GITHUB_RUN_ID} after CI" \
+            --query 'jobSummary.jobId' --output text)"
+          echo "job_id=${job_id}" >> "$GITHUB_OUTPUT"
+          echo "started ${APP} job ${job_id}"
+
+      - name: Wait for the Amplify job
+        id: wait
+        env:
+          JOB_ID: ${{ steps.start.outputs.job_id }}
+        run: |
+          deadline=$((SECONDS + 2700))
+          while :; do
+            status="$(aws amplify get-job --app-id "$APP_ID" --branch-name uat --job-id "$JOB_ID" --query 'job.summary.status' --output text)"
+            echo "${APP} job ${JOB_ID}: ${status}"
+            case "$status" in
+              SUCCEED) break ;;
+              FAILED|CANCELLED) echo "::error::Amplify job for ${APP} ended ${status}"; exit 1 ;;
+            esac
+            if [ "$SECONDS" -ge "$deadline" ]; then echo "::error::timed out waiting for the Amplify job"; exit 1; fi
+            sleep 20
+          done
+          built="$(aws amplify get-job --app-id "$APP_ID" --branch-name uat --job-id "$JOB_ID" --query 'job.summary.commitId' --output text)"
+          # StartJob RELEASE builds the branch head; fail loudly if Amplify built something other than the gated commit.
+          if [ "$built" != "$GITHUB_SHA" ]; then
+            echo "::error::Amplify built a different commit than the one CI passed on (expected ${GITHUB_SHA}, got ${built})"
+            exit 1
+          fi
+          echo "built_sha=${built}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke check ${{ matrix.app }}
+        run: node scripts/amplify/smoke.mjs "$APP" "$APP_URL"
+
+      - name: Record the deployed SHA
+        if: always()
+        env:
+          JOB_ID: ${{ steps.start.outputs.job_id }}
+          BUILT_SHA: ${{ steps.wait.outputs.built_sha }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### UAT web deploy: ${APP} (${OUTCOME})"
+            echo
+            echo "- Deployed commit: \`${BUILT_SHA:-not deployed}\`"
+            echo "- Pipeline commit: \`${GITHUB_SHA}\`"
+            echo "- Amplify job: \`${JOB_ID:-none}\`"
+            echo "- URL: ${APP_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -10,6 +10,7 @@
 | CMS business modules                                | NOT STARTED |                                                                                                                                                                                                                                                    |
 | Scheduler / cron                                    | NOT STARTED | Architecture note below                                                                                                                                                                                                                            |
 | Customer website (`apps/storefront`)                | IN REVIEW   | Home, PDP, category, search on the public `/v1` API; customer OTP sign-in + sealed server session; customer cart (S2); delivery location, addresses and slots (S3); checkout review, COD order placement, confirmation and Orders (S4); see README |
+| UAT web hosting (Amplify)                           | IN REVIEW   | `docs/uat/AMPLIFY_UAT_SETUP.md`: build/packaging, env contract, OIDC deploy workflow; NOT RUN on AWS. CMS session store hosting is an OPEN DECISION                                                                                                |
 
 **CMS C1 (inventory list + import jobs, branch `feature/cms-inventory-list-import-jobs`, on main `37d7d12`):** built exactly on what the backend contract supports (backend `origin/main` `06798ca`, read from source and `docs/ops/BULK_IMPORT.md`, not only the thin OpenAPI).
 

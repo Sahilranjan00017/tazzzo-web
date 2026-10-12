@@ -12,6 +12,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:deploy-scripts": "node --test \"scripts/amplify/*.test.mjs\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:integration": "pnpm --filter admin test:integration",

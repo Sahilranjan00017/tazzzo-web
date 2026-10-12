@@ -26,3 +26,6 @@ coverage/
 test-results/
 playwright-report/
 apps/*/.e2e-pids.json
+
+# Amplify packaging output (scripts/amplify/package-compute.mjs); holds runtime values, never commit
+.amplify-hosting/

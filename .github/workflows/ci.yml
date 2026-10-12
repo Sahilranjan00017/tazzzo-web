@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Called by deploy-uat-web.yml so the UAT deploy is gated on exactly these jobs.
+  workflow_call:
 
 permissions:
   contents: read
@@ -57,6 +59,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # Amplify packaging, runtime-env contract and smoke-check logic (scripts/amplify), plain node:test.
+      - run: pnpm test:deploy-scripts
 
   integration:
     name: Integration tests
