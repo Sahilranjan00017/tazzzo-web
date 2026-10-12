@@ -27,6 +27,14 @@ export default defineConfig({
           setupFiles: ['tests/support/component-setup.ts'],
         },
       },
+      {
+        resolve: { alias },
+        test: {
+          name: 'deploy',
+          environment: 'node',
+          include: ['tests/deploy/**/*.test.ts'],
+        },
+      },
     ],
   },
 })

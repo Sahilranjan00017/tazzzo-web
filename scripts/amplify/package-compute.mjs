@@ -19,6 +19,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { selectRuntimeEnv } from './runtime-env.mjs'
+import { validateRuntimeEnv } from './validate-runtime-env.mjs'
 
 export const DEFAULT_RUNTIME = 'nodejs22.x'
 
@@ -60,25 +61,55 @@ function filesUnder(dir) {
   })
 }
 
-/** Fails if any secret VALUE appears in a file below `dir` (the static side is served publicly). Names only in the error. */
+/** The spellings of a secret the leak check looks for: plain, percent-encoded, JSON-escaped (also with escaped slashes), base64, base64url. */
+export function leakVariants(value) {
+  if (value.length < 8) return []
+  const json = JSON.stringify(value).slice(1, -1)
+  const b64 = Buffer.from(value).toString('base64')
+  return [
+    ...new Set([
+      value,
+      encodeURIComponent(value),
+      json,
+      json.replaceAll('/', '\\/'),
+      b64,
+      b64.replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''),
+    ]),
+  ].filter((v) => v.length >= 8)
+}
+
+/**
+ * DEFENCE IN DEPTH, not a proof: fails if a secret VALUE (at least 8 characters) appears in a file below `dir` as plain text,
+ * percent-encoded, JSON-escaped, base64 or base64url. It does NOT catch other encodings (hex, HTML entities, case changes),
+ * a value split into pieces or computed at runtime, or a secret shorter than 8 characters. Names only in the error.
+ */
 export function assertNoSecretValuesIn(dir, secretValues) {
   const hits = []
   for (const file of filesUnder(dir)) {
     const text = readFileSync(file, 'utf8')
     for (const [name, value] of Object.entries(secretValues)) {
-      if (value.length >= 8 && text.includes(value)) hits.push(`${name} in ${file}`)
+      if (leakVariants(value).some((variant) => text.includes(variant)))
+        hits.push(`${name} in ${file}`)
     }
   }
   if (hits.length > 0) throw new Error(`secret value found in static output: ${hits.join('; ')}`)
 }
 
-export function packageCompute({ root, app, env, runtime = DEFAULT_RUNTIME }) {
+export function packageCompute({
+  root,
+  app,
+  env,
+  runtime = DEFAULT_RUNTIME,
+  validate = validateRuntimeEnv,
+}) {
   const appDir = join(root, 'apps', app)
   const standalone = join(appDir, '.next', 'standalone')
   if (!existsSync(join(standalone, 'apps', app, 'server.js'))) {
     throw new Error(`no standalone build for ${app}: run "pnpm --filter ${app} build" first`)
   }
   const { values, secretNames } = selectRuntimeEnv(app, env)
+  // The app's own production parser, before anything is written: a rule that would fail at runtime fails the build.
+  validate({ root, app, values })
 
   const out = join(appDir, '.amplify-hosting')
   const compute = join(out, 'compute', 'default')

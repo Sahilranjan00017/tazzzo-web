@@ -39,6 +39,14 @@ export default defineConfig({
           hookTimeout: 180_000,
         },
       },
+      {
+        resolve: { alias },
+        test: {
+          name: 'deploy',
+          environment: 'node',
+          include: ['tests/deploy/**/*.test.ts'],
+        },
+      },
     ],
   },
 })

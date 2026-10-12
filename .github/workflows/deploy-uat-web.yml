@@ -2,7 +2,8 @@ name: deploy-uat-web
 
 # Promotes a commit of branch `uat` to the two UAT Amplify apps (storefront, admin) AFTER the complete web CI has passed on
 # that exact commit. Amplify's own auto-build for branch `uat` MUST be disabled (docs/uat/AMPLIFY_UAT_SETUP.md), otherwise
-# a push would deploy before this gate. AWS access is OIDC only: no AWS key exists in GitHub secrets or variables.
+# a push would deploy before this gate. AWS access is OIDC only (aws-actions/configure-aws-credentials, one exchange per job,
+# 1 hour session): no AWS key exists in GitHub secrets or variables.
 #
 # Needs (repository or environment `uat` VARIABLES, none of them secret):
 #   AWS_UAT_WEB_DEPLOY_ROLE_ARN   IAM role trusted for this repo + environment uat (amplify:StartJob/GetJob only)
@@ -27,17 +28,30 @@ env:
   NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
+  # First, so a dispatch from any other ref stops here and does not spend the full CI.
+  guard:
+    name: Only branch uat may deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: |
+          if [ "$GITHUB_REF" != 'refs/heads/uat' ]; then
+            echo "::error::deploys run from refs/heads/uat only (this run is $GITHUB_REF)"
+            exit 1
+          fi
+
   # Exactly the pull-request CI: format, lint, typecheck, unit, integration, both Playwright suites, production build
   # (standalone + client-bundle secret-name checks) and the dependency audit.
   ci:
     name: CI gate
+    needs: [guard]
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   deploy:
     name: Deploy ${{ matrix.app }} to UAT
-    needs: ci
+    needs: [guard, ci]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: uat
@@ -53,39 +67,44 @@ jobs:
       APP_ID: ${{ matrix.app == 'storefront' && vars.AMPLIFY_UAT_STOREFRONT_APP_ID || vars.AMPLIFY_UAT_ADMIN_APP_ID }}
       APP_URL: ${{ matrix.app == 'storefront' && vars.UAT_STOREFRONT_URL || vars.UAT_ADMIN_URL }}
       AWS_REGION: ${{ vars.AWS_UAT_REGION || 'ap-south-1' }}
-      AWS_DEFAULT_REGION: ${{ vars.AWS_UAT_REGION || 'ap-south-1' }}
-      AWS_ROLE_ARN: ${{ vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN }}
     steps:
-      - name: Only branch uat may deploy
+      - name: Required variables are set
+        env:
+          ROLE_ARN: ${{ vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN }}
         run: |
-          if [ "$GITHUB_REF" != 'refs/heads/uat' ]; then
-            echo "::error::deploys run from refs/heads/uat only (this run is $GITHUB_REF)"
-            exit 1
-          fi
-          for name in APP_ID APP_URL AWS_ROLE_ARN; do
-            if [ -z "${!name}" ]; then echo "::error::repository/environment variable behind $name is not set"; exit 1; fi
+          for name in APP_ID APP_URL ROLE_ARN; do
+            if [ -z "${!name}" ]; then echo "::error::the repository/environment variable behind $name is not set"; exit 1; fi
           done
 
+      # Fail early, before any AWS call: the branch must still point at the commit CI passed on (a later push to uat must
+      # not be deployed under this run's gate).
+      - name: Branch uat still points at the gated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/uat" --jq .object.sha)"
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::error::refs/heads/uat is ${head} but this run gated ${GITHUB_SHA}; not deploying"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
 
-      # AWS CLI v2 (preinstalled on ubuntu-24.04) assumes the role by itself from AWS_ROLE_ARN +
-      # AWS_WEB_IDENTITY_TOKEN_FILE. The GitHub OIDC token is short-lived, masked, kept in a 0600 file and never printed.
-      - name: Exchange the GitHub OIDC token for AWS credentials (no stored keys)
-        run: |
-          umask 077
-          response="$(curl -sS --fail -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
-          token="$(jq -r '.value' <<<"$response")"
-          echo "::add-mask::${token}"
-          printf '%s' "$token" > "${RUNNER_TEMP}/oidc-token"
-          echo "AWS_WEB_IDENTITY_TOKEN_FILE=${RUNNER_TEMP}/oidc-token" >> "$GITHUB_ENV"
-          echo "AWS_ROLE_SESSION_NAME=gha-uat-web-${GITHUB_RUN_ID}-${APP}" >> "$GITHUB_ENV"
-          aws sts get-caller-identity --query Account --output text > /dev/null
-          echo 'assumed the UAT deploy role via OIDC'
+      # One OIDC exchange for the whole job: the action exports masked credentials valid for the 1 hour session, so the many
+      # get-job calls below never depend on the short-lived GitHub token. (Same action and pin as the backend UAT deploy.)
+      - name: Configure AWS credentials (OIDC, no keys)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN }}
+          role-duration-seconds: 3600
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Start the Amplify release job for this exact commit
+      - name: Start the Amplify release job
         id: start
         run: |
           job_id="$(aws amplify start-job \
@@ -113,9 +132,10 @@ jobs:
             sleep 20
           done
           built="$(aws amplify get-job --app-id "$APP_ID" --branch-name uat --job-id "$JOB_ID" --query 'job.summary.commitId' --output text)"
-          # StartJob RELEASE builds the branch head; fail loudly if Amplify built something other than the gated commit.
+          # DETECT-ONLY: how StartJob treats --commit-id with RELEASE is unverified (it may build the branch head), so this
+          # cannot prevent a wrong build, it only fails the run after the fact. The pre-start branch check above is the guard.
           if [ "$built" != "$GITHUB_SHA" ]; then
-            echo "::error::Amplify built a different commit than the one CI passed on (expected ${GITHUB_SHA}, got ${built})"
+            echo "::error::Amplify built a different commit than the one CI passed on (expected ${GITHUB_SHA}, got ${built}); roll back"
             exit 1
           fi
           echo "built_sha=${built}" >> "$GITHUB_OUTPUT"

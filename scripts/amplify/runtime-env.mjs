@@ -25,8 +25,6 @@ export const CONTRACT = {
       'STOREFRONT_RATE_LIMIT_EXPENSIVE_BURST',
       'STOREFRONT_RATE_LIMIT_MAX_CLIENTS',
     ],
-    // STOREFRONT_SESSION_SECRET is optional for the schema outside production but REQUIRED in production, which is what a
-    // deployed UAT is (NODE_ENV=production), so it is listed as required below via `requiredSecrets`.
     secret: [
       'STOREFRONT_SESSION_SECRET',
       'STOREFRONT_SESSION_SECRET_PREVIOUS',
@@ -52,12 +50,6 @@ export const CONTRACT = {
   },
 }
 
-/** Secrets that must be present for a deployed (NODE_ENV=production) app to answer requests at all. */
-export const REQUIRED_SECRETS = {
-  storefront: ['STOREFRONT_SESSION_SECRET'],
-  admin: ['GOOGLE_CLIENT_SECRET', 'SESSION_STORE_URL', 'SESSION_ENCRYPTION_KEY'],
-}
-
 const SECRET_LIKE = /(SECRET|PASSWORD|PRIVATE|TOKEN|SESSION|CREDENTIAL|_KEY$|^KEY$|API_KEY)/
 
 /** Same rule as apps/admin `assertNoPublicSecrets`: a secret-like NEXT_PUBLIC_ name would be inlined into the browser bundle. */
@@ -71,49 +63,20 @@ export function assertNoPublicSecrets(env) {
   }
 }
 
-const HTTPS_URL = new Set([
-  'TAZZZO_API_BASE_URL',
-  'TAZZZO_SITE_URL',
-  'TAZZZO_MEDIA_BASE_URL',
-  'CMS_BASE_URL',
-  'TAZZZO_BACKEND_URL',
-  'CMS_MEDIA_UPLOAD_ORIGIN',
-  'CMS_MEDIA_PUBLIC_ORIGIN',
-])
-
 /**
- * Selects the variables an app may receive at runtime. Throws an Error that names VARIABLES only (never a value) when a
- * required one is missing or a URL is not https. Empty strings count as unset.
+ * Selects the variables an app may receive at runtime (the allow-list). It does NOT validate values: validation is the app's
+ * own `parseServerEnv` run with NODE_ENV=production on exactly this selection (see `validate-runtime-env.mjs`), so the build
+ * and the running server can never disagree. Empty strings count as unset.
  * @returns {{ values: Record<string, string>, secretNames: string[] }}
  */
 export function selectRuntimeEnv(app, env) {
   const contract = CONTRACT[app]
   if (!contract) throw new Error(`unknown app: ${app}`)
   assertNoPublicSecrets(env)
-  const present = (name) => typeof env[name] === 'string' && env[name] !== ''
-  const missing = [...contract.required, ...REQUIRED_SECRETS[app]].filter((name) => !present(name))
-  if (missing.length > 0) throw new Error(`missing required variables: ${missing.join(', ')}`)
-
   const allowed = [...contract.required, ...contract.optional, ...contract.secret]
   /** @type {Record<string, string>} */
   const values = {}
-  for (const name of allowed) if (present(name)) values[name] = env[name]
-
-  const bad = []
-  for (const name of HTTPS_URL) {
-    if (values[name] === undefined) continue
-    try {
-      if (new URL(values[name]).protocol !== 'https:') bad.push(name)
-    } catch {
-      bad.push(name)
-    }
-  }
-  if (app === 'admin' && values.SESSION_STORE_URL !== undefined) {
-    // Same rule as apps/admin env.ts in production (rediss:// or loopback). Loopback is unreachable from Amplify compute.
-    if (!values.SESSION_STORE_URL.startsWith('rediss://')) bad.push('SESSION_STORE_URL')
-  }
-  if (bad.length > 0)
-    throw new Error(`variables must be https (rediss for the session store): ${bad.join(', ')}`)
-
+  for (const name of allowed)
+    if (typeof env[name] === 'string' && env[name] !== '') values[name] = env[name]
   return { values, secretNames: contract.secret.filter((name) => values[name] !== undefined) }
 }

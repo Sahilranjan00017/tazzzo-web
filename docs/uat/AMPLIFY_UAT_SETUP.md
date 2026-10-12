@@ -44,11 +44,13 @@ One file, an `applications:` list with `appRoot: apps/storefront` and `appRoot: 
 Amplify console variables are available to the **build**, not to the SSR compute (**VERIFIED as a search excerpt of the official "Making environment variables accessible to server-side runtimes" page**, whose own recipe is `env | grep ... >> .env.production`). This repo does not use that recipe, because it forwards everything matching a pattern. Instead `scripts/amplify/runtime-env.mjs` is an explicit allow-list of **names**:
 
 - only listed names are copied, into `compute/default/runtime-env.json` (mode 0600) and nowhere else; `index.js` loads it before the Next server starts; the static directory and the client bundles never receive it;
-- the build fails (naming variables, never values) when a required variable is missing, an URL is not https, the CMS store URL is not `rediss://`, or a secret-like `NEXT_PUBLIC_` variable exists;
-- the build fails if any secret **value** appears in the static output or in `.next/static` (in addition to the CI step that greps the client bundles for variable **names**);
+- the build runs the app's **real `parseServerEnv`** (storefront also `parseRateLimitConfig`) with `NODE_ENV=production` over exactly the forwarded variables (`scripts/amplify/validate-runtime-env.mjs`, via each app's vitest project `deploy`, `apps/*/tests/deploy/runtime-env.test.ts`), before anything is written. Every fail-closed production rule therefore fails the BUILD naming variables only (never values): missing required variables, https rules, `rediss://`, session/encryption key lengths, `STOREFRONT_TRUST_PROXY=true`, `CMS_MEDIA_*` grammar. There is no second copy of those rules in the scripts. A secret-like `NEXT_PUBLIC_` variable also fails the build;
+- as defence in depth the build fails if a secret **value** is found in the static output or in `.next/static`. This is a substring check, **not a proof**: values of at least 8 characters, looked for as plain text, percent-encoded, JSON-escaped (also with `\/`), base64 and base64url, only over the static directory and `.next/static`. It does **not** cover other encodings (hex, HTML entities, case changes), a value split into pieces or computed at runtime, secrets shorter than 8 characters, or any file outside those two directories. The CI step that greps the client bundles for variable **names** is separate;
 - `GOOGLE_ISSUER` (a test seam) cannot be forwarded; `NODE_ENV` is forced to `production`.
 
-Consequences to know: secrets end up inside the compute artifact held by Amplify (private, not served), so rotating a secret needs a redeploy; the bundle is not encrypted with a customer key. A stricter alternative (the compute reading SSM at runtime with a compute role) is possible but needs code in both apps and was not done (**not implemented**).
+Consequences to know: secrets end up inside the compute artifact held by Amplify (private, not served), and rotating a secret needs a **rebuild and redeploy**; the bundle is not encrypted with a customer key.
+
+**Accepted UAT risk (M5):** `runtime-env.json` is part of the build artifact, so anyone who can download Amplify build artifacts (or read the deployed function package) can read every forwarded secret in plain text. Access to the Amplify app is therefore access to the UAT secrets; keep the Amplify console/API audience to the UAT owners. A stricter alternative (the compute reading SSM at runtime with a compute role) is possible but needs code in both apps and was not done (**not implemented**).
 
 ### Secrets (Amplify "secrets" and SSM)
 
@@ -142,16 +144,25 @@ Prerequisite approvals (the infrastructure rules say no recurring-cost resource 
 - Admin: Google sign-in round trip and a write that audits against the UAT backend (only after the open decision).
 - `StartJob` with `--commit-id`: confirm that `get-job` reports the commit that CI passed on (the workflow fails when it does not).
 
+### Requirements for the GitHub side (M2)
+
+These are REQUIREMENTS, not suggestions; the workflow is only as safe as they are.
+
+- The GitHub environment `uat` is restricted to **deployment branch `uat`** only (Settings > Environments > uat > Deployment branches and tags > Selected branches: `uat`).
+- **Branch protection on `uat`**: pull request review required, the CI checks required (all `web-ci` jobs), no force pushes, no deletion, restrict who can push.
+- The IAM trust policy of `AWS_UAT_WEB_DEPLOY_ROLE_ARN` must pin more than the environment `sub`: also require the claim `job_workflow_ref` to equal this workflow on `uat`. The review asked for the value `repo:Sahilranjan00017/tazzzo-web/.github/workflows/deploy-uat-web.yml@refs/heads/uat`; note that GitHub's own `job_workflow_ref` claim is normally written **without** the `repo:` prefix (`Sahilranjan00017/tazzzo-web/.github/workflows/deploy-uat-web.yml@refs/heads/uat`), so print the claim of a real run once and copy the exact string (**NOT VERIFIED here**). The infrastructure PR owner has been asked to add this condition; until it exists, any workflow in this repository that can use environment `uat` could assume the role.
+
 ## 4. Deploy workflow
 
 `.github/workflows/deploy-uat-web.yml` runs on push to `uat` and on manual dispatch (from `uat` only):
 
-1. `ci` job: calls `.github/workflows/ci.yml` (made callable with `workflow_call`): format, lint, typecheck, unit tests (now including `pnpm test:deploy-scripts`), integration tests, both Playwright suites, production build with the standalone and client-bundle checks, dependency audit. Nothing else starts until it passes.
-2. `deploy` job (matrix: storefront, admin; `environment: uat`; `id-token: write`): exchanges the GitHub OIDC token for the role in `vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN` with the AWS CLI's web-identity support (no third-party action, so no unpinned dependency; the token is masked and kept in a 0600 file), then `aws amplify start-job --job-type RELEASE --commit-id <github.sha>` for the app in `vars.AMPLIFY_UAT_*_APP_ID`, branch `uat`, polls `get-job` until `SUCCEED` (fail on `FAILED`/`CANCELLED`, 45 min limit), checks that Amplify built the same commit, smoke-checks the URL in `vars.UAT_*_URL`, and writes the deployed SHA to the step summary.
+0. `guard` job (first): fails unless the run is on `refs/heads/uat`, so a dispatch from another branch does not spend the full CI.
+1. `ci` job: calls `.github/workflows/ci.yml` (made callable with `workflow_call`): format, lint, typecheck, unit tests (now including `pnpm test:deploy-scripts`), integration tests, both Playwright suites, production build with the standalone and client-bundle checks, dependency audit. Needs `guard`. Nothing else starts until it passes.
+2. `deploy` job (needs `guard` and `ci`; matrix: storefront, admin; `environment: uat`; `id-token: write`): checks that `refs/heads/uat` (GitHub API) still equals the gated `GITHUB_SHA` and aborts otherwise, **before any AWS call**; then `aws-actions/configure-aws-credentials` (pinned by full SHA, v6.3.0, the same pin as the backend UAT deploy workflow; I could only check the pin against the local copy of that workflow, not against the upstream tag) assumes `vars.AWS_UAT_WEB_DEPLOY_ROLE_ARN` **once** with `role-duration-seconds: 3600` and exports masked credentials; then `aws amplify start-job --job-type RELEASE --commit-id <github.sha>` for the app in `vars.AMPLIFY_UAT_*_APP_ID`, branch `uat`, polls `get-job` until `SUCCEED` (fail on `FAILED`/`CANCELLED`, 45 min limit), compares the built commit, smoke-checks `vars.UAT_*_URL` and writes the deployed SHA to the step summary.
 
-**NOT VERIFIED:** the `--job-type RELEASE` + `--commit-id` combination. The Amplify API describes `RELEASE` as a job for the latest change on the branch; whether `commitId` selects an older commit is not confirmed. For that reason the workflow compares the job's `commitId` with the gated SHA and fails otherwise.
+**NOT VERIFIED:** the `--job-type RELEASE` + `--commit-id` combination. The Amplify API describes `RELEASE` as a job for the latest change on the branch; whether `commitId` selects an older commit is not confirmed. The **pre-start branch check is the guard** (it makes a stale or moved `uat` abort before anything is started). The post-hoc comparison of the job's `commitId` with the gated SHA is **detect-only**: it fails the run after the build, it cannot prevent a wrong build, so treat a failure there as 'roll back now'. A push to `uat` between the check and Amplify checking out the branch remains a small race that only the detect-only check reports.
 
-The OIDC exchange via `ACTIONS_ID_TOKEN_REQUEST_URL` and `AWS_ROLE_ARN`/`AWS_WEB_IDENTITY_TOKEN_FILE` is the documented web-identity mechanism of the AWS CLI/SDKs (standard behaviour, not exercised here). The token is read when credentials are first requested; a job running past the STS session lifetime (1 hour default) would fail to refresh, which the 45 min limit avoids.
+Why the action and not a hand-rolled token file: the GitHub OIDC JWT lives about 5 minutes and the AWS CLI repeats the web-identity exchange on each call, so a long poll loop built on a token file would fail once the token expired. The action exchanges once and exports session credentials (1 hour here, which covers the 45 min wait; the role's maximum session duration must allow 3600 s, **NOT VERIFIED** until the infra role exists).
 
 ## 5. Rollback
 
@@ -167,18 +178,18 @@ Backend deploys, DNS for `api-uat`/`media-uat`, CORS/CSRF settings on the UAT ba
 
 ## 7. Verified versus not verified (summary)
 
-| Item                                                                                                 | State                                                                                    |
-| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Standalone build of both apps, packaging, runtime-env loading, CSP nonce, headers, `/login` redirect | VERIFIED locally (Node 22.22, Next 16.3.8, `pnpm --filter ... build`, `node index.js`)   |
-| Env contract equals `env.ts` names; secrets never in static output; https/rediss checks              | VERIFIED by `pnpm test:deploy-scripts` (15 tests)                                        |
-| Amplify managed Next.js support range 12-15                                                          | search excerpt of the official page; page not fetched (docs host unreachable here)       |
-| Deployment-specification fields (`version`, `routes`, `framework`, `computeResources`)               | search excerpts of the official page and third-party examples; exact schema NOT VERIFIED |
-| Port 3000, runtime string, `index.js` entrypoint accepted                                            | NOT VERIFIED                                                                             |
-| `amplify.yml` working directory, `baseDirectory`, cache and `customHeaders` semantics                | NOT VERIFIED                                                                             |
-| Amplify Secrets / SSM path and service-role sufficiency                                              | ASSUMED from the change request; NOT VERIFIED                                            |
-| Managed adapter support for `proxy.ts`                                                               | NOT VERIFIED (avoided by design)                                                         |
-| `start-job` RELEASE + commit id, rollback commands                                                   | NOT VERIFIED                                                                             |
-| Anything that needs AWS: app creation, domains, build, deploy, smoke check against UAT URLs          | NOT RUN                                                                                  |
+| Item                                                                                                                                       | State                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Standalone build of both apps, packaging, runtime-env loading, CSP nonce, headers, `/login` redirect                                       | VERIFIED locally (Node 22.22, Next 16.3.8, `pnpm --filter ... build`, `node index.js`)   |
+| Env contract equals `env.ts` names; production rules via the apps' real parsers (build fails on them); leak check is defence in depth only | VERIFIED by `pnpm test:deploy-scripts` (19 tests)                                        |
+| Amplify managed Next.js support range 12-15                                                                                                | search excerpt of the official page; page not fetched (docs host unreachable here)       |
+| Deployment-specification fields (`version`, `routes`, `framework`, `computeResources`)                                                     | search excerpts of the official page and third-party examples; exact schema NOT VERIFIED |
+| Port 3000, runtime string, `index.js` entrypoint accepted                                                                                  | NOT VERIFIED                                                                             |
+| `amplify.yml` working directory, `baseDirectory`, cache and `customHeaders` semantics                                                      | NOT VERIFIED                                                                             |
+| Amplify Secrets / SSM path and service-role sufficiency                                                                                    | ASSUMED from the change request; NOT VERIFIED                                            |
+| Managed adapter support for `proxy.ts`                                                                                                     | NOT VERIFIED (avoided by design)                                                         |
+| `start-job` RELEASE + commit id, rollback commands                                                                                         | NOT VERIFIED                                                                             |
+| Anything that needs AWS: app creation, domains, build, deploy, smoke check against UAT URLs                                                | NOT RUN                                                                                  |
 
 ## 8. Runtime behaviour on a stateless, multi-instance SSR runtime
 

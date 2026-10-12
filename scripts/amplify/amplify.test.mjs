@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -8,14 +8,11 @@ import {
   assertNoSecretValuesIn,
   deployManifest,
   entrypointSource,
+  leakVariants,
   packageCompute,
 } from './package-compute.mjs'
-import {
-  CONTRACT,
-  REQUIRED_SECRETS,
-  assertNoPublicSecrets,
-  selectRuntimeEnv,
-} from './runtime-env.mjs'
+import { CONTRACT, assertNoPublicSecrets, selectRuntimeEnv } from './runtime-env.mjs'
+import { validateRuntimeEnv } from './validate-runtime-env.mjs'
 import { judge, nonceOf, smoke } from './smoke.mjs'
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..')
@@ -32,7 +29,7 @@ const GOOD_ADMIN = {
   GOOGLE_HOSTED_DOMAIN: 'example.test',
   TAZZZO_BACKEND_URL: 'https://api-uat.example.test',
   SESSION_STORE_URL: 'rediss://:pw@redis.example.test:6380',
-  SESSION_ENCRYPTION_KEY: 'a2V5LWtleS1rZXkta2V5LWtleS1rZXkta2V5LWtleS0zMg',
+  SESSION_ENCRYPTION_KEY: 'q'.repeat(43),
 }
 
 describe('runtime env contract', () => {
@@ -89,34 +86,6 @@ describe('runtime env contract', () => {
     ])
   })
 
-  it('reports missing variables by name only', () => {
-    assert.throws(
-      () => selectRuntimeEnv('admin', { CMS_BASE_URL: 'https://x.test' }),
-      (e) => {
-        assert.match(e.message, /GOOGLE_CLIENT_SECRET/)
-        assert.doesNotMatch(e.message, /x\.test/)
-        return true
-      },
-    )
-    assert.ok(REQUIRED_SECRETS.storefront.includes('STOREFRONT_SESSION_SECRET'))
-  })
-
-  it('refuses http urls and a non-TLS session store, naming the variable but not the value', () => {
-    assert.throws(
-      () =>
-        selectRuntimeEnv('storefront', {
-          ...GOOD_STOREFRONT,
-          TAZZZO_API_BASE_URL: 'http://api.test',
-        }),
-      (e) => /TAZZZO_API_BASE_URL/.test(e.message) && !/api\.test/.test(e.message),
-    )
-    assert.throws(
-      () =>
-        selectRuntimeEnv('admin', { ...GOOD_ADMIN, SESSION_STORE_URL: 'redis://localhost:6379' }),
-      /SESSION_STORE_URL/,
-    )
-  })
-
   it('refuses a secret-like NEXT_PUBLIC_ variable', () => {
     assert.throws(
       () => assertNoPublicSecrets({ NEXT_PUBLIC_SESSION_KEY: 'x' }),
@@ -133,6 +102,8 @@ const IGNORED = new Set([
   'SESSION_COOKIES',
   'PUBLIC_PATHS',
 ])
+
+const noValidate = () => {}
 
 describe('packaging', () => {
   function fakeBuild(app) {
@@ -151,7 +122,12 @@ describe('packaging', () => {
 
   it('writes manifest, entrypoint, and runtime env into compute only', () => {
     const { root, appDir } = fakeBuild('storefront')
-    const result = packageCompute({ root, app: 'storefront', env: GOOD_STOREFRONT })
+    const result = packageCompute({
+      root,
+      app: 'storefront',
+      env: GOOD_STOREFRONT,
+      validate: noValidate,
+    })
     const manifest = JSON.parse(
       readFileSync(join(appDir, '.amplify-hosting', 'deploy-manifest.json'), 'utf8'),
     )
@@ -176,7 +152,7 @@ describe('packaging', () => {
       `x="${GOOD_STOREFRONT.STOREFRONT_SESSION_SECRET}"`,
     )
     assert.throws(
-      () => packageCompute({ root, app: 'storefront', env: GOOD_STOREFRONT }),
+      () => packageCompute({ root, app: 'storefront', env: GOOD_STOREFRONT, validate: noValidate }),
       (e) => {
         assert.match(e.message, /STOREFRONT_SESSION_SECRET/)
         assert.ok(!e.message.includes(GOOD_STOREFRONT.STOREFRONT_SESSION_SECRET))
@@ -187,10 +163,42 @@ describe('packaging', () => {
     assert.doesNotThrow(() => assertNoSecretValuesIn(dir, { A: 'longsecretvalue' }))
   })
 
+  it('validates before writing anything and stops the build on a rejected configuration', () => {
+    const { root, appDir } = fakeBuild('admin')
+    const calls = []
+    assert.throws(
+      () =>
+        packageCompute({
+          root,
+          app: 'admin',
+          env: GOOD_ADMIN,
+          validate: (args) => {
+            calls.push(args.values.SESSION_STORE_URL)
+            throw new Error('the admin production configuration is invalid: SESSION_STORE_URL')
+          },
+        }),
+      /SESSION_STORE_URL/,
+    )
+    assert.equal(calls.length, 1)
+    assert.equal(existsSync(join(appDir, '.amplify-hosting')), false)
+  })
+
+  it('leak check covers plain, percent-encoded, JSON-escaped and base64 spellings', () => {
+    const secret = 'p@ss/w0rd+value"x'
+    const dir = mkdtempSync(join(tmpdir(), 'amplify-enc-'))
+    for (const variant of leakVariants(secret)) {
+      writeFileSync(join(dir, 'a.js'), `var x="${variant}"`)
+      assert.throws(() => assertNoSecretValuesIn(dir, { S: secret }), /S in/, variant)
+    }
+    writeFileSync(join(dir, 'a.js'), 'nothing here')
+    assert.doesNotThrow(() => assertNoSecretValuesIn(dir, { S: secret }))
+    assert.deepEqual(leakVariants('short'), [])
+  })
+
   it('refuses to package without a standalone build', () => {
     const root = mkdtempSync(join(tmpdir(), 'amplify-none-'))
     assert.throws(
-      () => packageCompute({ root, app: 'admin', env: GOOD_ADMIN }),
+      () => packageCompute({ root, app: 'admin', env: GOOD_ADMIN, validate: noValidate }),
       /no standalone build/,
     )
   })
@@ -203,6 +211,69 @@ describe('packaging', () => {
     assert.equal(
       deployManifest({ nextVersion: '16.3.8', runtime: 'nodejs22.x' }).framework.version,
       '16.3.8',
+    )
+  })
+})
+
+// These run the apps' REAL parsers through vitest (needs installed dependencies, as in CI).
+describe('production rules come from the apps parsers', { timeout: 120_000 }, () => {
+  const run = (app, values) => validateRuntimeEnv({ root: ROOT, app, values })
+  const failure = (app, values) => {
+    try {
+      run(app, values)
+    } catch (e) {
+      return e.message
+    }
+    return null
+  }
+
+  it('accepts a valid storefront and admin configuration', () => {
+    assert.equal(
+      failure('storefront', { ...GOOD_STOREFRONT, STOREFRONT_TRUST_PROXY: 'true' }),
+      null,
+    )
+    assert.equal(failure('admin', GOOD_ADMIN), null)
+  })
+
+  it('fails the storefront build without STOREFRONT_TRUST_PROXY=true, naming the variable only', () => {
+    const message = failure('storefront', GOOD_STOREFRONT)
+    assert.match(message, /STOREFRONT_TRUST_PROXY/)
+    assert.ok(!message.includes(GOOD_STOREFRONT.STOREFRONT_SESSION_SECRET))
+  })
+
+  it('fails on an http API url, a short session key and a missing secret', () => {
+    const base = { ...GOOD_STOREFRONT, STOREFRONT_TRUST_PROXY: 'true' }
+    assert.match(
+      failure('storefront', { ...base, TAZZZO_API_BASE_URL: 'http://api.example.test' }),
+      /TAZZZO_API_BASE_URL/,
+    )
+    assert.match(
+      failure('storefront', { ...base, STOREFRONT_SESSION_SECRET: 'c2hvcnQ=' }),
+      /STOREFRONT_SESSION_SECRET/,
+    )
+    const { STOREFRONT_SESSION_SECRET: _omit, ...without } = base
+    assert.match(failure('storefront', without), /STOREFRONT_SESSION_SECRET/)
+  })
+
+  it('fails the admin build on a non-TLS store, a short encryption key and a bad media origin', () => {
+    assert.match(
+      failure('admin', { ...GOOD_ADMIN, SESSION_STORE_URL: 'redis://redis.example.test:6379' }),
+      /SESSION_STORE_URL/,
+    )
+    assert.match(
+      failure('admin', { ...GOOD_ADMIN, SESSION_ENCRYPTION_KEY: 'c2hvcnQ' }),
+      /SESSION_ENCRYPTION_KEY/,
+    )
+    assert.match(
+      failure('admin', {
+        ...GOOD_ADMIN,
+        CMS_MEDIA_UPLOAD_ORIGIN: 'https://bucket.example.test/path',
+      }),
+      /CMS_MEDIA_UPLOAD_ORIGIN/,
+    )
+    assert.match(
+      failure('admin', { ...GOOD_ADMIN, CMS_BASE_URL: 'http://cms.example.test' }),
+      /CMS_BASE_URL/,
     )
   })
 })
@@ -273,13 +344,17 @@ describe('repository wiring', () => {
     assert.doesNotMatch(yml, /env \| grep|printenv|>> *\.env/)
   })
 
-  it('deploy workflow: OIDC only, gated on CI, pinned actions, no static AWS keys', () => {
+  it('deploy workflow: OIDC through the AWS action, gated on CI, every third-party action pinned, no static AWS keys', () => {
     const wf = read('.github/workflows/deploy-uat-web.yml')
     assert.match(wf, /id-token: write/)
     assert.match(wf, /uses: \.\/\.github\/workflows\/ci\.yml/)
-    assert.match(wf, /needs: ci/)
+    assert.match(wf, /needs: \[guard\]/)
+    assert.match(wf, /needs: \[guard, ci\]/)
     assert.match(wf, /environment: uat/)
     assert.match(wf, /--job-type RELEASE/)
+    assert.match(wf, /aws-actions\/configure-aws-credentials@[0-9a-f]{40}/)
+    assert.match(wf, /role-duration-seconds: 3600/)
+    assert.doesNotMatch(wf, /ACTIONS_ID_TOKEN_REQUEST|AWS_WEB_IDENTITY_TOKEN_FILE/)
     assert.doesNotMatch(wf, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|secrets\.AWS/)
     for (const use of wf.match(/uses: [^\n]+/g) ?? []) {
       if (use.startsWith('uses: ./')) continue
