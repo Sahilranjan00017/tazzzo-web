@@ -1,0 +1,71 @@
+# Amplify Hosting build settings for the TWO UAT apps built from this repository (see docs/uat/AMPLIFY_UAT_SETUP.md).
+# One file, an `applications:` list: Amplify selects the entry whose `appRoot` equals the app's AMPLIFY_MONOREPO_APP_ROOT
+# (set that variable to apps/storefront or apps/admin on the matching Amplify app; the console does it for monorepo apps).
+#
+# NOT VERIFIED against a live Amplify build (no AWS access when this was written): the working directory the commands
+# start in, whether `baseDirectory` and `cache.paths` are relative to appRoot, and whether the Amplify image offers
+# nvm/corepack as used here. Every command therefore finds the workspace root itself instead of assuming a directory.
+#
+# Build = `next build` (output: standalone) + scripts/amplify/package-compute.mjs, which writes the Amplify "deployment
+# specification" bundle to <appRoot>/.amplify-hosting (static/, compute/default/, deploy-manifest.json) and forwards the
+# ALLOW-LISTED runtime variables into compute only. See scripts/amplify/runtime-env.mjs for the names.
+version: 1
+applications:
+  - appRoot: apps/storefront
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - while [ ! -f pnpm-workspace.yaml ] && [ "$PWD" != / ]; do cd ..; done
+            - nvm install "$(cat .nvmrc)" && nvm use "$(cat .nvmrc)"
+            - node --version
+            - corepack enable
+            - pnpm --version
+            - pnpm install --frozen-lockfile
+        build:
+          commands:
+            - while [ ! -f pnpm-workspace.yaml ] && [ "$PWD" != / ]; do cd ..; done
+            - export NEXT_TELEMETRY_DISABLED=1
+            - pnpm --filter storefront build
+            - node scripts/amplify/package-compute.mjs storefront
+      artifacts:
+        baseDirectory: .amplify-hosting
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - .next/cache/**/*
+    customHeaders:
+      - pattern: '/_next/static/**'
+        headers:
+          - key: Cache-Control
+            value: 'public, max-age=31536000, immutable'
+  - appRoot: apps/admin
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - while [ ! -f pnpm-workspace.yaml ] && [ "$PWD" != / ]; do cd ..; done
+            - nvm install "$(cat .nvmrc)" && nvm use "$(cat .nvmrc)"
+            - node --version
+            - corepack enable
+            - pnpm --version
+            - pnpm install --frozen-lockfile
+        build:
+          commands:
+            - while [ ! -f pnpm-workspace.yaml ] && [ "$PWD" != / ]; do cd ..; done
+            - export NEXT_TELEMETRY_DISABLED=1
+            - pnpm --filter admin build
+            - node scripts/amplify/package-compute.mjs admin
+      artifacts:
+        baseDirectory: .amplify-hosting
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - .next/cache/**/*
+    customHeaders:
+      - pattern: '/_next/static/**'
+        headers:
+          - key: Cache-Control
+            value: 'public, max-age=31536000, immutable'
